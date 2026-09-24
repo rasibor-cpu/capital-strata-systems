@@ -1,6 +1,18 @@
 from __future__ import annotations
 
-from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, section, split_panels, warning_banner
+from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, section, warning_banner
+
+
+def _anchor_panel(anchor: str, content: str) -> str:
+    return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
+
+
+def _evidence_panel(anchor: str, title: str, content: str) -> str:
+    return (
+        f'<div class="mc-section-anchor mc-evidence-disclosure" id="{anchor}">'
+        f'<details><summary>{title}</summary>{content}</details>'
+        '</div>'
+    )
 
 
 def render(state: dict) -> str:
@@ -26,71 +38,99 @@ def render(state: dict) -> str:
             "<p class=\"mc-muted\">All human-facing report links use the shared paginated viewer.</p>"
             "</section>"
         )
+        + '<nav class="mc-page-jump" aria-label="Options Income sections">'
+          '<a href="#mc-options-status">Status</a>'
+          '<a href="#mc-options-lifecycle">Lifecycle</a>'
+          '<a href="#mc-options-risk">Risk</a>'
+          '<a href="#mc-options-evidence">Evidence</a>'
+          '</nav>'
         + metric_grid(
             (
                 ("Engine Status", options.get("status"), options.get("status")),
+                ("Operational Readiness", options.get("operational_readiness"), options.get("operational_readiness")),
+                ("Certification", cert.get("outcome") if cert else options.get("certification"), cert.get("outcome") if cert else options.get("certification")),
+                ("Execution", "BLOCKED", "blocked"),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-priority mc-options-priority",
+            aria_label="Options Income priority",
+        )
+        + metric_grid(
+            (
                 ("Deployment", options.get("deployment_state") or panel.get("deployment_state"), "neutral"),
                 ("Opportunities", options.get("opportunity_count", len(options.get("opportunities", []) or [])), "neutral"),
-                ("Certification", cert.get("outcome") if cert else options.get("certification"), "neutral"),
-                ("Operational Readiness", options.get("operational_readiness"), options.get("operational_readiness")),
                 ("Data Readiness", (options.get("data_readiness") or {}).get("status") if isinstance(options.get("data_readiness"), dict) else options.get("engine_status"), "neutral"),
                 ("Chain / Holdings", _provider_chip(options.get("provider_summary")), "neutral"),
                 ("Assignment Risk", _risk_status(options.get("assignment_risk")), "neutral"),
                 ("Volatility Risk", _risk_status(options.get("volatility_risk")), "neutral"),
-                ("Last Refresh", options.get("last_successful_refresh"), "neutral"),
-            )
+            ),
+            css_class="mc-metric-grid mc-metric-grid-secondary",
+            aria_label="Options Income secondary metrics",
         )
-        + split_panels(
-            detail_table("Income Lifecycle", {
-                "covered_calls": options.get("covered_calls"),
-                "cash_secured_puts": options.get("cash_secured_puts"),
-                "paper_positions": options.get("paper_positions"),
-                "premium_accounting": options.get("premium_accounting"),
-                "collateral": options.get("collateral"),
-                "position_health": options.get("position_health"),
-            }),
-            detail_table("Targets / Run-Rate / Allocation", {
-                "income_targets": options.get("income_targets"),
-                "run_rate": run_rate,
-                "portfolio_allocation": options.get("portfolio_allocation"),
-                "missing_dependencies": options.get("missing_dependencies"),
-                "data_readiness": options.get("data_readiness"),
-                "provider_summary": options.get("provider_summary"),
-            }),
-            detail_table("Risk And Rolling", {
-                "rolling_recommendations": options.get("rolling_recommendations"),
-                "greeks": options.get("greeks"),
-                "assignment_risk": options.get("assignment_risk"),
-                "volatility_risk": options.get("volatility_risk"),
-                "stress_tests": options.get("stress_tests"),
-                "alerts": options.get("alerts"),
-            }),
-            detail_table("Options Income Command Panel", {
-                "status": panel.get("status"),
-                "deployed": panel.get("deployed"),
-                "deployment_state": panel.get("deployment_state"),
-                "opportunity_count": panel.get("opportunity_count"),
-                "opportunities": panel.get("opportunities"),
-                "premium_accounting": panel.get("premium_accounting"),
-                "collateral": panel.get("collateral"),
-                "greeks": panel.get("greeks"),
-                "assignment_risk": panel.get("assignment_risk"),
-                "volatility_risk": panel.get("volatility_risk"),
-                "rolling_recommendations": panel.get("rolling_recommendations"),
-                "income_targets": panel.get("income_targets"),
-                "run_rate": panel.get("run_rate"),
-                "certification": panel.get("certification"),
-                "operational_readiness": panel.get("operational_readiness"),
-                "missing_dependencies": panel.get("missing_dependencies"),
-                "source": panel.get("source"),
-                "provenance": panel.get("provenance") or options.get("provenance"),
-                "state_hash": panel.get("state_hash") or options.get("state_hash"),
-                "generated_at": panel.get("generated_at") or options.get("generated_at"),
-                "last_successful_refresh": panel.get("last_successful_refresh"),
-                "advisory_only": True,
-                "execution_blocked": True,
-            }),
-        )
+        + '<div class="mc-operator-stack">'
+        + _anchor_panel("mc-options-status", detail_table("Options Income Snapshot", {
+            "status": options.get("status"),
+            "deployment_state": options.get("deployment_state") or panel.get("deployment_state"),
+            "operational_readiness": options.get("operational_readiness"),
+            "certification": cert.get("outcome") if cert else options.get("certification"),
+            "data_readiness": (options.get("data_readiness") or {}).get("status") if isinstance(options.get("data_readiness"), dict) else options.get("engine_status"),
+            "provider": _provider_chip(options.get("provider_summary")),
+            "last_successful_refresh": options.get("last_successful_refresh"),
+            "execution_blocked": True,
+        }))
+        + _anchor_panel("mc-options-lifecycle", detail_table("Income Lifecycle Snapshot", {
+            "covered_calls": options.get("covered_calls"),
+            "cash_secured_puts": options.get("cash_secured_puts"),
+            "paper_positions": options.get("paper_positions"),
+            "premium_accounting": options.get("premium_accounting"),
+            "collateral": options.get("collateral"),
+            "position_health": options.get("position_health"),
+        }))
+        + _anchor_panel("mc-options-risk", detail_table("Risk Snapshot", {
+            "assignment_risk": _risk_status(options.get("assignment_risk")),
+            "volatility_risk": _risk_status(options.get("volatility_risk")),
+            "rolling_recommendations": options.get("rolling_recommendations"),
+            "alerts": options.get("alerts"),
+        }))
+        + _anchor_panel("mc-options-run-rate", detail_table("Run-Rate Snapshot", {
+            "income_targets": options.get("income_targets"),
+            "run_rate": run_rate,
+            "portfolio_allocation": options.get("portfolio_allocation"),
+            "missing_dependencies": options.get("missing_dependencies"),
+        }))
+        + _evidence_panel("mc-options-evidence", "Show full options-income command evidence", detail_table("Options Income Command Panel (Full)", {
+            "status": panel.get("status"),
+            "deployed": panel.get("deployed"),
+            "deployment_state": panel.get("deployment_state"),
+            "opportunity_count": panel.get("opportunity_count"),
+            "opportunities": panel.get("opportunities"),
+            "premium_accounting": panel.get("premium_accounting"),
+            "collateral": panel.get("collateral"),
+            "greeks": panel.get("greeks"),
+            "assignment_risk": panel.get("assignment_risk"),
+            "volatility_risk": panel.get("volatility_risk"),
+            "rolling_recommendations": panel.get("rolling_recommendations"),
+            "income_targets": panel.get("income_targets"),
+            "run_rate": panel.get("run_rate"),
+            "certification": panel.get("certification"),
+            "operational_readiness": panel.get("operational_readiness"),
+            "missing_dependencies": panel.get("missing_dependencies"),
+            "source": panel.get("source"),
+            "provenance": panel.get("provenance") or options.get("provenance"),
+            "state_hash": panel.get("state_hash") or options.get("state_hash"),
+            "generated_at": panel.get("generated_at") or options.get("generated_at"),
+            "last_successful_refresh": panel.get("last_successful_refresh"),
+            "advisory_only": True,
+            "execution_blocked": True,
+        }))
+        + _evidence_panel("mc-options-greeks", "Show Greeks and stress-test evidence", detail_table("Greeks & Stress Tests", {
+            "greeks": options.get("greeks"),
+            "stress_tests": options.get("stress_tests"),
+        }))
+        + _evidence_panel("mc-options-provider", "Show provider/readiness evidence", detail_table("Provider & Data Readiness", {
+            "data_readiness": options.get("data_readiness"),
+            "provider_summary": options.get("provider_summary"),
+        }))
+        + '</div>'
     )
 
 
