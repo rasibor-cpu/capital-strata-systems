@@ -411,3 +411,48 @@ def test_trade_balance_value_does_not_append_unavailable_currency() -> None:
     assert "<strong>596.7317</strong>" in body
     assert "<strong>601.0005 UNAVAILABLE</strong>" not in body
     assert '<em class="mc-status warn">WARNING</em>' in body
+
+
+def test_trade_operations_adds_compact_decision_snapshot_and_trace_summary() -> None:
+    body = render_trade_operations({
+        "trading": {"execution_status": "BLOCKED"},
+        "decision_panel": {
+            "status": "BLOCKED",
+            "reason": "BLOCKED",
+            "read_only": True,
+            "decisions": [{
+                "symbol": "DATA UNAVAILABLE",
+                "asset_class": "DATA UNAVAILABLE",
+                "decision": "BLOCKED",
+                "quality_score": "UNKNOWN",
+                "confidence": "DATA UNAVAILABLE",
+                "generated_at": "2026-09-24T22:29:22Z",
+                "freshness": "DATA UNAVAILABLE",
+                "state_hash": "hash",
+                "provenance": {"large": "payload"},
+            }],
+        },
+        "decision_trace": {
+            "stages": [{
+                "stage": "Market Regime",
+                "status": "DISABLED",
+                "reason": "Market regime evidence",
+                "freshness": "DATA UNAVAILABLE",
+                "evidence": {"large": "payload"},
+                "state_hash": "hash",
+            }]
+        },
+    })
+    assert "Decision Snapshot" in body
+    assert "Decision Trace Summary" in body
+    assert "Decision Evidence (Full)" in body
+    assert "Decision Trace Evidence (Full)" in body
+    summary_start = body.find("Decision Trace Summary")
+    full_start = body.find("Decision Trace Evidence (Full)")
+    assert 0 <= summary_start < full_start
+    compact = body[summary_start:full_start]
+    assert "Market Regime" in compact
+    assert "DISABLED" in compact
+    assert "Market regime evidence" in compact
+    assert "state_hash" not in compact
+    assert "provenance" not in compact
