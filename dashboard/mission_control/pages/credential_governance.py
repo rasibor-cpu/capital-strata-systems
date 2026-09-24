@@ -7,9 +7,20 @@ from dashboard.mission_control.pages._components import (
     detail_table,
     metric_grid,
     page_header,
-    split_panels,
     warning_banner,
 )
+
+
+def _anchor_panel(anchor: str, content: str) -> str:
+    return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
+
+
+def _evidence_panel(anchor: str, title: str, content: str) -> str:
+    return (
+        f'<div class="mc-section-anchor mc-evidence-disclosure" id="{anchor}">'
+        f'<details><summary>{title}</summary>{content}</details>'
+        '</div>'
+    )
 
 
 def render(state: dict) -> str:
@@ -42,37 +53,65 @@ def render(state: dict) -> str:
             "Credential Governance",
             "ESMS-001 vault health, ESMS-002 dependencies, rotation, audit, and compliance metadata. Secrets are never displayed.",
         )
+        + '<nav class="mc-page-jump" aria-label="Credential Governance sections">'
+          '<a href="#mc-cred-status">Status</a>'
+          '<a href="#mc-cred-rotation">Rotation</a>'
+          '<a href="#mc-cred-compliance">Compliance</a>'
+          '<a href="#mc-cred-evidence">Evidence</a>'
+          '</nav>'
         + metric_grid(
             (
-                ("Vault Health", health.get("status", "UNCONFIGURED"), health.get("status", "neutral")),
+                ("Vault Health", health.get("status", "UNCONFIGURED"), health.get("status", "UNCONFIGURED")),
+                ("Compliance", compliance.get("outcome", "EVIDENCE_PENDING"), compliance.get("outcome", "EVIDENCE_PENDING")),
                 ("Credentials", len(inventory), "neutral"),
-                ("Rotation Queue", len(rotation), "neutral"),
                 ("Expiring Soon", len(expiring), "warning" if expiring else "normal"),
-                ("Compliance", compliance.get("outcome", "EVIDENCE_PENDING"), compliance.get("outcome", "neutral")),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-priority mc-cred-priority",
+            aria_label="Credential Governance priority",
+        )
+        + metric_grid(
+            (
+                ("Rotation Queue", len(rotation), "warning" if rotation else "normal"),
+                ("Audit Events", len(audit), "neutral"),
+                ("Dependencies", len(dependencies), "neutral"),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-secondary",
+            aria_label="Credential Governance secondary metrics",
+        )
+        + '<div class="mc-operator-stack">'
+        + _anchor_panel("mc-cred-status", detail_table("Credential Governance Snapshot", {
+            "vault_health": health.get("status", "UNCONFIGURED"),
+            "credential_count": len(inventory),
+            "compliance": compliance.get("outcome", "EVIDENCE_PENDING"),
+        }))
+        + _anchor_panel("mc-cred-rotation", detail_table("Rotation Snapshot", {
+            "rotation_queue_count": len(rotation),
+            "expiring_soon_count": len(expiring),
+        }))
+        + _anchor_panel("mc-cred-compliance", detail_table("Compliance Snapshot", {
+            "outcome": compliance.get("outcome", "EVIDENCE_PENDING"),
+            "audit_event_count": len(audit),
+            "dependency_node_count": len(dependencies),
+        }))
+        + _evidence_panel("mc-cred-evidence", "Show credential inventory metadata", detail_table("Credential Inventory", inventory))
+        + _evidence_panel("mc-cred-selected", "Show selected credential metadata", detail_table("Selected Credential", {
+            key: selected.get(key)
+            for key in (
+                "vcid",
+                "broker",
+                "owner",
+                "health",
+                "rotation_due",
+                "dependencies",
+                "audit_history",
+                "validation_history",
+                "fingerprint",
             )
-        )
-        + split_panels(
-            detail_table("Credential Inventory", inventory),
-            detail_table("Selected Credential", {
-                key: selected.get(key)
-                for key in (
-                    "vcid",
-                    "broker",
-                    "owner",
-                    "health",
-                    "rotation_due",
-                    "dependencies",
-                    "audit_history",
-                    "validation_history",
-                    "fingerprint",
-                )
-            }),
-            detail_table("Rotation Queue", rotation),
-            detail_table("Expiring Soon", expiring),
-            detail_table("Audit Events", audit),
-            detail_table("Dependency Graph", dependencies),
-            detail_table("Compliance Status", compliance),
-        )
+        }))
+        + _evidence_panel("mc-cred-rotation-evidence", "Show rotation and expiry metadata", detail_table("Rotation Queue", rotation) + detail_table("Expiring Soon", expiring))
+        + _evidence_panel("mc-cred-audit", "Show audit and dependency metadata", detail_table("Audit Events", audit) + detail_table("Dependency Graph", dependencies))
+        + _evidence_panel("mc-cred-compliance-evidence", "Show compliance metadata", detail_table("Compliance Status", compliance))
+        + '</div>'
     )
 
 
