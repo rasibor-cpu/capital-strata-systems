@@ -15,11 +15,34 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
-def _first_recommendation(recommendations: dict) -> object:
+def _first_recommendation(recommendations: dict) -> dict:
     rows = recommendations.get("recommendations")
-    if isinstance(rows, list) and rows:
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
         return rows[0]
-    return "UNAVAILABLE"
+    return {}
+
+
+def _committee_summary_rows(committee: dict) -> list[dict]:
+    rows = committee.get("committees")
+    if not isinstance(rows, list):
+        return []
+    summary = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        summary.append({
+            "committee": row.get("committee"),
+            "outcome": row.get("outcome"),
+            "reason": row.get("reason"),
+            "freshness": row.get("freshness"),
+        })
+    return summary
+
+
+def _source_consistency_summary(value: object) -> object:
+    if isinstance(value, dict):
+        return value.get("status") or value.get("freshness") or "RECORDED"
+    return value
 
 
 def render(state: dict) -> str:
@@ -47,16 +70,19 @@ def render(state: dict) -> str:
             "blocking_rule": explanation.get("blocking_rule"),
             "required_improvement": explanation.get("required_improvement"),
         }))
-        + _anchor_panel("mc-audit-committee", detail_table("Committee Snapshot", committee.get("committees", [])))
+        + _anchor_panel("mc-audit-committee", detail_table("Committee Snapshot", _committee_summary_rows(committee)))
         + _anchor_panel("mc-audit-guidance", detail_table("Operator Guidance", {
-            "top_recommendation": _first_recommendation(recommendations),
+            "top_action": _first_recommendation(recommendations).get("action", "UNAVAILABLE"),
+            "top_reason": _first_recommendation(recommendations).get("reason", "UNAVAILABLE"),
+            "authority": _first_recommendation(recommendations).get("authority", "UNAVAILABLE"),
+            "changes_execution": _first_recommendation(recommendations).get("changes_execution", False),
             "counterfactual_count": len(counterfactuals.get("counterfactuals", [])) if isinstance(counterfactuals.get("counterfactuals"), list) else 0,
             "warning_count": len(audit.get("warnings", [])) if isinstance(audit.get("warnings"), list) else 0,
             "failure_count": len(audit.get("failures", [])) if isinstance(audit.get("failures"), list) else 0,
         }))
         + _anchor_panel("mc-audit-evidence", detail_table("Evidence Snapshot", {
             "status": evidence.get("status"),
-            "source_consistency": evidence.get("source_consistency"),
+            "source_consistency": _source_consistency_summary(evidence.get("source_consistency")),
             "node_count": len(evidence.get("nodes", [])) if isinstance(evidence.get("nodes"), list) else 0,
             "edge_count": len(evidence.get("edges", [])) if isinstance(evidence.get("edges"), list) else 0,
         }))
