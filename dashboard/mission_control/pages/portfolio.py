@@ -15,8 +15,17 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
-def _metric_status(value: object) -> object:
-    return "UNAVAILABLE" if value in (None, "") else value
+def _metric_status(value: object) -> str:
+    if value in (None, ""):
+        return "UNAVAILABLE"
+    text = str(value).strip().upper()
+    if "UNAVAILABLE" in text:
+        return "UNAVAILABLE"
+    return "RECORDED"
+
+
+def _nested_value(value: object, key: str) -> object:
+    return value.get(key) if isinstance(value, dict) else value
 
 
 def _capital_snapshot(portfolio: dict, command: dict) -> dict:
@@ -83,10 +92,12 @@ def render(state: dict) -> str:
         + _anchor_panel("mc-portfolio-attribution", detail_table("Performance Attribution Snapshot", {
             "pnl_attribution": attribution.get("pnl_attribution"),
             "strategy_attribution": attribution.get("strategy_attribution"),
-            "broker_attribution": attribution.get("broker_attribution"),
+            "broker_quality": _nested_value(attribution.get("broker_attribution"), "broker_quality"),
             "timing_attribution": attribution.get("timing_attribution"),
-            "execution_attribution": attribution.get("execution_attribution"),
-            "risk_attribution": attribution.get("risk_attribution"),
+            "execution_quality": _nested_value(attribution.get("execution_attribution"), "quality"),
+            "execution_slippage": _nested_value(attribution.get("execution_attribution"), "slippage"),
+            "risk_state": _nested_value(attribution.get("risk_attribution"), "risk_state"),
+            "risk_drawdown": _nested_value(attribution.get("risk_attribution"), "drawdown"),
         }))
         + _evidence_panel("mc-portfolio-command-evidence", "Show full portfolio command evidence", detail_table("Portfolio Command Evidence (Full)", {
             "available_capital": command.get("available_capital"),
