@@ -690,3 +690,31 @@ def test_portfolio_mobile_priority_and_evidence_disclosures_are_read_only() -> N
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
+
+
+def test_portfolio_numeric_metrics_use_semantic_status_not_value_echo() -> None:
+    body = render_portfolio({
+        "portfolio": {
+            "equity": 601.0005,
+            "cash": 596.7317,
+            "buying_power": 596.7317,
+            "total_exposure": 0.0,
+            "capital_available": 601.0005,
+            "drawdown": "UNAVAILABLE",
+        },
+        "performance_attribution": {
+            "broker_attribution": {"broker_quality": "DATA UNAVAILABLE"},
+            "execution_attribution": {"quality": "UNKNOWN", "slippage": "DATA UNAVAILABLE"},
+            "risk_attribution": {"risk_state": "RED", "drawdown": "UNAVAILABLE"},
+        },
+    })
+    assert '<span>Equity</span><strong>601.0005</strong><em class="mc-status neutral">RECORDED</em>' in body
+    assert '<span>Total Exposure</span><strong>0.0</strong><em class="mc-status neutral">RECORDED</em>' in body
+    assert '<span>Drawdown</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert "<strong>601.0005</strong><em class=\"mc-status neutral\">601.0005</em>" not in body
+    assert "broker_quality" in body
+    assert "execution_quality" in body
+    assert "execution_slippage" in body
+    assert "risk_state" in body
+    assert "risk_drawdown" in body
+    assert "{&#x27;broker_quality&#x27;" not in body
