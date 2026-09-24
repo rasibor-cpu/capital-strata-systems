@@ -20,6 +20,7 @@ from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
 from dashboard.mission_control.pages.options_income import render as render_options_income
 from dashboard.mission_control.pages.users_governance import render as render_users_governance
 from dashboard.mission_control.pages.system_configuration import render as render_system_configuration
+from dashboard.mission_control.pages.documentation_runbooks import render as render_documentation_runbooks
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1320,3 +1321,30 @@ def test_system_configuration_uses_explicit_fail_closed_secondary_states() -> No
     assert '<span>Environment</span><strong>DISABLED</strong><em class="mc-status bad">DISABLED</em>' in body
     assert "<th>planning_posture</th><td>PLANNING_ONLY</td>" in body
     assert "<th>planning_only</th><td>True</td>" not in body
+
+
+def test_documentation_runbooks_mobile_compacts_indexes() -> None:
+    body = render_documentation_runbooks({
+        "documentation": {
+            "architecture": ["a", "b"],
+            "governance": ["g"],
+            "release_reports": ["r"],
+            "certification_reports": ["c1", "c2"],
+            "operator_runbooks": ["o1", "o2", "o3"],
+            "rollback_instructions": ["rb"],
+            "broker_onboarding_guides": ["b"],
+            "incident_procedures": ["i"],
+            "rc1_validation_reports": ["v"],
+            "options_income_documentation": ["oi"],
+            "browser_paths_expose_absolute_paths": False,
+        }
+    })
+    assert 'aria-label="Documentation and Runbooks sections"' in body
+    assert 'aria-label="Documentation coverage priority"' in body
+    assert "Documentation Coverage Snapshot" in body
+    assert "Operational Runbook Snapshot" in body
+    assert "<th>architecture</th><td>2</td>" in body
+    assert "<th>operator_runbooks</th><td>3</td>" in body
+    assert "<summary>Show architecture and governance document index</summary>" in body
+    assert "<summary>Show full operational runbook index</summary>" in body
+    assert "<details open" not in body
