@@ -94,11 +94,11 @@ def render(state: dict) -> str:
         + _anchor_panel("mc-trade-context", detail_table("Account Context", account_context))
         + _anchor_panel("mc-trade-decisions", detail_table("Decision Snapshot", _decision_snapshot(decision)))
         + _anchor_panel("mc-trade-trace-summary", detail_table("Decision Trace Summary", _trace_summary_rows(trace)))
+        + _anchor_panel("mc-trade-trace", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
         + _anchor_panel("mc-trade-decision-evidence", detail_table("Decision Evidence (Full)", {
             "decisions": decision.get("decisions"),
             "read_only": decision.get("read_only"),
         }))
-        + _anchor_panel("mc-trade-trace", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
         + _anchor_panel("mc-trade-execution", detail_table("Execution Committee", {
             "execution_quality": committee.get("execution_quality"),
             "latency": committee.get("latency"),
