@@ -15,6 +15,20 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
+def _control_state(value: object) -> str:
+    return "ENABLED" if value is True else "DISABLED" if value is False else "UNAVAILABLE"
+
+
+def _session_state(value: object) -> str:
+    return "RECORDED" if value not in (None, "", "DATA UNAVAILABLE") else "UNAVAILABLE"
+
+
+def _list_summary(value: object, empty: str = "NONE") -> str:
+    if isinstance(value, list):
+        return ", ".join(str(item) for item in value) if value else empty
+    return str(value) if value not in (None, "") else empty
+
+
 def render(state: dict) -> str:
     governance = section(state, "governance")
     rbac = section(state, "rbac_console")
@@ -42,7 +56,7 @@ def render(state: dict) -> str:
         + metric_grid(
             (
                 ("Unit", governance.get("unit"), "neutral"),
-                ("Write Routes", rbac.get("write_routes_enabled"), rbac.get("write_routes_enabled")),
+                ("Write Routes", _control_state(rbac.get("write_routes_enabled")), _control_state(rbac.get("write_routes_enabled"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Users and Governance secondary metrics",
@@ -62,16 +76,16 @@ def render(state: dict) -> str:
             "rbac_summary": governance.get("rbac_summary"),
         }))
         + _anchor_panel("mc-users-session", detail_table("Session Snapshot", {
-            "session": governance.get("session"),
+            "session_state": _session_state(governance.get("session")),
             "session_age": governance.get("session_age"),
             "authentication_source": governance.get("authentication_source"),
-            "allowed_engine_modes": governance.get("allowed_engine_modes"),
+            "allowed_engine_modes": _list_summary(governance.get("allowed_engine_modes"), "NONE RECORDED"),
         }))
         + _anchor_panel("mc-users-actions", detail_table("Operator Action Snapshot", {
-            "available_actions": operator.get("available_actions"),
-            "disabled_actions": operator.get("disabled_actions"),
-            "write_routes_enabled": rbac.get("write_routes_enabled"),
-            "role_editing": rbac.get("role_editing"),
+            "available_actions": _list_summary(operator.get("available_actions"), "NONE"),
+            "disabled_actions": _list_summary(operator.get("disabled_actions"), "NONE"),
+            "write_routes": _control_state(rbac.get("write_routes_enabled")),
+            "role_editing": _control_state(rbac.get("role_editing")),
         }))
         + _anchor_panel("mc-users-governance", detail_table("Governance Summary", {
             "security_posture": summary.get("security_posture"),
