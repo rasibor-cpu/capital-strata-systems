@@ -344,3 +344,31 @@ def test_operator_mobile_stack_css_preserves_touch_layout() -> None:
     assert ".mc-operator-stack" in MISSION_CONTROL_CSS
     assert ".mc-risk-priority" in MISSION_CONTROL_CSS
     assert ".mc-trade-priority" in MISSION_CONTROL_CSS
+
+
+def test_unavailable_risk_metrics_are_not_neutral() -> None:
+    body = render_risk_command({
+        "risk": {
+            "overall_risk_state": "RED",
+            "risk_score": None,
+            "drawdown": None,
+            "exposure": None,
+            "unified_trade_gate": "DATA UNAVAILABLE",
+            "kill_switch": "UNAVAILABLE",
+        }
+    })
+    assert '<span>Risk Score</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert '<span>Drawdown</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert '<span>Exposure</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+
+
+def test_unavailable_trade_balance_metrics_are_not_neutral() -> None:
+    body = render_trade_operations({
+        "trading": {"execution_status": "BLOCKED"},
+        "decision_panel": {"status": "UNAVAILABLE"},
+        "broker_balance_summary": {"account_summary": {}},
+    })
+    assert '<span>Available to Trade</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert '<span>Account Value</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert '<span>Buying Power</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert '<span>Margin Available</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
