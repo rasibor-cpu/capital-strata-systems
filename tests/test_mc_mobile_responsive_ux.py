@@ -8,6 +8,8 @@ from dashboard.mission_control.layout import render_mission_control_shell
 from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS
 from dashboard.mission_control.pages.executive_overview import render as render_executive_overview
 from dashboard.mission_control.pages.alerts_incidents import render as render_alerts_incidents
+from dashboard.mission_control.pages.risk_command import render as render_risk_command
+from dashboard.mission_control.pages.trade_operations import render as render_trade_operations
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -278,3 +280,67 @@ def test_alerts_mobile_css_uses_touch_targets_without_runtime_semantics() -> Non
     assert ".mc-alert-priority" in MISSION_CONTROL_CSS
     assert "min-height: 44px" in MISSION_CONTROL_CSS
     assert ".mc-section-anchor" in MISSION_CONTROL_CSS
+
+
+def test_risk_command_mobile_priority_is_read_only() -> None:
+    body = render_risk_command({
+        "risk": {
+            "overall_risk_state": "AMBER",
+            "risk_score": 42,
+            "drawdown": "1.2%",
+            "exposure": "LOW",
+            "unified_trade_gate": "BLOCKED",
+            "kill_switch": "SAFE",
+        },
+        "risk_command_center": {},
+        "risk_committee": {},
+        "profit_protection_governance": {"execution_allowed": False, "read_only": True},
+    })
+    assert 'aria-label="Risk Command priority"' in body
+    assert 'aria-label="Risk Command sections"' in body
+    assert 'href="#mc-risk-limits"' in body
+    assert 'href="#mc-risk-command"' in body
+    assert 'href="#mc-risk-profit-protection"' in body
+    assert 'href="#mc-risk-committee"' in body
+    assert body.find("<span>Unified Gate</span>") < body.find("<span>Risk Score</span>")
+    assert "<form" not in body
+    assert "method=" not in body
+
+
+def test_trade_operations_mobile_priority_is_read_only() -> None:
+    body = render_trade_operations({
+        "trading": {
+            "execution_status": "BLOCKED",
+            "accepted_decisions": 1,
+            "rejected_decisions": 2,
+            "open_positions": [],
+            "orders": [],
+            "fills": [],
+            "rejections": [],
+        },
+        "decision_panel": {"status": "REVIEW", "read_only": True},
+        "decision_trace": {"stages": []},
+        "trade_lifecycle": {"stages": [], "events": []},
+        "execution_committee": {},
+        "broker_balance_summary": {
+            "account_summary": {
+                "available_to_trade": {"availability_state": "AVAILABLE", "value": 1000, "currency": "CAD"},
+            }
+        },
+    })
+    assert 'aria-label="Trade Operations priority"' in body
+    assert 'aria-label="Trade Operations sections"' in body
+    assert 'href="#mc-trade-account"' in body
+    assert 'href="#mc-trade-decisions"' in body
+    assert 'href="#mc-trade-execution"' in body
+    assert 'href="#mc-trade-lifecycle"' in body
+    assert body.find("<span>Execution Status</span>") < body.find("<span>Account Value</span>")
+    assert "1000 CAD" in body
+    assert "<form" not in body
+    assert "method=" not in body
+
+
+def test_operator_mobile_stack_css_preserves_touch_layout() -> None:
+    assert ".mc-operator-stack" in MISSION_CONTROL_CSS
+    assert ".mc-risk-priority" in MISSION_CONTROL_CSS
+    assert ".mc-trade-priority" in MISSION_CONTROL_CSS
