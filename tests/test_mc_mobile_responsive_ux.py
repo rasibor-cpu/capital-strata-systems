@@ -16,6 +16,7 @@ from dashboard.mission_control.pages.market_intelligence import render as render
 from dashboard.mission_control.pages.certification_readiness import render as render_certification_readiness
 from dashboard.mission_control.pages.audit_explainability import render as render_audit_explainability
 from dashboard.mission_control.pages.production_readiness import render as render_production_readiness
+from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1015,3 +1016,30 @@ def test_production_readiness_missing_blocker_and_risk_evidence_does_not_render_
     assert '<span>Outstanding Risks</span><strong>EVIDENCE_MISSING</strong>' in body
     assert '<span>Evidence Completeness</span><strong>0%</strong><em class="mc-status neutral">neutral</em>' not in body
     assert "<th>blocker_evidence</th><td>EVIDENCE_MISSING</td>" in body
+
+
+def test_mobile_landing_groups_navigation_and_marks_stale_recorded_session() -> None:
+    navigation = {
+        "canonical_home": "/mobile-launcher",
+        "landing": [
+            {"label": "Home", "href": "/mobile-launcher"},
+            {"label": "Mission Control", "href": "/mission-control/executive-overview"},
+            {"label": "Trade Operations", "href": "/mission-control/trade-operations"},
+            {"label": "Users and Governance", "href": "/mission-control/users-governance"},
+        ],
+    }
+    body = render_mobile_landing(
+        navigation,
+        manifest_href="/manifest.json",
+        operator_summary={
+            "session_cycle": 6,
+            "current_log_on": "2026-08-08T04:18:08+00:00",
+            "last_log_on": None,
+        },
+    )
+    assert 'aria-label="CSS primary mobile destinations"' in body
+    assert "<summary>More read-only destinations</summary>" in body
+    assert 'aria-label="CSS additional mobile destinations"' in body
+    assert "Recorded log on" in body
+    assert "STALE SESSION METADATA" in body
+    assert "Current log on" not in body
