@@ -13,6 +13,7 @@ from dashboard.mission_control.pages.trade_operations import render as render_tr
 from dashboard.mission_control.pages.runtime_operations import render as render_runtime_operations
 from dashboard.mission_control.pages.portfolio import render as render_portfolio
 from dashboard.mission_control.pages.market_intelligence import render as render_market_intelligence
+from dashboard.mission_control.pages.certification_readiness import render as render_certification_readiness
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -825,3 +826,39 @@ def test_market_intelligence_top_opportunity_is_vertical_mobile_snapshot() -> No
     assert "<th>ranking</th><td>1</td>" in compact
     assert "<thead>" not in compact
     assert "provenance" not in compact
+
+
+def test_certification_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_certification_readiness({
+        "certification": {
+            "rc1_platform_certification": "PASS",
+            "rc1_operational_readiness": "NOT_READY",
+            "options_income_certification": "UNAVAILABLE",
+            "broker_readiness": "RED",
+            "runtime_readiness": "STALE",
+            "ready_for_live_trading": False,
+            "ready_for_controlled_rc1_runtime": True,
+            "blockers": ["runtime stale"],
+            "warnings": [],
+            "live_disable_proof": {"execution": "BLOCKED"},
+        },
+        "governance_summary_console": {
+            "write_routes_enabled": False,
+            "operator_actions_enabled": False,
+        },
+        "final_certification": {
+            "overall": "NOT_CERTIFIED",
+            "checks": [],
+        },
+    })
+    assert 'aria-label="Certification sections"' in body
+    assert 'aria-label="Certification priority"' in body
+    assert "Readiness Snapshot" in body
+    assert "Blockers &amp; Warnings" in body
+    assert "Governance Snapshot" in body
+    assert "<summary>Show live-disable proof</summary>" in body
+    assert "<summary>Show final certification evidence</summary>" in body
+    assert "<summary>Show final certification checks</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
