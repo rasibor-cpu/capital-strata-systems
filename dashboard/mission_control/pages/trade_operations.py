@@ -7,6 +7,10 @@ def _anchor_panel(anchor: str, content: str) -> str:
     return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
 
 
+def _metric_status(value: object) -> object:
+    return "UNAVAILABLE" if value in (None, "") else value
+
+
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
@@ -29,7 +33,7 @@ def render(state: dict) -> str:
             (
                 ("Execution Status", trading.get("execution_status"), trading.get("execution_status")),
                 ("Decision Status", decision.get("status"), decision.get("status")),
-                ("Available to Trade", _display_value(account_values.get("available_to_trade")), _display_value(account_values.get("available_to_trade"))),
+                ("Available to Trade", _display_value(account_values.get("available_to_trade")), _metric_status(_display_value(account_values.get("available_to_trade")))),
                 ("Open Positions", len(trading.get("open_positions", []) or []), "neutral"),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-trade-priority",
@@ -37,9 +41,9 @@ def render(state: dict) -> str:
         )
         + metric_grid(
             (
-                ("Account Value", _display_value(account_values.get("total_account_value")), _display_value(account_values.get("total_account_value"))),
-                ("Buying Power", _display_value(account_values.get("buying_power")), _display_value(account_values.get("buying_power"))),
-                ("Margin Available", _display_value(account_values.get("margin_available")), _display_value(account_values.get("margin_available"))),
+                ("Account Value", _display_value(account_values.get("total_account_value")), _metric_status(_display_value(account_values.get("total_account_value")))),
+                ("Buying Power", _display_value(account_values.get("buying_power")), _metric_status(_display_value(account_values.get("buying_power")))),
+                ("Margin Available", _display_value(account_values.get("margin_available")), _metric_status(_display_value(account_values.get("margin_available")))),
                 ("Accepted Decisions", trading.get("accepted_decisions"), "neutral"),
                 ("Rejected Decisions", trading.get("rejected_decisions"), "neutral"),
                 ("Orders", len(trading.get("orders", []) or []), "neutral"),
