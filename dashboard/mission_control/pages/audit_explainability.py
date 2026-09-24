@@ -22,20 +22,19 @@ def _first_recommendation(recommendations: dict) -> dict:
     return {}
 
 
-def _committee_summary_rows(committee: dict) -> list[dict]:
+def _committee_summary_rows(committee: dict) -> dict:
     rows = committee.get("committees")
     if not isinstance(rows, list):
-        return []
-    summary = []
+        return {}
+    summary = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
-        summary.append({
-            "committee": row.get("committee"),
-            "outcome": row.get("outcome"),
-            "reason": row.get("reason"),
-            "freshness": row.get("freshness"),
-        })
+        name = str(row.get("committee") or "UNAVAILABLE")
+        outcome = row.get("outcome") or "UNAVAILABLE"
+        reason = row.get("reason") or "UNAVAILABLE"
+        freshness = row.get("freshness") or "UNAVAILABLE"
+        summary[name] = f"{outcome} | {reason} | {freshness}"
     return summary
 
 
