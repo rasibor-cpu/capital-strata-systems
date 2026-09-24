@@ -23,6 +23,31 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
+def _evidence_count(data: dict, key: str) -> object:
+    if key not in data:
+        return "EVIDENCE_MISSING"
+    value = data.get(key)
+    if isinstance(value, list):
+        return len(value)
+    if isinstance(value, dict):
+        if "unmitigated_count" in value:
+            return value.get("unmitigated_count")
+        return "RECORDED" if value else "EVIDENCE_MISSING"
+    return "EVIDENCE_MISSING" if value in (None, "") else value
+
+
+def _score_status(value: object) -> str:
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return "UNAVAILABLE"
+    if score <= 0:
+        return "EVIDENCE_MISSING"
+    if score < 100:
+        return "WARNING"
+    return "PASS"
+
+
 def render(state: dict) -> str:
     auth = (
         state.get("authorization_context")
@@ -70,16 +95,10 @@ def render(state: dict) -> str:
         )
         + metric_grid(
             (
-                ("Governance Score", f"{data.get('governance_score', 0)}%", "neutral"),
-                ("Evidence Completeness", f"{data.get('evidence_completeness', 0)}%", "neutral"),
-                ("Deployment Blockers", len(data.get("deployment_blockers", [])), "warning"),
-                (
-                    "Outstanding Risks",
-                    data.get("outstanding_risks", {}).get("unmitigated_count", 0)
-                    if isinstance(data.get("outstanding_risks"), dict)
-                    else 0,
-                    "warning",
-                ),
+                ("Governance Score", f"{data.get('governance_score', 0)}%", _score_status(data.get("governance_score"))),
+                ("Evidence Completeness", f"{data.get('evidence_completeness', 0)}%", _score_status(data.get("evidence_completeness"))),
+                ("Deployment Blockers", _evidence_count(data, "deployment_blockers"), _evidence_count(data, "deployment_blockers")),
+                ("Outstanding Risks", _evidence_count(data, "outstanding_risks"), _evidence_count(data, "outstanding_risks")),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Production Readiness secondary metrics",
@@ -94,8 +113,8 @@ def render(state: dict) -> str:
             "deployment_authorized": data.get("deployment_authorized"),
         }))
         + _anchor_panel("mc-prod-blockers", detail_table("Deployment Blockers", {
-            "blocker_count": len(data.get("deployment_blockers", [])),
-            "blockers": data.get("deployment_blockers", []),
+            "blocker_evidence": _evidence_count(data, "deployment_blockers"),
+            "blockers": data.get("deployment_blockers", "EVIDENCE_MISSING"),
         }))
         + _anchor_panel("mc-prod-risk", detail_table("Outstanding Risks", data.get("outstanding_risks", {})))
         + _anchor_panel("mc-prod-evidence", detail_table("Evidence Completeness", {
