@@ -1415,3 +1415,11 @@ def test_enterprise_governance_missing_evidence_does_not_render_reassuring_zeroe
     assert "<th>risk_register_count</th><td>EVIDENCE_MISSING</td>" in body
     assert "<th>blocker_count</th><td>EVIDENCE_MISSING</td>" in body
     assert "<th>blockers</th><td>EVIDENCE_MISSING</td>" in body
+
+
+def test_status_class_treats_missing_evidence_as_bad() -> None:
+    from dashboard.mission_control.pages._components import status_class
+
+    assert status_class("EVIDENCE_MISSING") == "bad"
+    assert status_class("DATA_MISSING") == "bad"
+    assert status_class("MISSING") == "bad"
