@@ -7,6 +7,14 @@ def _anchor_panel(anchor: str, content: str) -> str:
     return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
 
 
+def _evidence_panel(anchor: str, title: str, content: str) -> str:
+    return (
+        f'<div class="mc-section-anchor mc-evidence-disclosure" id="{anchor}">'
+        f'<details><summary>{title}</summary>{content}</details>'
+        '</div>'
+    )
+
+
 def _metric_status(value: object) -> object:
     return "UNAVAILABLE" if value in (None, "") else value
 
@@ -123,14 +131,14 @@ def render(state: dict) -> str:
         + _anchor_panel("mc-trade-margin-summary", detail_table("Margin Snapshot", _margin_snapshot(balances.get("collateral_margin", {}))))
         + _anchor_panel("mc-trade-context", detail_table("Account Context", account_context))
         + _anchor_panel("mc-trade-position-summary", detail_table("Position Snapshot", _position_snapshot(balances.get("position_value", {}))))
-        + _anchor_panel("mc-trade-account-evidence", detail_table("Account Evidence (Full)", account_values))
-        + _anchor_panel("mc-trade-assets", detail_table("Asset Breakdown Evidence (Full)", balances.get("asset_breakdown", [])))
-        + _anchor_panel("mc-trade-position-value", detail_table("Position Value Evidence (Full)", balances.get("position_value", {})))
-        + _anchor_panel("mc-trade-collateral", detail_table("Collateral / Margin Evidence (Full)", balances.get("collateral_margin", {})))
+        + _evidence_panel("mc-trade-account-evidence", "Show full account evidence", detail_table("Account Evidence (Full)", account_values))
+        + _evidence_panel("mc-trade-assets", "Show full asset-breakdown evidence", detail_table("Asset Breakdown Evidence (Full)", balances.get("asset_breakdown", [])))
+        + _evidence_panel("mc-trade-position-value", "Show full position-value evidence", detail_table("Position Value Evidence (Full)", balances.get("position_value", {})))
+        + _evidence_panel("mc-trade-collateral", "Show full collateral / margin evidence", detail_table("Collateral / Margin Evidence (Full)", balances.get("collateral_margin", {})))
         + _anchor_panel("mc-trade-decisions", detail_table("Decision Snapshot", _decision_snapshot(decision)))
         + _anchor_panel("mc-trade-trace-summary", detail_table("Decision Trace Summary", _trace_summary_rows(trace)))
-        + _anchor_panel("mc-trade-trace", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
-        + _anchor_panel("mc-trade-decision-evidence", detail_table("Decision Evidence (Full)", {
+        + _evidence_panel("mc-trade-trace", "Show full decision trace evidence", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
+        + _evidence_panel("mc-trade-decision-evidence", "Show full decision evidence", detail_table("Decision Evidence (Full)", {
             "decisions": decision.get("decisions"),
             "read_only": decision.get("read_only"),
         }))
