@@ -11,6 +11,7 @@ from dashboard.mission_control.pages.alerts_incidents import render as render_al
 from dashboard.mission_control.pages.risk_command import render as render_risk_command
 from dashboard.mission_control.pages.trade_operations import render as render_trade_operations
 from dashboard.mission_control.pages.runtime_operations import render as render_runtime_operations
+from dashboard.mission_control.pages.portfolio import render as render_portfolio
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -647,3 +648,45 @@ def test_runtime_operations_prioritizes_heartbeat_status_and_marks_missing_engin
     assert "<span>Heartbeat At</span><strong>2026-08-22T01:33:35+00:00</strong>" in body
     assert '<span>Engine Mode</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
     assert body.find("<span>Heartbeat Status</span>") < body.find("<span>Heartbeat At</span>")
+
+
+def test_portfolio_mobile_priority_and_evidence_disclosures_are_read_only() -> None:
+    body = render_portfolio({
+        "portfolio": {
+            "equity": "UNAVAILABLE",
+            "cash": "UNAVAILABLE",
+            "buying_power": "UNAVAILABLE",
+            "total_exposure": "UNAVAILABLE",
+            "capital_available": "UNAVAILABLE",
+            "drawdown": "UNAVAILABLE",
+            "asset_allocation": {},
+            "sector_allocation": {},
+            "currency_exposure": {},
+        },
+        "portfolio_command": {
+            "available_capital": "UNAVAILABLE",
+            "deployed_capital": "UNAVAILABLE",
+            "capital_utilization": "UNAVAILABLE",
+            "collateral": "UNAVAILABLE",
+            "state_hash": "hash",
+        },
+        "capital_allocation_center": {"state_hash": "hash"},
+        "performance_attribution": {},
+        "capital_committee": {},
+    })
+    assert 'aria-label="Portfolio sections"' in body
+    assert 'aria-label="Portfolio priority"' in body
+    assert 'href="#mc-portfolio-capital"' in body
+    assert 'href="#mc-portfolio-allocation"' in body
+    assert 'href="#mc-portfolio-committee"' in body
+    assert 'href="#mc-portfolio-attribution"' in body
+    assert "Capital Snapshot" in body
+    assert "Allocation Snapshot" in body
+    assert "Capital Committee Snapshot" in body
+    assert "Performance Attribution Snapshot" in body
+    assert "<summary>Show full portfolio command evidence</summary>" in body
+    assert "<summary>Show full capital-allocation evidence</summary>" in body
+    assert '<span>Equity</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
