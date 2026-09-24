@@ -7,6 +7,7 @@ import re
 from dashboard.mission_control.layout import render_mission_control_shell
 from dashboard.mission_control.navigation import MISSION_CONTROL_SECTIONS
 from dashboard.mission_control.pages.executive_overview import render as render_executive_overview
+from dashboard.mission_control.pages.alerts_incidents import render as render_alerts_incidents
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -238,3 +239,42 @@ def test_metric_grid_unavailable_tag_is_not_green() -> None:
     assert 'mc-status bad">UNAVAILABLE' in html
     assert 'mc-status good">UNAVAILABLE' not in html
     assert 'mc-status good">AVAILABLE' in html
+
+
+def test_alerts_mobile_triage_navigation_is_read_only_and_touch_friendly() -> None:
+    body = render_alerts_incidents(
+        {
+            "alerts": {
+                "count": 2,
+                "severity": "WARNING",
+                "heartbeat_status": "ACTIVE",
+                "external_notifications": "DISABLED",
+                "active_alerts": [{"severity": "WARNING", "source": "runtime"}],
+                "incident_timeline": [{"event": "sample"}],
+            },
+            "alert_center": {
+                "grouped_by_severity": {"WARNING": 2},
+                "grouped_by_category": {"runtime": 2},
+                "acknowledgement_actions": ["read-only"],
+                "source": "canonical",
+                "state_hash": "abc123",
+            },
+        }
+    )
+    assert 'aria-label="Alerts and incidents sections"' in body
+    assert 'aria-label="Alert triage priority"' in body
+    assert 'href="#mc-active-alerts"' in body
+    assert 'href="#mc-alert-center"' in body
+    assert 'href="#mc-incident-timeline"' in body
+    assert 'id="mc-active-alerts"' in body
+    assert 'id="mc-alert-center"' in body
+    assert 'id="mc-incident-timeline"' in body
+    assert "<form" not in body
+    assert "method=" not in body
+
+
+def test_alerts_mobile_css_uses_touch_targets_without_runtime_semantics() -> None:
+    assert ".mc-page-jump" in MISSION_CONTROL_CSS
+    assert ".mc-alert-priority" in MISSION_CONTROL_CSS
+    assert "min-height: 44px" in MISSION_CONTROL_CSS
+    assert ".mc-section-anchor" in MISSION_CONTROL_CSS
