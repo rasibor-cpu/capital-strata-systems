@@ -15,6 +15,7 @@ from dashboard.mission_control.pages.portfolio import render as render_portfolio
 from dashboard.mission_control.pages.market_intelligence import render as render_market_intelligence
 from dashboard.mission_control.pages.certification_readiness import render as render_certification_readiness
 from dashboard.mission_control.pages.audit_explainability import render as render_audit_explainability
+from dashboard.mission_control.pages.production_readiness import render as render_production_readiness
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -963,3 +964,35 @@ def test_audit_committee_snapshot_is_vertical_for_mobile() -> None:
     assert "<th>Investment Committee</th><td>NOT EVALUATED | DATA UNAVAILABLE | DATA UNAVAILABLE</td>" in compact
     assert "<th>Risk Committee</th><td>NOT EVALUATED | DATA UNAVAILABLE | DATA UNAVAILABLE</td>" in compact
     assert "<thead>" not in compact
+
+
+def test_production_readiness_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_production_readiness({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "production_readiness": {
+            "status": "RED",
+            "certification_score": 42,
+            "governance_score": 80,
+            "broker_readiness": "FAIL_CLOSED",
+            "runtime_readiness": "RED",
+            "evidence_completeness": 65,
+            "deployment_blockers": ["runtime stale"],
+            "outstanding_risks": {"unmitigated_count": 2},
+            "deployment_authorized": False,
+            "evidence_fabricated": False,
+        },
+    })
+    assert 'aria-label="Production Readiness sections"' in body
+    assert 'aria-label="Production Readiness priority"' in body
+    assert "Readiness Snapshot" in body
+    assert "Deployment Blockers" in body
+    assert "Outstanding Risks" in body
+    assert "Evidence Completeness" in body
+    assert "<summary>Show platform certification evidence</summary>" in body
+    assert "<summary>Show operational acceptance evidence</summary>" in body
+    assert "<summary>Show endurance evidence</summary>" in body
+    assert "<summary>Show disaster-recovery evidence</summary>" in body
+    assert "<summary>Show deployment-readiness evidence</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
