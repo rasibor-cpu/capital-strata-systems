@@ -14,6 +14,7 @@ from dashboard.mission_control.pages.runtime_operations import render as render_
 from dashboard.mission_control.pages.portfolio import render as render_portfolio
 from dashboard.mission_control.pages.market_intelligence import render as render_market_intelligence
 from dashboard.mission_control.pages.certification_readiness import render as render_certification_readiness
+from dashboard.mission_control.pages.audit_explainability import render as render_audit_explainability
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -859,6 +860,40 @@ def test_certification_mobile_priority_and_disclosures_are_read_only() -> None:
     assert "<summary>Show live-disable proof</summary>" in body
     assert "<summary>Show final certification evidence</summary>" in body
     assert "<summary>Show final certification checks</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
+
+
+def test_audit_explainability_mobile_hierarchy_and_disclosures_are_read_only() -> None:
+    body = render_audit_explainability({
+        "decision_explanation": {
+            "decision": "BLOCKED",
+            "plain_language": "Trade blocked",
+            "blocking_subsystem": "RISK",
+            "blocking_rule": "R7",
+            "required_improvement": "Fresh runtime evidence",
+        },
+        "committee_view": {"committees": []},
+        "counterfactuals": {"counterfactuals": []},
+        "recommendation_panel": {"recommendations": []},
+        "evidence_graph": {"status": "UNAVAILABLE", "nodes": [], "edges": [], "source_consistency": "STALE"},
+        "audit": {"warnings": [], "failures": []},
+        "audit_console": {},
+        "change_history_console": {"changes": []},
+    })
+    assert 'aria-label="Audit and Explainability sections"' in body
+    assert "Decision Explanation" in body
+    assert "Committee Snapshot" in body
+    assert "Operator Guidance" in body
+    assert "Evidence Snapshot" in body
+    assert "<summary>Show counterfactual evidence</summary>" in body
+    assert "<summary>Show recommendation evidence</summary>" in body
+    assert "<summary>Show evidence graph</summary>" in body
+    assert "<summary>Show full decision evidence</summary>" in body
+    assert "<summary>Show audit trail</summary>" in body
+    assert "<summary>Show audit center evidence</summary>" in body
+    assert "<summary>Show change history</summary>" in body
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
