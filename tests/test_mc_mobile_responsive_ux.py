@@ -996,3 +996,22 @@ def test_production_readiness_mobile_priority_and_disclosures_are_read_only() ->
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
+
+
+def test_production_readiness_missing_blocker_and_risk_evidence_does_not_render_zero() -> None:
+    body = render_production_readiness({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "production_readiness": {
+            "status": "NOT_CERTIFIED",
+            "certification_score": 0,
+            "governance_score": 0,
+            "broker_readiness": "EVIDENCE_MISSING",
+            "runtime_readiness": "EVIDENCE_MISSING",
+            "evidence_completeness": 0,
+            "deployment_authorized": False,
+        },
+    })
+    assert '<span>Deployment Blockers</span><strong>EVIDENCE_MISSING</strong>' in body
+    assert '<span>Outstanding Risks</span><strong>EVIDENCE_MISSING</strong>' in body
+    assert '<span>Evidence Completeness</span><strong>0%</strong><em class="mc-status neutral">neutral</em>' not in body
+    assert "<th>blocker_evidence</th><td>EVIDENCE_MISSING</td>" in body
