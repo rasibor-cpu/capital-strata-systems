@@ -33,13 +33,40 @@ def render_mobile_landing(
         and item.get("href")
         and "/api/" not in str(item.get("href") or "")
     ]
-    links = "".join(
-        '<a class="landing-link" href="{href}" aria-label="{aria}">{label}</a>'.format(
+    primary_labels = {
+        "Home",
+        "Mission Control",
+        "Trade Operations",
+        "Reports",
+        "Portfolio",
+        "Market Intelligence",
+        "Risk Command",
+        "Options Income",
+    }
+
+    def _link(item: Mapping[str, Any]) -> str:
+        return '<a class="landing-link" href="{href}" aria-label="{aria}">{label}</a>'.format(
             href=_esc(item["href"]),
             aria=_esc(item.get("aria_label") or item["label"]),
             label=_esc(item["label"]),
         )
-        for item in destinations
+
+    primary_links = "".join(
+        _link(item) for item in destinations if str(item.get("label")) in primary_labels
+    )
+    secondary_links = "".join(
+        _link(item) for item in destinations if str(item.get("label")) not in primary_labels
+    )
+    links = (
+        f'<nav class="landing-primary" aria-label="CSS primary mobile destinations">{primary_links}</nav>'
+        + (
+            '<details class="landing-more">'
+            '<summary>More read-only destinations</summary>'
+            f'<nav aria-label="CSS additional mobile destinations">{secondary_links}</nav>'
+            '</details>'
+            if secondary_links
+            else ""
+        )
     )
     balance = dict(balance_summary or {})
     balance_fields = (
@@ -89,10 +116,12 @@ def render_mobile_landing(
     if session_cycle is None:
         session_cycle = operator.get("current_cycle")
 
-    current_log_on = _format_operator_time(
+    current_log_on_raw = (
         operator.get("current_log_on")
         or operator.get("last_auth_time")
     )
+    current_log_on = _format_operator_time(current_log_on_raw)
+    current_log_on_state = _operator_time_state(current_log_on_raw)
 
     last_log_on = _format_operator_time(
         operator.get("last_log_on")
@@ -109,8 +138,9 @@ def render_mobile_landing(
         '</div>'
 
         '<div class="operator-time-row">'
-        '<span class="operator-label">Current log on</span>'
+        '<span class="operator-label">Recorded log on</span>'
         f'<b class="operator-time">{_esc(current_log_on)}</b>'
+        f'<small class="operator-time-state">{_esc(current_log_on_state)}</small>'
         '</div>'
 
         '<div class="operator-time-row">'
@@ -141,6 +171,9 @@ def render_mobile_landing(
     h1 {{ margin:18px 0 4px; font-size:1.6rem; }}
     p {{ color:var(--muted); margin:0 0 18px; }}
     nav {{ display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; }}
+    .landing-more {{ margin-top:12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }}
+    .landing-more summary {{ min-height:48px; display:flex; align-items:center; padding:10px 14px; cursor:pointer; font-weight:750; }}
+    .landing-more nav {{ padding:0 10px 10px; }}
     .landing-link {{ min-height:52px; display:flex; align-items:center; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); text-decoration:none; }}
     .landing-link:hover {{ border-color:var(--focus); }}
     .balance {{ margin:0 0 12px; padding:12px 14px; border:1px solid var(--line); border-radius:8px; display:grid; gap:3px; }}
@@ -151,6 +184,7 @@ def render_mobile_landing(
     .operator-label {{ color:var(--muted); }}
     .operator-value {{ font-weight:700; text-align:right; }}
     .operator-time {{ font-weight:650; line-height:1.35; overflow-wrap:normal; word-break:normal; }}
+    .operator-time-state {{ color:var(--muted); font-size:.78rem; font-weight:700; }}
     .theme-control {{ margin:0 0 18px; padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); display:flex; align-items:center; justify-content:space-between; gap:12px; }}
     .theme-control label {{ color:var(--muted); font-weight:650; }}
     .theme-select {{ min-height:40px; padding:6px 10px; border:1px solid var(--line); border-radius:7px; background:var(--panel-2); color:var(--text); font:inherit; font-weight:650; }}
@@ -175,7 +209,7 @@ def render_mobile_landing(
         <option value="light">Light</option>
       </select>
     </section>
-    <nav aria-label="CSS mobile destinations">{links}</nav>
+    {links}
     <footer>Execution remains DISABLED / BLOCKED / FAIL_CLOSED / ADVISORY_ONLY.</footer>
   </main>
   {service_worker_script}
@@ -256,6 +290,27 @@ def render_mobile_landing(
   </script>
 </body>
 </html>"""
+
+
+def _operator_time_state(value: Any) -> str:
+    """Return presentation-only freshness for recorded operator session time."""
+    from datetime import datetime, timezone
+
+    raw = str(value or "").strip()
+    if not raw:
+        return "NO RECORDED SESSION TIME"
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        age_seconds = (datetime.now(timezone.utc) - parsed.astimezone(timezone.utc)).total_seconds()
+        if age_seconds < 0:
+            return "RECORDED"
+        if age_seconds > 86400:
+            return "STALE SESSION METADATA"
+        return "CURRENT SESSION METADATA"
+    except (TypeError, ValueError):
+        return "UNVERIFIED SESSION METADATA"
 
 
 def _format_operator_time(value: Any) -> str:
