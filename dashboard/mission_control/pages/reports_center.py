@@ -102,19 +102,33 @@ def _esc(value: Any) -> str:
 
 
 def _metrics(home: dict, auth: dict) -> str:
-    items = [
+    primary = [
         ("Registered", home.get("total_registered")),
-        ("Archive recent", (home.get("archive_health") or {}).get("recent_count")),
         ("Failures", (home.get("archive_health") or {}).get("failed_count")),
         ("reports_view", auth.get("reports_view")),
         ("reports_generate", auth.get("reports_generate")),
+    ]
+    secondary = [
+        ("Archive recent", (home.get("archive_health") or {}).get("recent_count")),
         ("Email default", home.get("email_policy_default")),
     ]
-    cards = "".join(
-        f'<article class="mc-metric-card"><span>{_esc(k)}</span><strong>{_esc(v)}</strong></article>'
-        for k, v in items
+
+    def cards(items: list[tuple[str, object]]) -> str:
+        return "".join(
+            f'<article class="mc-metric-card"><span>{_esc(k)}</span><strong>{_esc(v)}</strong></article>'
+            for k, v in items
+        )
+
+    return (
+        '<section class="mc-metric-grid mc-metric-grid-priority mc-reports-priority" '
+        'aria-label="Reports priority metrics">'
+        + cards(primary)
+        + '</section>'
+        + '<section class="mc-metric-grid mc-metric-grid-secondary" '
+        'aria-label="Reports secondary metrics">'
+        + cards(secondary)
+        + '</section>'
     )
-    return f'<section class="mc-metric-grid" aria-label="Reports metrics">{cards}</section>'
 
 
 def _subnav() -> str:
