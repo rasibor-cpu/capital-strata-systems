@@ -628,3 +628,22 @@ def test_runtime_operations_mobile_priority_and_disclosures_are_read_only() -> N
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
+
+
+def test_runtime_operations_prioritizes_heartbeat_status_and_marks_missing_engine_mode() -> None:
+    body = render_runtime_operations({
+        "runtime": {
+            "runtime_status": "STALE",
+            "runtime_mode": "DISABLED",
+            "engine_mode": None,
+            "cycle": 6,
+            "heartbeat": "2026-08-22T01:33:35+00:00",
+            "heartbeat_status": "STALE",
+            "source": "RUNTIME",
+            "subsystem_health": {"certification": "RED"},
+        }
+    })
+    assert "<span>Heartbeat Status</span><strong>STALE</strong>" in body
+    assert "<span>Heartbeat At</span><strong>2026-08-22T01:33:35+00:00</strong>" in body
+    assert '<span>Engine Mode</span><strong>UNAVAILABLE</strong><em class="mc-status bad">UNAVAILABLE</em>' in body
+    assert body.find("<span>Heartbeat Status</span>") < body.find("<span>Heartbeat At</span>")
