@@ -457,3 +457,43 @@ def test_trade_operations_adds_compact_decision_snapshot_and_trace_summary() -> 
     assert "Market regime evidence" in compact
     assert "state_hash" not in compact
     assert "provenance" not in compact
+
+
+def test_trade_operations_adds_compact_account_and_margin_snapshots() -> None:
+    body = render_trade_operations({
+        "trading": {"execution_status": "BLOCKED"},
+        "decision_panel": {"status": "BLOCKED"},
+        "broker_balance_summary": {
+            "account_summary": {
+                "total_account_value": {"availability_state": "AVAILABLE", "value": 601.0005, "currency": "UNAVAILABLE"},
+                "cash": {"availability_state": "AVAILABLE", "value": 596.7317, "currency": "UNAVAILABLE"},
+                "available_to_trade": {"availability_state": "AVAILABLE", "value": 601.0005, "currency": "UNAVAILABLE"},
+                "buying_power": {"availability_state": "AVAILABLE", "value": 596.7317, "currency": "UNAVAILABLE"},
+                "margin_available": {"availability_state": "AVAILABLE", "value": 601.0005, "currency": "UNAVAILABLE"},
+                "total_pnl": {"availability_state": "AVAILABLE", "value": 393.3379, "currency": "UNAVAILABLE"},
+            },
+            "collateral_margin": {
+                "margin_state": "SIMULATED",
+                "available_collateral": {"availability_state": "AVAILABLE", "value": 601.0005, "currency": "UNAVAILABLE"},
+                "free_margin": {"availability_state": "AVAILABLE", "value": 601.0005, "currency": "UNAVAILABLE"},
+                "required_collateral": {"availability_state": "UNAVAILABLE"},
+                "used_margin": {"availability_state": "UNAVAILABLE"},
+            },
+        },
+    })
+    assert "Account Snapshot" in body
+    assert "Margin Snapshot" in body
+    assert "Account Evidence (Full)" in body
+    assert "Collateral / Margin Evidence (Full)" in body
+    account_start = body.find("Account Snapshot")
+    account_full = body.find("Account Evidence (Full)")
+    margin_start = body.find("Margin Snapshot")
+    margin_full = body.find("Collateral / Margin Evidence (Full)")
+    assert 0 <= account_start < account_full
+    assert 0 <= margin_start < margin_full
+    compact = body[account_start:account_full]
+    assert "601.0005" in compact
+    assert "596.7317" in compact
+    assert "393.3379" in compact
+    assert "provenance" not in compact
+    assert "state_hash" not in compact
