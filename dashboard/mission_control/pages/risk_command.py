@@ -7,6 +7,10 @@ def _anchor_panel(anchor: str, content: str) -> str:
     return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
 
 
+def _metric_status(value: object) -> object:
+    return "UNAVAILABLE" if value in (None, "") else value
+
+
 def render(state: dict) -> str:
     risk = section(state, "risk")
     command = section(state, "risk_command_center")
@@ -26,15 +30,15 @@ def render(state: dict) -> str:
                 ("Risk State", risk.get("overall_risk_state"), risk.get("overall_risk_state")),
                 ("Unified Gate", risk.get("unified_trade_gate"), risk.get("unified_trade_gate")),
                 ("Kill Switch", risk.get("kill_switch"), risk.get("kill_switch")),
-                ("Drawdown", risk.get("drawdown"), risk.get("drawdown")),
+                ("Drawdown", risk.get("drawdown"), _metric_status(risk.get("drawdown"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-risk-priority",
             aria_label="Risk Command priority",
         )
         + metric_grid(
             (
-                ("Risk Score", risk.get("risk_score"), risk.get("risk_score")),
-                ("Exposure", risk.get("exposure"), risk.get("exposure")),
+                ("Risk Score", risk.get("risk_score"), _metric_status(risk.get("risk_score"))),
+                ("Exposure", risk.get("exposure"), _metric_status(risk.get("exposure"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Risk Command secondary metrics",
