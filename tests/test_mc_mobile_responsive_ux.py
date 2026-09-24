@@ -1073,3 +1073,60 @@ def test_options_income_mobile_priority_and_disclosures_are_read_only() -> None:
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
+
+
+def test_options_income_compact_lifecycle_and_run_rate_do_not_dump_nested_payloads() -> None:
+    body = render_options_income({
+        "options_income": {
+            "premium_accounting": {
+                "session": {
+                    "premium_collected": 0.0,
+                    "realized_options_income": 0.0,
+                    "provenance": "ACCOUNTING|HISTORICAL",
+                },
+                "portfolio": {"large": "payload"},
+            },
+            "collateral": {
+                "status": "ADVISORY_UNAVAILABLE",
+                "reason": "No canonical broker/account collateral supplied",
+                "concentration_by_underlying": {"ABC": 1},
+            },
+            "covered_calls": [],
+            "cash_secured_puts": [],
+            "paper_positions": [],
+            "position_health": "NO_OPEN_OPTION_POSITIONS",
+            "income_targets": {
+                "status": "TARGET_NOT_CONFIGURED",
+                "monthly_income_target": None,
+                "current_month_actual_options_income": None,
+                "projected_month_end_options_income": None,
+                "assumptions": ["No monthly Options Income target configured"],
+            },
+            "portfolio_allocation": {
+                "portfolio_id": "OI-RUNTIME-ADVISORY-EMPTY",
+                "capital_allocated": 0.0,
+                "available_capital": 0.0,
+                "warnings": ["Advisory empty portfolio"],
+            },
+            "missing_dependencies": ["MARKET_DATA", "OPTION_CHAIN"],
+        },
+        "options_income_panel": {},
+    })
+    life_start = body.find("Income Lifecycle Snapshot")
+    risk_start = body.find("Risk Snapshot")
+    lifecycle = body[life_start:risk_start]
+    assert "premium_collected" in lifecycle
+    assert "realized_options_income" in lifecycle
+    assert "collateral_status" in lifecycle
+    assert "provenance" not in lifecycle
+    assert "concentration_by_underlying" not in lifecycle
+
+    run_start = body.find("Run-Rate Snapshot")
+    evidence_start = body.find("<summary>Show full options-income command evidence</summary>")
+    run = body[run_start:evidence_start]
+    assert "target_status" in run
+    assert "portfolio_id" in run
+    assert "MARKET_DATA, OPTION_CHAIN" in run
+    assert "assumptions" not in run
+    assert "warnings" not in run
+    assert "<summary>Show premium/collateral/allocation evidence</summary>" in body
