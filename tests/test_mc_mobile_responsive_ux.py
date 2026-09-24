@@ -21,6 +21,7 @@ from dashboard.mission_control.pages.options_income import render as render_opti
 from dashboard.mission_control.pages.users_governance import render as render_users_governance
 from dashboard.mission_control.pages.system_configuration import render as render_system_configuration
 from dashboard.mission_control.pages.documentation_runbooks import render as render_documentation_runbooks
+from dashboard.mission_control.pages.enterprise_governance import render as render_enterprise_governance
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1347,4 +1348,33 @@ def test_documentation_runbooks_mobile_compacts_indexes() -> None:
     assert "<th>operator_runbooks</th><td>3</td>" in body
     assert "<summary>Show architecture and governance document index</summary>" in body
     assert "<summary>Show full operational runbook index</summary>" in body
+    assert "<details open" not in body
+
+
+def test_enterprise_governance_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_enterprise_governance({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "enterprise_governance": {
+            "overall_certification_readiness": 40,
+            "governance_score": 75,
+            "iso_27001": {"percentage": 60},
+            "iso_9001": {"percentage": 50},
+            "broker_readiness": "FAIL_CLOSED",
+            "runtime_readiness": "RED",
+            "security_posture": "PASS",
+            "compliance_posture": "WARNING",
+            "enterprise_risk_summary": {"critical_count": 2, "high_count": 1},
+            "enterprise_risk_register": [{"id": "R1"}],
+            "outstanding_blockers": ["runtime evidence missing"],
+        },
+    })
+    assert 'aria-label="Executive Governance sections"' in body
+    assert 'aria-label="Executive Governance priority"' in body
+    assert "Governance Snapshot" in body
+    assert "Enterprise Risk Snapshot" in body
+    assert "Certification Blockers Snapshot" in body
+    assert "<summary>Show governance-domain evidence</summary>" in body
+    assert "<summary>Show ISO readiness evidence</summary>" in body
+    assert "<summary>Show continuity and risk evidence</summary>" in body
+    assert "<summary>Show certification evidence</summary>" in body
     assert "<details open" not in body
