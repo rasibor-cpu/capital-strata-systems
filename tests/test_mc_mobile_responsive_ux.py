@@ -1450,3 +1450,36 @@ def test_credential_governance_mobile_compacts_redacted_metadata() -> None:
     assert "<summary>Show audit and dependency metadata</summary>" in body
     assert "<summary>Show compliance metadata</summary>" in body
     assert "<details open" not in body
+
+
+def test_credential_governance_missing_collections_fail_closed() -> None:
+    body = render_credential_governance({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "credential_governance": {
+            "vault_health": {"status": "UNCONFIGURED"},
+            "compliance": {"outcome": "EVIDENCE_PENDING"},
+        },
+    })
+    assert "<th>credential_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>rotation_queue_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>expiring_soon_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>audit_event_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>dependency_node_count</th><td>EVIDENCE_MISSING</td>" in body
+
+
+def test_credential_governance_explicit_empty_collections_are_zero() -> None:
+    body = render_credential_governance({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "credential_governance": {
+            "credential_inventory": [],
+            "rotation_queue": [],
+            "expiring_soon": [],
+            "audit_events": [],
+            "dependency_graph": {},
+        },
+    })
+    assert "<th>credential_count</th><td>0</td>" in body
+    assert "<th>rotation_queue_count</th><td>0</td>" in body
+    assert "<th>expiring_soon_count</th><td>0</td>" in body
+    assert "<th>audit_event_count</th><td>0</td>" in body
+    assert "<th>dependency_node_count</th><td>0</td>" in body
