@@ -102,6 +102,23 @@ class CollectionService:
         collection.ledger_txn_id = txn.ledger_txn_id
         return txn
 
+    def post_terminal_adjustment(self, collection: CollectionTransaction) -> LedgerTransaction:
+        """Reverse recognized fee/receivable for a settled terminal event."""
+        if collection.status not in {
+            CollectionStatus.REFUNDED, CollectionStatus.REVERSED, CollectionStatus.CHARGEBACK,
+        }:
+            raise InvalidCollectionTransition("terminal adjustment requires REFUNDED, REVERSED or CHARGEBACK")
+        original_key = f"{collection.collection_id}:FEE_OBLIGATION"
+        if not any(txn.meta.get("economic_event_key") == original_key for txn in self.ledger.transactions.values()):
+            raise InvalidCollectionTransition("terminal adjustment requires original fee obligation")
+        return self._post_once(
+            collection,
+            economic_event=f"{collection.status.value}_FEE_ADJUSTMENT",
+            debit_account=f"INCOME:CSS_FEE:{collection.currency}",
+            credit_account=f"AR:CUSTOMER:{collection.customer_id}:{collection.currency}",
+            txn_type=collection.status.value,
+        )
+
     def mark_reconciled(self, collection: CollectionTransaction, reconciliation_reference: str) -> None:
         if collection.status != CollectionStatus.SETTLED or not collection.ledger_txn_id:
             raise InvalidCollectionTransition("reconciliation requires posted settlement")
