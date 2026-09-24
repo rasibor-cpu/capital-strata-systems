@@ -15,6 +15,17 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
+def _nested_value(value, key: str, default="UNAVAILABLE"):
+    if isinstance(value, dict):
+        result = value.get(key)
+        return default if result in (None, "") else result
+    return default
+
+
+def _list_count(value) -> int:
+    return len(value) if isinstance(value, list) else 0
+
+
 def render(state: dict) -> str:
     options = section(state, "options_income")
     panel = section(state, "options_income_panel")
@@ -78,12 +89,19 @@ def render(state: dict) -> str:
             "execution_blocked": True,
         }))
         + _anchor_panel("mc-options-lifecycle", detail_table("Income Lifecycle Snapshot", {
-            "covered_calls": options.get("covered_calls"),
-            "cash_secured_puts": options.get("cash_secured_puts"),
-            "paper_positions": options.get("paper_positions"),
-            "premium_accounting": options.get("premium_accounting"),
-            "collateral": options.get("collateral"),
-            "position_health": options.get("position_health"),
+            "covered_call_count": _list_count(options.get("covered_calls")),
+            "cash_secured_put_count": _list_count(options.get("cash_secured_puts")),
+            "paper_position_count": _list_count(options.get("paper_positions")),
+            "premium_collected": _nested_value(
+                _nested_value(options.get("premium_accounting"), "session", {}),
+                "premium_collected",
+            ),
+            "realized_options_income": _nested_value(
+                _nested_value(options.get("premium_accounting"), "session", {}),
+                "realized_options_income",
+            ),
+            "collateral_status": _nested_value(options.get("collateral"), "status"),
+            "position_health": options.get("position_health") or "UNAVAILABLE",
         }))
         + _anchor_panel("mc-options-risk", detail_table("Risk Snapshot", {
             "assignment_risk": _risk_status(options.get("assignment_risk")),
@@ -92,10 +110,17 @@ def render(state: dict) -> str:
             "alerts": options.get("alerts"),
         }))
         + _anchor_panel("mc-options-run-rate", detail_table("Run-Rate Snapshot", {
-            "income_targets": options.get("income_targets"),
-            "run_rate": run_rate,
-            "portfolio_allocation": options.get("portfolio_allocation"),
-            "missing_dependencies": options.get("missing_dependencies"),
+            "target_status": _nested_value(options.get("income_targets"), "status"),
+            "monthly_income_target": _nested_value(options.get("income_targets"), "monthly_income_target"),
+            "current_month_actual": _nested_value(options.get("income_targets"), "current_month_actual_options_income"),
+            "projected_month_end": _nested_value(options.get("income_targets"), "projected_month_end_options_income"),
+            "run_rate_status": _nested_value(run_rate, "status"),
+            "portfolio_id": _nested_value(options.get("portfolio_allocation"), "portfolio_id"),
+            "capital_allocated": _nested_value(options.get("portfolio_allocation"), "capital_allocated"),
+            "available_capital": _nested_value(options.get("portfolio_allocation"), "available_capital"),
+            "missing_dependencies": ", ".join(options.get("missing_dependencies", []))
+                if isinstance(options.get("missing_dependencies"), list) and options.get("missing_dependencies")
+                else "NONE RECORDED",
         }))
         + _evidence_panel("mc-options-evidence", "Show full options-income command evidence", detail_table("Options Income Command Panel (Full)", {
             "status": panel.get("status"),
@@ -129,6 +154,11 @@ def render(state: dict) -> str:
         + _evidence_panel("mc-options-provider", "Show provider/readiness evidence", detail_table("Provider & Data Readiness", {
             "data_readiness": options.get("data_readiness"),
             "provider_summary": options.get("provider_summary"),
+        }))
+        + _evidence_panel("mc-options-accounting", "Show premium/collateral/allocation evidence", detail_table("Premium Accounting", options.get("premium_accounting", {})) + detail_table("Collateral", options.get("collateral", {})) + detail_table("Income Targets / Run Rate", {
+            "income_targets": options.get("income_targets"),
+            "run_rate": run_rate,
+            "portfolio_allocation": options.get("portfolio_allocation"),
         }))
         + '</div>'
     )
