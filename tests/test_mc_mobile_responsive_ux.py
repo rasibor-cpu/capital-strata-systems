@@ -946,3 +946,20 @@ def test_audit_explainability_compacts_committee_guidance_and_consistency() -> N
     compact_evidence = body[evidence_start:counterfactual_start]
     assert "<th>source_consistency</th><td>RECORDED</td>" in compact_evidence
     assert "decision:latest" not in compact_evidence
+
+
+def test_audit_committee_snapshot_is_vertical_for_mobile() -> None:
+    body = render_audit_explainability({
+        "committee_view": {
+            "committees": [
+                {"committee": "Investment Committee", "outcome": "NOT EVALUATED", "reason": "DATA UNAVAILABLE", "freshness": "DATA UNAVAILABLE"},
+                {"committee": "Risk Committee", "outcome": "NOT EVALUATED", "reason": "DATA UNAVAILABLE", "freshness": "DATA UNAVAILABLE"},
+            ]
+        }
+    })
+    start = body.find("Committee Snapshot")
+    end = body.find("Operator Guidance")
+    compact = body[start:end]
+    assert "<th>Investment Committee</th><td>NOT EVALUATED | DATA UNAVAILABLE | DATA UNAVAILABLE</td>" in compact
+    assert "<th>Risk Committee</th><td>NOT EVALUATED | DATA UNAVAILABLE | DATA UNAVAILABLE</td>" in compact
+    assert "<thead>" not in compact
