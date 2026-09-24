@@ -19,6 +19,7 @@ from dashboard.mission_control.pages.production_readiness import render as rende
 from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
 from dashboard.mission_control.pages.options_income import render as render_options_income
 from dashboard.mission_control.pages.users_governance import render as render_users_governance
+from dashboard.mission_control.pages.system_configuration import render as render_system_configuration
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1258,3 +1259,39 @@ def test_users_governance_compacts_session_and_control_states() -> None:
     assert "<th>available_actions</th><td>NONE</td>" in body
     assert "<th>write_routes</th><td>DISABLED</td>" in body
     assert "<th>role_editing</th><td>DISABLED</td>" in body
+
+
+def test_system_configuration_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_system_configuration({
+        "configuration": {
+            "runtime_mode": "DISABLED",
+            "engine_mode": "UNAVAILABLE",
+            "cycle_mode": "SAFE",
+            "selected_broker": "COINBASE",
+        },
+        "configuration_console": {
+            "editing_enabled": False,
+            "environment_classification": "ADVISORY",
+        },
+        "feature_flags_console": {"editing_enabled": False},
+        "rollback_console": {
+            "eligible_targets": [],
+            "planning_only": True,
+            "perform_available": False,
+        },
+        "change_history_console": {"changes": []},
+    })
+    assert 'aria-label="System Configuration sections"' in body
+    assert 'aria-label="System Configuration priority"' in body
+    assert "Runtime Configuration Snapshot" in body
+    assert "Control Posture" in body
+    assert "Rollback Snapshot" in body
+    assert "<summary>Show limit and feature evidence</summary>" in body
+    assert "<summary>Show service and refresh evidence</summary>" in body
+    assert "<summary>Show configuration-console evidence</summary>" in body
+    assert "<summary>Show feature-flag evidence</summary>" in body
+    assert "<summary>Show change history</summary>" in body
+    assert "<summary>Show rollback-plan evidence</summary>" in body
+    assert "<th>configuration_editing</th><td>DISABLED</td>" in body
+    assert "<th>live_limit_editing</th><td>DISABLED</td>" in body
+    assert "<details open" not in body
