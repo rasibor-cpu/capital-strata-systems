@@ -85,6 +85,38 @@ def _position_snapshot(position_value: object) -> dict:
     return {key.lower(): _display_value(positions.get(key)) for key in preferred}
 
 
+def _execution_snapshot(trading: dict, committee: dict) -> dict:
+    routing = committee.get("routing_quality")
+    routing_quality = routing.get("quality") if isinstance(routing, dict) else routing
+    return {
+        "execution_status": trading.get("execution_status"),
+        "execution_quality": committee.get("execution_quality") or trading.get("execution_quality"),
+        "latency": committee.get("latency"),
+        "slippage": committee.get("slippage") or trading.get("slippage"),
+        "fees": trading.get("fees"),
+        "routing_quality": routing_quality,
+        "controls": committee.get("controls"),
+        "fills": len(trading.get("fills", []) or []),
+        "rejections": len(trading.get("rejections", []) or []),
+    }
+
+
+def _lifecycle_summary_rows(lifecycle: dict) -> list[dict]:
+    stages = lifecycle.get("stages")
+    if not isinstance(stages, list):
+        return []
+    rows = []
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        rows.append({
+            "stage": stage.get("stage"),
+            "count": stage.get("count"),
+            "freshness": stage.get("freshness"),
+        })
+    return rows
+
+
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
@@ -142,7 +174,9 @@ def render(state: dict) -> str:
             "decisions": decision.get("decisions"),
             "read_only": decision.get("read_only"),
         }))
-        + _anchor_panel("mc-trade-execution", detail_table("Execution Committee", {
+        + _anchor_panel("mc-trade-execution", detail_table("Execution Snapshot", _execution_snapshot(trading, committee)))
+        + _anchor_panel("mc-trade-lifecycle", detail_table("Lifecycle Summary", _lifecycle_summary_rows(lifecycle)))
+        + _evidence_panel("mc-trade-execution-evidence", "Show full execution committee evidence", detail_table("Execution Committee Evidence (Full)", {
             "execution_quality": committee.get("execution_quality"),
             "latency": committee.get("latency"),
             "slippage": committee.get("slippage"),
@@ -153,7 +187,7 @@ def render(state: dict) -> str:
             "controls": committee.get("controls"),
             "links": committee.get("links"),
         }))
-        + _anchor_panel("mc-trade-quality", detail_table("Execution Quality", {
+        + _evidence_panel("mc-trade-quality", "Show full execution-quality evidence", detail_table("Execution Quality Evidence (Full)", {
             "slippage": trading.get("slippage"),
             "fees": trading.get("fees"),
             "execution_quality": trading.get("execution_quality"),
@@ -161,9 +195,9 @@ def render(state: dict) -> str:
             "source": lifecycle.get("source"),
             "state_hash": lifecycle.get("state_hash"),
         }))
-        + _anchor_panel("mc-trade-lifecycle", detail_table("Trade Lifecycle", lifecycle.get("stages", [])))
-        + _anchor_panel("mc-trade-events", detail_table("Lifecycle Events", lifecycle.get("events", [])))
-        + _anchor_panel("mc-trade-rejections", detail_table("Recent Rejections", trading.get("rejections", [])))
+        + _evidence_panel("mc-trade-lifecycle-evidence", "Show full lifecycle evidence", detail_table("Trade Lifecycle Evidence (Full)", lifecycle.get("stages", [])))
+        + _evidence_panel("mc-trade-events", "Show lifecycle events", detail_table("Lifecycle Events", lifecycle.get("events", [])))
+        + _evidence_panel("mc-trade-rejections", "Show recent rejections", detail_table("Recent Rejections", trading.get("rejections", [])))
         + '</div>'
     )
 
