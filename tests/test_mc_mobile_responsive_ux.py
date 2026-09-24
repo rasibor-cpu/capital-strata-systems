@@ -754,3 +754,45 @@ def test_market_intelligence_mobile_priority_and_disclosure_are_read_only() -> N
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
+
+
+def test_market_intelligence_compacts_opportunity_rows() -> None:
+    body = render_market_intelligence({
+        "market_intelligence": {
+            "market_regime": "DISABLED",
+            "trend": "UNAVAILABLE",
+            "volatility": "NORMAL",
+            "liquidity": "UNAVAILABLE",
+        },
+        "opportunity_ranking": {
+            "opportunities": [{
+                "symbol": "DATA UNAVAILABLE",
+                "asset_class": "DATA UNAVAILABLE",
+                "confidence": "DATA UNAVAILABLE",
+                "expected_quality": "UNKNOWN",
+                "risk": "DATA UNAVAILABLE",
+                "blocking_reason": "BLOCKED",
+                "committee_outcome": "PASS",
+                "ranking": 1,
+                "freshness": "DATA UNAVAILABLE",
+                "source": "RUNTIME",
+                "source_module": "dashboard.mission_control.opportunity_ranking.opportunity",
+                "provenance": {"large": "payload"},
+                "runtime_id": "runtime",
+                "state_hash": "hash",
+                "decision_hash": "hash",
+            }]
+        },
+    })
+    assert "Opportunity Snapshot" in body
+    assert "<summary>Show full opportunity evidence</summary>" in body
+    snapshot_start = body.find("Opportunity Snapshot")
+    full_start = body.find("<summary>Show full opportunity evidence</summary>")
+    assert 0 <= snapshot_start < full_start
+    compact = body[snapshot_start:full_start]
+    for value in ("symbol", "asset_class", "confidence", "expected_quality", "risk", "blocking_reason", "committee_outcome", "ranking", "freshness"):
+        assert value in compact
+    assert "provenance" not in compact
+    assert "runtime_id" not in compact
+    assert "state_hash" not in compact
+    assert "decision_hash" not in compact
