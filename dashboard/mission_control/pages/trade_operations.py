@@ -71,6 +71,12 @@ def _margin_snapshot(collateral_margin: object) -> dict:
     }
 
 
+def _position_snapshot(position_value: object) -> dict:
+    positions = position_value if isinstance(position_value, dict) else {}
+    preferred = ("EQUITIES", "CRYPTO", "FX", "OPTIONS", "FUTURES", "TOTAL_INVESTED_VALUE")
+    return {key.lower(): _display_value(positions.get(key)) for key in preferred}
+
+
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
@@ -116,9 +122,10 @@ def render(state: dict) -> str:
         + _anchor_panel("mc-trade-account", detail_table("Account Snapshot", _account_snapshot(account_values)))
         + _anchor_panel("mc-trade-margin-summary", detail_table("Margin Snapshot", _margin_snapshot(balances.get("collateral_margin", {}))))
         + _anchor_panel("mc-trade-context", detail_table("Account Context", account_context))
+        + _anchor_panel("mc-trade-position-summary", detail_table("Position Snapshot", _position_snapshot(balances.get("position_value", {}))))
         + _anchor_panel("mc-trade-account-evidence", detail_table("Account Evidence (Full)", account_values))
-        + _anchor_panel("mc-trade-assets", detail_table("Asset Breakdown", balances.get("asset_breakdown", [])))
-        + _anchor_panel("mc-trade-position-value", detail_table("Position Value", balances.get("position_value", {})))
+        + _anchor_panel("mc-trade-assets", detail_table("Asset Breakdown Evidence (Full)", balances.get("asset_breakdown", [])))
+        + _anchor_panel("mc-trade-position-value", detail_table("Position Value Evidence (Full)", balances.get("position_value", {})))
         + _anchor_panel("mc-trade-collateral", detail_table("Collateral / Margin Evidence (Full)", balances.get("collateral_margin", {})))
         + _anchor_panel("mc-trade-decisions", detail_table("Decision Snapshot", _decision_snapshot(decision)))
         + _anchor_panel("mc-trade-trace-summary", detail_table("Decision Trace Summary", _trace_summary_rows(trace)))
