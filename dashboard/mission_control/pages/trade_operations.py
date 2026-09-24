@@ -45,6 +45,32 @@ def _trace_summary_rows(trace: dict) -> list[dict]:
     return rows
 
 
+def _account_snapshot(account_values: dict) -> dict:
+    return {
+        "account_value": _display_value(account_values.get("total_account_value")),
+        "cash": _display_value(account_values.get("cash")),
+        "available_to_trade": _display_value(account_values.get("available_to_trade")),
+        "buying_power": _display_value(account_values.get("buying_power")),
+        "margin_available": _display_value(account_values.get("margin_available")),
+        "unrealized_pnl": _display_value(account_values.get("unrealized_pnl")),
+        "realized_pnl": _display_value(account_values.get("realized_pnl")),
+        "total_pnl": _display_value(account_values.get("total_pnl")),
+    }
+
+
+def _margin_snapshot(collateral_margin: object) -> dict:
+    margin = collateral_margin if isinstance(collateral_margin, dict) else {}
+    return {
+        "margin_state": margin.get("margin_state"),
+        "available_collateral": _display_value(margin.get("available_collateral")),
+        "free_margin": _display_value(margin.get("free_margin")),
+        "required_collateral": _display_value(margin.get("required_collateral")),
+        "used_margin": _display_value(margin.get("used_margin")),
+        "utilization_pct": _display_value(margin.get("utilization_pct")),
+        "closeout_percentage": _display_value(margin.get("closeout_percentage")),
+    }
+
+
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
@@ -87,11 +113,13 @@ def render(state: dict) -> str:
             aria_label="Trade Operations secondary metrics",
         )
         + '<div class="mc-operator-stack">'
-        + _anchor_panel("mc-trade-account", detail_table("Account Summary", account_values))
+        + _anchor_panel("mc-trade-account", detail_table("Account Snapshot", _account_snapshot(account_values)))
+        + _anchor_panel("mc-trade-margin-summary", detail_table("Margin Snapshot", _margin_snapshot(balances.get("collateral_margin", {}))))
+        + _anchor_panel("mc-trade-context", detail_table("Account Context", account_context))
+        + _anchor_panel("mc-trade-account-evidence", detail_table("Account Evidence (Full)", account_values))
         + _anchor_panel("mc-trade-assets", detail_table("Asset Breakdown", balances.get("asset_breakdown", [])))
         + _anchor_panel("mc-trade-position-value", detail_table("Position Value", balances.get("position_value", {})))
-        + _anchor_panel("mc-trade-collateral", detail_table("Collateral / Margin", balances.get("collateral_margin", {})))
-        + _anchor_panel("mc-trade-context", detail_table("Account Context", account_context))
+        + _anchor_panel("mc-trade-collateral", detail_table("Collateral / Margin Evidence (Full)", balances.get("collateral_margin", {})))
         + _anchor_panel("mc-trade-decisions", detail_table("Decision Snapshot", _decision_snapshot(decision)))
         + _anchor_panel("mc-trade-trace-summary", detail_table("Decision Trace Summary", _trace_summary_rows(trace)))
         + _anchor_panel("mc-trade-trace", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
