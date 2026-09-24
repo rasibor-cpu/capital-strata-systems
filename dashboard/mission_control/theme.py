@@ -131,6 +131,41 @@ body.mc-body {
 .neutral { color: var(--mc-text); background: rgba(104, 168, 255, .11); }
 .mc-content { padding: 22px; min-width: 0; overflow-x: hidden; }
 .mc-table-wrap { max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.mc-page-jump {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 16px;
+}
+.mc-page-jump a {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 7px 11px;
+  border: 1px solid var(--mc-line);
+  border-radius: 8px;
+  background: var(--mc-panel);
+  color: var(--mc-info);
+  text-decoration: none;
+  font-size: .82rem;
+  font-weight: 700;
+}
+.mc-page-jump a:focus-visible {
+  outline: 2px solid var(--mc-info);
+  outline-offset: 2px;
+}
+.mc-alert-stack {
+  display: grid;
+  gap: 14px;
+}
+.mc-section-anchor {
+  min-width: 0;
+  scroll-margin-top: 12px;
+}
+.mc-section-anchor > .mc-panel {
+  margin: 0;
+}
 .mc-breadcrumb { color: var(--mc-muted); font-size: .82rem; margin-bottom: 12px; }
 .css-breadcrumbs { display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin-top:6px; font-size:.82rem; color:var(--mc-muted); }
 .css-crumb { color:var(--mc-info); text-decoration:none; }
@@ -367,6 +402,12 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-metric-grid-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mc-metric-grid-secondary { grid-template-columns: 1fr; }
   .mc-content { padding: 16px; }
+  .mc-page-jump {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .mc-page-jump a { min-height: 44px; padding: 8px 6px; text-align: center; }
+  .mc-alert-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .rc-card-grid, .rc-filters { grid-template-columns: 1fr; }
   .mc-nav a { min-height: 48px; }
   .mc-page-header h1 { font-size: 1.25rem; }
@@ -379,6 +420,9 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-page-header p { display: none; }
   .mc-warning { padding: 8px 10px; font-size: .84rem; line-height: 1.35; }
   .mc-content { padding: 12px; }
+  .mc-page-jump { gap: 6px; margin-bottom: 12px; }
+  .mc-page-jump a { font-size: .76rem; }
+  .mc-alert-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 """ + CSS_DISCLOSURE
 
