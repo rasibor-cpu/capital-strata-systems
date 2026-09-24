@@ -91,7 +91,7 @@ def status_class(value: Any) -> str:
     tokens = _status_tokens(value)
     if not tokens:
         return "neutral"
-    if tokens & {"unavailable", "disabled", "blocked", "red", "fail", "failed", "error"}:
+    if tokens & {"unavailable", "disabled", "blocked", "red", "fail", "failed", "error", "missing"}:
         return "bad"
     if "not" in tokens and "ready" in tokens:
         return "bad"
