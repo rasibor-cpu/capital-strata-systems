@@ -12,6 +12,7 @@ from dashboard.mission_control.pages.risk_command import render as render_risk_c
 from dashboard.mission_control.pages.trade_operations import render as render_trade_operations
 from dashboard.mission_control.pages.runtime_operations import render as render_runtime_operations
 from dashboard.mission_control.pages.portfolio import render as render_portfolio
+from dashboard.mission_control.pages.market_intelligence import render as render_market_intelligence
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -718,3 +719,38 @@ def test_portfolio_numeric_metrics_use_semantic_status_not_value_echo() -> None:
     assert "risk_state" in body
     assert "risk_drawdown" in body
     assert "{&#x27;broker_quality&#x27;" not in body
+
+
+def test_market_intelligence_mobile_priority_and_disclosure_are_read_only() -> None:
+    body = render_market_intelligence({
+        "market_intelligence": {
+            "market_regime": "DISABLED",
+            "trend": "UNAVAILABLE",
+            "volatility": "NORMAL",
+            "liquidity": "UNAVAILABLE",
+            "momentum": "UNAVAILABLE",
+            "signal_confluence": "CONFIRMED",
+            "pressure": "UNKNOWN",
+            "probability": "UNKNOWN",
+            "velocity": "UNKNOWN",
+            "vwap_state": "UNAVAILABLE",
+            "spread_quality": "TIGHT",
+            "execution_cost_state": "UNKNOWN",
+            "asset_class_rankings": [],
+            "watchlists": [],
+            "market_data_freshness": "DATA UNAVAILABLE",
+        },
+        "opportunity_ranking": {"opportunities": []},
+    })
+    assert 'aria-label="Market Intelligence sections"' in body
+    assert 'aria-label="Market Intelligence priority"' in body
+    assert 'href="#mc-market-snapshot"' in body
+    assert 'href="#mc-market-rankings"' in body
+    assert 'href="#mc-market-opportunities"' in body
+    assert "Market Snapshot" in body
+    assert "Rankings &amp; Watchlists" in body
+    assert "Opportunity Snapshot" in body
+    assert "<summary>Show full signal-surface evidence</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
