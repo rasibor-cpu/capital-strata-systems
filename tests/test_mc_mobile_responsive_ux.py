@@ -1230,3 +1230,31 @@ def test_users_governance_mobile_priority_and_disclosures_are_read_only() -> Non
     assert "<summary>Show operator-console evidence</summary>" in body
     assert "<summary>Show approval workflow evidence</summary>" in body
     assert "<details open" not in body
+
+
+def test_users_governance_compacts_session_and_control_states() -> None:
+    body = render_users_governance({
+        "governance": {
+            "session": "2513cbeea26523f2a4473d9789102010",
+            "session_age": "DATA UNAVAILABLE",
+            "authentication_source": "css_session_recovery.session_user_ctx",
+            "allowed_engine_modes": ["SAFE", "BALANCED"],
+        },
+        "rbac_console": {
+            "write_routes_enabled": False,
+            "role_editing": False,
+        },
+        "operator_console": {
+            "available_actions": [],
+            "disabled_actions": ["state changes", "broker changes"],
+        },
+    })
+    session_start = body.find("Session Snapshot")
+    actions_start = body.find("Operator Action Snapshot")
+    session = body[session_start:actions_start]
+    assert "<th>session_state</th><td>RECORDED</td>" in session
+    assert "2513cbeea26523f2a4473d9789102010" not in session
+    assert "SAFE, BALANCED" in session
+    assert "<th>available_actions</th><td>NONE</td>" in body
+    assert "<th>write_routes</th><td>DISABLED</td>" in body
+    assert "<th>role_editing</th><td>DISABLED</td>" in body
