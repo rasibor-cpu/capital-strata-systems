@@ -17,6 +17,7 @@ from dashboard.mission_control.pages.certification_readiness import render as re
 from dashboard.mission_control.pages.audit_explainability import render as render_audit_explainability
 from dashboard.mission_control.pages.production_readiness import render as render_production_readiness
 from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
+from dashboard.mission_control.pages.options_income import render as render_options_income
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1043,3 +1044,32 @@ def test_mobile_landing_groups_navigation_and_marks_stale_recorded_session() -> 
     assert "Recorded log on" in body
     assert "STALE SESSION METADATA" in body
     assert "Current log on" not in body
+
+
+def test_options_income_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_options_income({
+        "options_income": {
+            "status": "DATA_DEPENDENCY_BLOCKED",
+            "deployment_state": "ADVISORY",
+            "operational_readiness": "RED",
+            "certification": {"outcome": "NOT_CERTIFIED"},
+            "data_readiness": {"status": "DATA UNAVAILABLE"},
+            "provider_summary": {},
+            "opportunities": [],
+            "assignment_risk": {"status": "UNAVAILABLE"},
+            "volatility_risk": {"status": "UNAVAILABLE"},
+        },
+        "options_income_panel": {},
+    })
+    assert 'aria-label="Options Income sections"' in body
+    assert 'aria-label="Options Income priority"' in body
+    assert "Options Income Snapshot" in body
+    assert "Income Lifecycle Snapshot" in body
+    assert "Risk Snapshot" in body
+    assert "Run-Rate Snapshot" in body
+    assert "<summary>Show full options-income command evidence</summary>" in body
+    assert "<summary>Show Greeks and stress-test evidence</summary>" in body
+    assert "<summary>Show provider/readiness evidence</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
