@@ -23,6 +23,7 @@ from dashboard.mission_control.pages.system_configuration import render as rende
 from dashboard.mission_control.pages.documentation_runbooks import render as render_documentation_runbooks
 from dashboard.mission_control.pages.enterprise_governance import render as render_enterprise_governance
 from dashboard.mission_control.pages.credential_governance import render as render_credential_governance
+from dashboard.mission_control.pages.enterprise_identity import render as render_enterprise_identity
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1483,3 +1484,35 @@ def test_credential_governance_explicit_empty_collections_are_zero() -> None:
     assert "<th>expiring_soon_count</th><td>0</td>" in body
     assert "<th>audit_event_count</th><td>0</td>" in body
     assert "<th>dependency_node_count</th><td>0</td>" in body
+
+
+def test_enterprise_identity_mobile_compacts_redacted_metadata() -> None:
+    body = render_enterprise_identity({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "identity_governance": {
+            "enterprise_identity": [{"id": "id-1"}],
+            "enterprise_secrets": [],
+            "vault_health": {"status": "PASS"},
+            "rotation": {"reminders": []},
+            "certificates": [],
+            "oauth": [],
+            "broker_authentication": [],
+            "risk": {"high_risk_count": 0},
+            "audit": [],
+            "orphaned_secrets": [],
+            "direct_access_violations": [],
+            "migration_progress": {"status": "RECORDED"},
+            "vault_health_score": {"score": 100, "status": "PASS"},
+        },
+    })
+    assert 'aria-label="Enterprise Identity sections"' in body
+    assert 'aria-label="Enterprise Identity priority"' in body
+    assert "Identity &amp; Vault Snapshot" in body
+    assert "Risk Snapshot" in body
+    assert "Migration Snapshot" in body
+    assert "<summary>Show identity and vault metadata</summary>" in body
+    assert "<summary>Show rotation and certificate metadata</summary>" in body
+    assert "<summary>Show authentication registration metadata</summary>" in body
+    assert "<summary>Show risk and audit metadata</summary>" in body
+    assert "<summary>Show authority and migration metadata</summary>" in body
+    assert "<details open" not in body
