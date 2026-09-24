@@ -155,7 +155,8 @@ body.mc-body {
   outline: 2px solid var(--mc-info);
   outline-offset: 2px;
 }
-.mc-alert-stack {
+.mc-alert-stack,
+.mc-operator-stack {
   display: grid;
   gap: 14px;
 }
@@ -407,7 +408,10 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .mc-page-jump a { min-height: 44px; padding: 8px 6px; text-align: center; }
-  .mc-alert-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-alert-priority,
+  .mc-risk-priority,
+  .mc-trade-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-operator-stack { gap: 12px; }
   .rc-card-grid, .rc-filters { grid-template-columns: 1fr; }
   .mc-nav a { min-height: 48px; }
   .mc-page-header h1 { font-size: 1.25rem; }
@@ -422,7 +426,10 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   .mc-content { padding: 12px; }
   .mc-page-jump { gap: 6px; margin-bottom: 12px; }
   .mc-page-jump a { font-size: .76rem; }
-  .mc-alert-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-alert-priority,
+  .mc-risk-priority,
+  .mc-trade-priority { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mc-operator-stack { gap: 10px; }
 }
 """ + CSS_DISCLOSURE
 
