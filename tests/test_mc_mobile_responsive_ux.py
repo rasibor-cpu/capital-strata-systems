@@ -749,7 +749,7 @@ def test_market_intelligence_mobile_priority_and_disclosure_are_read_only() -> N
     assert 'href="#mc-market-opportunities"' in body
     assert "Market Snapshot" in body
     assert "Rankings &amp; Watchlists" in body
-    assert "Opportunity Snapshot" in body
+    assert "Top Opportunity Snapshot" in body
     assert "<summary>Show full signal-surface evidence</summary>" in body
     assert "<details open" not in body
     assert "<form" not in body
@@ -784,9 +784,9 @@ def test_market_intelligence_compacts_opportunity_rows() -> None:
             }]
         },
     })
-    assert "Opportunity Snapshot" in body
+    assert "Top Opportunity Snapshot" in body
     assert "<summary>Show full opportunity evidence</summary>" in body
-    snapshot_start = body.find("Opportunity Snapshot")
+    snapshot_start = body.find("Top Opportunity Snapshot")
     full_start = body.find("<summary>Show full opportunity evidence</summary>")
     assert 0 <= snapshot_start < full_start
     compact = body[snapshot_start:full_start]
@@ -796,3 +796,32 @@ def test_market_intelligence_compacts_opportunity_rows() -> None:
     assert "runtime_id" not in compact
     assert "state_hash" not in compact
     assert "decision_hash" not in compact
+
+
+def test_market_intelligence_top_opportunity_is_vertical_mobile_snapshot() -> None:
+    body = render_market_intelligence({
+        "market_intelligence": {},
+        "opportunity_ranking": {
+            "opportunities": [{
+                "symbol": "ABC",
+                "asset_class": "EQUITY",
+                "confidence": "LOW",
+                "expected_quality": "UNKNOWN",
+                "risk": "HIGH",
+                "blocking_reason": "BLOCKED",
+                "committee_outcome": "PASS",
+                "ranking": 1,
+                "freshness": "STALE",
+                "provenance": {"large": "payload"},
+            }]
+        },
+    })
+    start = body.find("Top Opportunity Snapshot")
+    end = body.find("<summary>Show full opportunity evidence</summary>")
+    assert 0 <= start < end
+    compact = body[start:end]
+    assert "<th>opportunity_count</th><td>1</td>" in compact
+    assert "<th>symbol</th><td>ABC</td>" in compact
+    assert "<th>ranking</th><td>1</td>" in compact
+    assert "<thead>" not in compact
+    assert "provenance" not in compact
