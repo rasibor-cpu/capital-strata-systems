@@ -1295,3 +1295,28 @@ def test_system_configuration_mobile_priority_and_disclosures_are_read_only() ->
     assert "<th>configuration_editing</th><td>DISABLED</td>" in body
     assert "<th>live_limit_editing</th><td>DISABLED</td>" in body
     assert "<details open" not in body
+
+
+def test_system_configuration_uses_explicit_fail_closed_secondary_states() -> None:
+    body = render_system_configuration({
+        "configuration": {
+            "runtime_mode": "DISABLED",
+            "engine_mode": "UNAVAILABLE",
+            "cycle_mode": "DATA UNAVAILABLE",
+            "selected_broker": "COINBASE",
+        },
+        "configuration_console": {
+            "editing_enabled": False,
+            "environment_classification": "DISABLED",
+        },
+        "feature_flags_console": {"editing_enabled": False},
+        "rollback_console": {
+            "eligible_targets": [],
+            "planning_only": True,
+            "perform_available": False,
+        },
+    })
+    assert '<span>Cycle Mode</span><strong>DATA UNAVAILABLE</strong><em class="mc-status bad">DATA UNAVAILABLE</em>' in body
+    assert '<span>Environment</span><strong>DISABLED</strong><em class="mc-status bad">DISABLED</em>' in body
+    assert "<th>planning_posture</th><td>PLANNING_ONLY</td>" in body
+    assert "<th>planning_only</th><td>True</td>" not in body
