@@ -897,3 +897,52 @@ def test_audit_explainability_mobile_hierarchy_and_disclosures_are_read_only() -
     assert "<details open" not in body
     assert "<form" not in body
     assert "method=" not in body
+
+
+def test_audit_explainability_compacts_committee_guidance_and_consistency() -> None:
+    body = render_audit_explainability({
+        "committee_view": {
+            "committees": [{
+                "committee": "Risk Committee",
+                "outcome": "NOT EVALUATED",
+                "reason": "DATA UNAVAILABLE",
+                "freshness": "DATA UNAVAILABLE",
+                "source": "RUNTIME",
+                "source_module": "module",
+                "provenance": {"large": "payload"},
+                "runtime_id": "runtime",
+                "state_hash": "hash",
+            }]
+        },
+        "recommendation_panel": {
+            "recommendations": [{
+                "action": "Increase evidence",
+                "reason": "BLOCKED",
+                "authority": "ADVISORY_ONLY",
+                "changes_execution": False,
+            }]
+        },
+        "evidence_graph": {
+            "status": "PASS",
+            "source_consistency": {"runtime_id": "runtime", "state_hash": "hash", "decision_id": "decision:latest"},
+            "nodes": [1, 2],
+            "edges": [1],
+        },
+        "counterfactuals": {"counterfactuals": []},
+        "audit": {"warnings": [], "failures": []},
+    })
+    committee_start = body.find("Committee Snapshot")
+    guidance_start = body.find("Operator Guidance")
+    committee_compact = body[committee_start:guidance_start]
+    assert "Risk Committee" in committee_compact
+    assert "NOT EVALUATED" in committee_compact
+    assert "provenance" not in committee_compact
+    assert "runtime_id" not in committee_compact
+    assert "state_hash" not in committee_compact
+    assert "<th>top_action</th><td>Increase evidence</td>" in body
+    assert "<th>top_reason</th><td>BLOCKED</td>" in body
+    evidence_start = body.find("Evidence Snapshot")
+    counterfactual_start = body.find("<summary>Show counterfactual evidence</summary>")
+    compact_evidence = body[evidence_start:counterfactual_start]
+    assert "<th>source_consistency</th><td>RECORDED</td>" in compact_evidence
+    assert "decision:latest" not in compact_evidence
