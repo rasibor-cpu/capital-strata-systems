@@ -1130,3 +1130,19 @@ def test_options_income_compact_lifecycle_and_run_rate_do_not_dump_nested_payloa
     assert "assumptions" not in run
     assert "warnings" not in run
     assert "<summary>Show premium/collateral/allocation evidence</summary>" in body
+
+
+def test_reports_mobile_metrics_and_touch_targets_are_prioritized() -> None:
+    from dashboard.mission_control.pages.reports_center import _metrics
+    body = _metrics(
+        {"total_registered": 12, "archive_health": {"recent_count": 3, "failed_count": 1}, "email_policy_default": "DISABLED"},
+        {"reports_view": True, "reports_generate": False},
+    )
+    assert 'aria-label="Reports priority metrics"' in body
+    assert 'aria-label="Reports secondary metrics"' in body
+    assert "mc-metric-grid-priority" in body
+    assert "mc-metric-grid-secondary" in body
+
+    from dashboard.mission_control.theme import MISSION_CONTROL_CSS
+    assert ".rc-subnav-link { min-height:44px;" in MISSION_CONTROL_CSS
+    assert ".rc-actions .rc-btn { min-height:44px;" in MISSION_CONTROL_CSS
