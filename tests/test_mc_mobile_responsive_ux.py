@@ -449,7 +449,8 @@ def test_trade_operations_adds_compact_decision_snapshot_and_trace_summary() -> 
     assert "Decision Trace Evidence (Full)" in body
     summary_start = body.find("Decision Trace Summary")
     full_start = body.find("Decision Trace Evidence (Full)")
-    assert 0 <= summary_start < full_start
+    decision_full_start = body.find("Decision Evidence (Full)")
+    assert 0 <= summary_start < full_start < decision_full_start
     compact = body[summary_start:full_start]
     assert "Market Regime" in compact
     assert "DISABLED" in compact
