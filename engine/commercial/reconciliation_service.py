@@ -32,6 +32,8 @@ class ReconciliationException:
     exception_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime = field(default_factory=datetime.utcnow)
     resolved_at: Optional[datetime] = None
+    resolution_reference: Optional[str] = None
+    resolved_by: Optional[str] = None
 
 
 class ReconciliationService:
@@ -55,6 +57,25 @@ class ReconciliationService:
             self._raise(collection, name, expected, observed)
             return ReconciliationState.EXCEPTION
         return ReconciliationState.MATCHED
+
+    def resolve_exception(self, exception_id: str, *, resolved_by: str, resolution_reference: str) -> ReconciliationException:
+        if not resolved_by or not resolution_reference:
+            raise ValueError("resolver and resolution reference required")
+        matches = [item for item in self.exceptions.values() if item.exception_id == exception_id]
+        if not matches:
+            raise KeyError(exception_id)
+        item = matches[0]
+        if item.resolved_at is not None:
+            if item.resolved_by != resolved_by or item.resolution_reference != resolution_reference:
+                raise ValueError("resolved exception is immutable")
+            return item
+        item.resolved_at = datetime.utcnow()
+        item.resolved_by = resolved_by
+        item.resolution_reference = resolution_reference
+        return item
+
+    def open_exceptions(self):
+        return [item for item in self.exceptions.values() if item.resolved_at is None]
 
     def _raise(self, collection, reason, expected, observed):
         key = f"{collection.collection_id}:{reason}:{expected}:{observed}"
