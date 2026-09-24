@@ -102,6 +102,26 @@ class CollectionService:
         collection.ledger_txn_id = txn.ledger_txn_id
         return txn
 
+    def post_provider_fee(
+        self, collection: CollectionTransaction, fee_amount: Decimal, provider_name: str
+    ) -> LedgerTransaction:
+        """Recognize provider processing cost only after provider settlement."""
+        if collection.status != CollectionStatus.SETTLED or not collection.settlement_reference:
+            raise InvalidCollectionTransition("provider fee requires SETTLED provider state")
+        if fee_amount <= Decimal("0") or fee_amount > collection.amount:
+            raise ValueError("provider fee must be positive and no greater than collection amount")
+        if not provider_name:
+            raise ValueError("provider name required")
+        event = f"PROVIDER_FEE:{provider_name}:{fee_amount}"
+        return self._post_once_amount(
+            collection,
+            amount=fee_amount,
+            economic_event=event,
+            debit_account=f"EXPENSE:PAYMENT_PROVIDER:{collection.currency}",
+            credit_account=f"CASH:PROVIDER_CLEARING:{collection.currency}",
+            txn_type="PROVIDER_FEE",
+        )
+
     def post_terminal_adjustment(self, collection: CollectionTransaction) -> LedgerTransaction:
         """Reverse recognized fee/receivable for a settled terminal event."""
         if collection.status not in {
@@ -126,6 +146,29 @@ class CollectionService:
             raise ValueError("reconciliation reference required")
         collection.reconciled_at = datetime.utcnow()
         collection.meta["reconciliation_reference"] = reconciliation_reference
+
+    def _post_once_amount(
+        self, collection: CollectionTransaction, *, amount: Decimal,
+        economic_event: str, debit_account: str, credit_account: str, txn_type: str,
+    ) -> LedgerTransaction:
+        event_key = f"{collection.collection_id}:{economic_event}"
+        for txn in self.ledger.transactions.values():
+            if txn.meta.get("economic_event_key") == event_key:
+                return txn
+        txn = LedgerTransaction(
+            txn_type=txn_type,
+            meta={"economic_event_key": event_key, "collection_id": collection.collection_id,
+                  "obligation_id": collection.obligation_id, "customer_id": collection.customer_id},
+        )
+        txn.entries = [
+            LedgerEntry(ledger_txn_id=txn.ledger_txn_id, account_id=debit_account, debit=amount,
+                        currency=collection.currency, counterparty_id=collection.customer_id, memo=economic_event),
+            LedgerEntry(ledger_txn_id=txn.ledger_txn_id, account_id=credit_account, credit=amount,
+                        currency=collection.currency, counterparty_id=collection.customer_id, memo=economic_event),
+        ]
+        self._assert_balanced(txn)
+        self.ledger.add_transaction(txn)
+        return txn
 
     def _post_once(
         self,
