@@ -15,6 +15,10 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
+def _metric_status(value: object) -> object:
+    return "UNAVAILABLE" if value in (None, "") else value
+
+
 def _runtime_snapshot(runtime: dict) -> dict:
     return {
         "uptime": runtime.get("uptime"),
@@ -47,19 +51,20 @@ def render(state: dict) -> str:
           '</nav>'
         + metric_grid(
             (
-                ("Runtime Status", runtime.get("runtime_status"), runtime.get("runtime_status")),
-                ("Heartbeat", runtime.get("heartbeat"), runtime.get("heartbeat_status")),
-                ("Certification", subsystem.get("certification"), subsystem.get("certification")),
-                ("Runtime Mode", runtime.get("runtime_mode"), runtime.get("runtime_mode")),
+                ("Runtime Status", runtime.get("runtime_status"), _metric_status(runtime.get("runtime_status"))),
+                ("Heartbeat Status", runtime.get("heartbeat_status"), _metric_status(runtime.get("heartbeat_status"))),
+                ("Certification", subsystem.get("certification"), _metric_status(subsystem.get("certification"))),
+                ("Runtime Mode", runtime.get("runtime_mode"), _metric_status(runtime.get("runtime_mode"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-runtime-priority",
             aria_label="Runtime Operations priority",
         )
         + metric_grid(
             (
-                ("Engine Mode", runtime.get("engine_mode"), "neutral"),
+                ("Engine Mode", runtime.get("engine_mode"), _metric_status(runtime.get("engine_mode"))),
                 ("Cycle", runtime.get("cycle"), "neutral"),
-                ("Source", runtime.get("source"), runtime.get("source")),
+                ("Heartbeat At", runtime.get("heartbeat"), "neutral"),
+                ("Source", runtime.get("source"), "neutral"),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Runtime Operations secondary metrics",
