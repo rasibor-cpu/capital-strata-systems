@@ -11,6 +11,40 @@ def _metric_status(value: object) -> object:
     return "UNAVAILABLE" if value in (None, "") else value
 
 
+def _decision_snapshot(decision: dict) -> dict:
+    decisions = decision.get("decisions")
+    latest = decisions[0] if isinstance(decisions, list) and decisions and isinstance(decisions[0], dict) else {}
+    return {
+        "status": decision.get("status"),
+        "reason": decision.get("reason"),
+        "symbol": latest.get("symbol"),
+        "asset_class": latest.get("asset_class"),
+        "decision": latest.get("decision"),
+        "quality_score": latest.get("quality_score"),
+        "confidence": latest.get("confidence"),
+        "generated_at": latest.get("generated_at") or latest.get("generated_timestamp"),
+        "freshness": latest.get("freshness"),
+        "read_only": decision.get("read_only"),
+    }
+
+
+def _trace_summary_rows(trace: dict) -> list[dict]:
+    stages = trace.get("stages")
+    if not isinstance(stages, list):
+        return []
+    rows = []
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        rows.append({
+            "stage": stage.get("stage"),
+            "status": stage.get("status"),
+            "reason": stage.get("reason"),
+            "freshness": stage.get("freshness"),
+        })
+    return rows
+
+
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
@@ -58,13 +92,13 @@ def render(state: dict) -> str:
         + _anchor_panel("mc-trade-position-value", detail_table("Position Value", balances.get("position_value", {})))
         + _anchor_panel("mc-trade-collateral", detail_table("Collateral / Margin", balances.get("collateral_margin", {})))
         + _anchor_panel("mc-trade-context", detail_table("Account Context", account_context))
-        + _anchor_panel("mc-trade-decisions", detail_table("Decision Panel", {
-            "status": decision.get("status"),
-            "reason": decision.get("reason"),
+        + _anchor_panel("mc-trade-decisions", detail_table("Decision Snapshot", _decision_snapshot(decision)))
+        + _anchor_panel("mc-trade-trace-summary", detail_table("Decision Trace Summary", _trace_summary_rows(trace)))
+        + _anchor_panel("mc-trade-decision-evidence", detail_table("Decision Evidence (Full)", {
             "decisions": decision.get("decisions"),
             "read_only": decision.get("read_only"),
         }))
-        + _anchor_panel("mc-trade-trace", detail_table("Decision Trace", trace.get("stages", [])))
+        + _anchor_panel("mc-trade-trace", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
         + _anchor_panel("mc-trade-execution", detail_table("Execution Committee", {
             "execution_quality": committee.get("execution_quality"),
             "latency": committee.get("latency"),
