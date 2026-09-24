@@ -1320,8 +1320,12 @@ def test_system_configuration_uses_explicit_fail_closed_secondary_states() -> No
     })
     assert '<span>Cycle Mode</span><strong>DATA UNAVAILABLE</strong><em class="mc-status bad">DATA UNAVAILABLE</em>' in body
     assert '<span>Environment</span><strong>DISABLED</strong><em class="mc-status bad">DISABLED</em>' in body
-    assert "<th>planning_posture</th><td>PLANNING_ONLY</td>" in body
-    assert "<th>planning_only</th><td>True</td>" not in body
+    rollback_start = body.find("Rollback Snapshot")
+    evidence_start = body.find("<summary>Show limit and feature evidence</summary>")
+    rollback_snapshot = body[rollback_start:evidence_start]
+    assert "<th>planning_posture</th><td>PLANNING_ONLY</td>" in rollback_snapshot
+    assert "<th>planning_only</th><td>True</td>" not in rollback_snapshot
+    assert "<th>planning_only</th><td>True</td>" in body
 
 
 def test_documentation_runbooks_mobile_compacts_indexes() -> None:
