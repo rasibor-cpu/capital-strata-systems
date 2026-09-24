@@ -22,6 +22,7 @@ from dashboard.mission_control.pages.users_governance import render as render_us
 from dashboard.mission_control.pages.system_configuration import render as render_system_configuration
 from dashboard.mission_control.pages.documentation_runbooks import render as render_documentation_runbooks
 from dashboard.mission_control.pages.enterprise_governance import render as render_enterprise_governance
+from dashboard.mission_control.pages.credential_governance import render as render_credential_governance
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1423,3 +1424,29 @@ def test_status_class_treats_missing_evidence_as_bad() -> None:
     assert status_class("EVIDENCE_MISSING") == "bad"
     assert status_class("DATA_MISSING") == "bad"
     assert status_class("MISSING") == "bad"
+
+
+def test_credential_governance_mobile_compacts_redacted_metadata() -> None:
+    body = render_credential_governance({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "credential_governance": {
+            "vault_health": {"status": "PASS"},
+            "credential_inventory": [{"vcid": "cred-1", "health": "PASS"}],
+            "rotation_queue": [],
+            "expiring_soon": [],
+            "audit_events": [{"event": "checked"}],
+            "dependency_graph": {"cred-1": ["service-a"]},
+            "compliance": {"outcome": "PASS"},
+        },
+    })
+    assert 'aria-label="Credential Governance sections"' in body
+    assert 'aria-label="Credential Governance priority"' in body
+    assert "Credential Governance Snapshot" in body
+    assert "Rotation Snapshot" in body
+    assert "Compliance Snapshot" in body
+    assert "<summary>Show credential inventory metadata</summary>" in body
+    assert "<summary>Show selected credential metadata</summary>" in body
+    assert "<summary>Show rotation and expiry metadata</summary>" in body
+    assert "<summary>Show audit and dependency metadata</summary>" in body
+    assert "<summary>Show compliance metadata</summary>" in body
+    assert "<details open" not in body
