@@ -1398,8 +1398,19 @@ def test_enterprise_governance_missing_evidence_does_not_render_reassuring_zeroe
             "compliance_posture": "EVIDENCE_MISSING",
         },
     })
-    assert '<span>Overall Readiness</span><strong>0%</strong><em class="mc-status bad">EVIDENCE_MISSING</em>' in body
-    assert '<span>Governance Score</span><strong>0%</strong><em class="mc-status bad">EVIDENCE_MISSING</em>' in body
+    overall_start = body.find("<span>Overall Readiness</span>")
+    broker_start = body.find("<span>Broker Readiness</span>")
+    overall_card = body[overall_start:broker_start]
+    assert "<strong>0%</strong>" in overall_card
+    assert 'class="mc-status bad"' in overall_card
+    assert "EVIDENCE_MISSING" in overall_card
+
+    governance_start = body.find("<span>Governance Score</span>")
+    iso_start = body.find("<span>ISO 27001</span>")
+    governance_card = body[governance_start:iso_start]
+    assert "<strong>0%</strong>" in governance_card
+    assert 'class="mc-status bad"' in governance_card
+    assert "EVIDENCE_MISSING" in governance_card
     assert '<span>Critical Risks</span><strong>EVIDENCE_MISSING</strong>' in body
     assert "<th>risk_register_count</th><td>EVIDENCE_MISSING</td>" in body
     assert "<th>blocker_count</th><td>EVIDENCE_MISSING</td>" in body
