@@ -19,6 +19,10 @@ def _control_state(value: object) -> str:
     return "ENABLED" if value is True else "DISABLED" if value is False else "UNAVAILABLE"
 
 
+def _planning_state(value: object) -> str:
+    return "PLANNING_ONLY" if value is True else "NOT_PLANNING_ONLY" if value is False else "UNAVAILABLE"
+
+
 def render(state: dict) -> str:
     config = section(state, "configuration")
     console = section(state, "configuration_console")
@@ -46,8 +50,8 @@ def render(state: dict) -> str:
         )
         + metric_grid(
             (
-                ("Cycle Mode", config.get("cycle_mode"), "neutral"),
-                ("Environment", console.get("environment_classification"), "neutral"),
+                ("Cycle Mode", config.get("cycle_mode"), config.get("cycle_mode")),
+                ("Environment", console.get("environment_classification"), console.get("environment_classification")),
                 ("Rollback Perform", _control_state(rollback.get("perform_available")), _control_state(rollback.get("perform_available"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
@@ -67,7 +71,7 @@ def render(state: dict) -> str:
             "live_limit_editing": "DISABLED",
         }))
         + _anchor_panel("mc-config-rollback", detail_table("Rollback Snapshot", {
-            "planning_only": rollback.get("planning_only"),
+            "planning_posture": _planning_state(rollback.get("planning_only")),
             "perform_available": _control_state(rollback.get("perform_available")),
             "eligible_target_count": len(rollback.get("eligible_targets", [])) if isinstance(rollback.get("eligible_targets"), list) else 0,
         }))
