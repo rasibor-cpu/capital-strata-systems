@@ -7,9 +7,26 @@ from dashboard.mission_control.pages._components import (
     detail_table,
     metric_grid,
     page_header,
-    split_panels,
     warning_banner,
 )
+
+
+def _anchor_panel(anchor: str, content: str) -> str:
+    return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
+
+
+def _evidence_panel(anchor: str, title: str, content: str) -> str:
+    return (
+        f'<div class="mc-section-anchor mc-evidence-disclosure" id="{anchor}">'
+        f'<details><summary>{title}</summary>{content}</details>'
+        '</div>'
+    )
+
+
+def _count(value: object) -> object:
+    if isinstance(value, list):
+        return len(value)
+    return "UNAVAILABLE"
 
 
 def render(state: dict) -> str:
@@ -58,44 +75,57 @@ def render(state: dict) -> str:
             "Readiness evidence is not ISO certification or production authorization.",
             status="warn",
         )
+        + '<nav class="mc-page-jump" aria-label="Executive Governance sections">'
+          '<a href="#mc-gov-status">Status</a>'
+          '<a href="#mc-gov-risk">Risk</a>'
+          '<a href="#mc-gov-blockers">Blockers</a>'
+          '<a href="#mc-gov-evidence">Evidence</a>'
+          '</nav>'
         + metric_grid(
             (
-                (
-                    "Overall Readiness",
-                    f"{data.get('overall_certification_readiness', 0)}%",
-                    "neutral",
-                ),
-                (
-                    "Governance Score",
-                    f"{data.get('governance_score', 0)}%",
-                    "neutral",
-                ),
-                ("ISO 27001", f"{iso27001.get('percentage', 0)}%", "neutral"),
-                ("ISO 9001", f"{iso9001.get('percentage', 0)}%", "neutral"),
+                ("Overall Readiness", f"{data.get('overall_certification_readiness', 0)}%", data.get("status") or "neutral"),
                 ("Broker Readiness", data.get("broker_readiness"), data.get("broker_readiness")),
                 ("Runtime Readiness", data.get("runtime_readiness"), data.get("runtime_readiness")),
-                ("Security", data.get("security_posture"), data.get("security_posture")),
-                ("Compliance", data.get("compliance_posture"), data.get("compliance_posture")),
-                ("Critical Risks", risk.get("critical_count", 0), "warning"),
                 ("Execution", "BLOCKED", "blocked"),
-            )
-        )
-        + split_panels(
-            detail_table("Governance Domains", data.get("domains", {})),
-            detail_table("ISO 27001 Readiness", iso27001),
-            detail_table("ISO 9001 Readiness", iso9001),
-            detail_table("Business Continuity", continuity),
-            detail_table("Enterprise Risk Summary", risk),
-            detail_table(
-                "Enterprise Risk Register",
-                data.get("enterprise_risk_register", []),
             ),
-            detail_table("Certification Evidence", certification),
-            detail_table(
-                "Outstanding Certification Blockers",
-                {"blockers": data.get("outstanding_blockers", [])},
-            ),
+            css_class="mc-metric-grid mc-metric-grid-priority mc-gov-priority",
+            aria_label="Executive Governance priority",
         )
+        + metric_grid(
+            (
+                ("Governance Score", f"{data.get('governance_score', 0)}%", "neutral"),
+                ("ISO 27001", f"{iso27001.get('percentage', 0)}%", "neutral"),
+                ("ISO 9001", f"{iso9001.get('percentage', 0)}%", "neutral"),
+                ("Critical Risks", risk.get("critical_count", 0), "warning"),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-secondary",
+            aria_label="Executive Governance secondary metrics",
+        )
+        + '<div class="mc-operator-stack">'
+        + _anchor_panel("mc-gov-status", detail_table("Governance Snapshot", {
+            "security_posture": data.get("security_posture"),
+            "compliance_posture": data.get("compliance_posture"),
+            "governance_score": data.get("governance_score"),
+            "overall_certification_readiness": data.get("overall_certification_readiness"),
+            "broker_readiness": data.get("broker_readiness"),
+            "runtime_readiness": data.get("runtime_readiness"),
+        }))
+        + _anchor_panel("mc-gov-risk", detail_table("Enterprise Risk Snapshot", {
+            "critical_count": risk.get("critical_count"),
+            "high_count": risk.get("high_count"),
+            "medium_count": risk.get("medium_count"),
+            "low_count": risk.get("low_count"),
+            "risk_register_count": _count(data.get("enterprise_risk_register")),
+        }))
+        + _anchor_panel("mc-gov-blockers", detail_table("Certification Blockers Snapshot", {
+            "blocker_count": _count(data.get("outstanding_blockers")),
+            "blockers": data.get("outstanding_blockers", []),
+        }))
+        + _evidence_panel("mc-gov-evidence", "Show governance-domain evidence", detail_table("Governance Domains", data.get("domains", {})))
+        + _evidence_panel("mc-gov-iso", "Show ISO readiness evidence", detail_table("ISO 27001 Readiness", iso27001) + detail_table("ISO 9001 Readiness", iso9001))
+        + _evidence_panel("mc-gov-continuity", "Show continuity and risk evidence", detail_table("Business Continuity", continuity) + detail_table("Enterprise Risk Summary", risk) + detail_table("Enterprise Risk Register", data.get("enterprise_risk_register", [])))
+        + _evidence_panel("mc-gov-certification", "Show certification evidence", detail_table("Certification Evidence", certification))
+        + '</div>'
     )
 
 
