@@ -524,3 +524,27 @@ def test_trade_operations_adds_compact_position_snapshot() -> None:
         assert key in compact
     assert "provenance" not in compact
     assert "state_hash" not in compact
+
+
+def test_trade_full_evidence_is_collapsed_by_default() -> None:
+    body = render_trade_operations({
+        "trading": {"execution_status": "BLOCKED"},
+        "decision_panel": {"status": "BLOCKED", "read_only": True, "decisions": []},
+        "decision_trace": {"stages": []},
+        "broker_balance_summary": {},
+    })
+    assert 'class="mc-section-anchor mc-evidence-disclosure"' in body
+    assert "<details>" in body
+    assert "<summary>Show full account evidence</summary>" in body
+    assert "<summary>Show full position-value evidence</summary>" in body
+    assert "<summary>Show full collateral / margin evidence</summary>" in body
+    assert "<summary>Show full decision trace evidence</summary>" in body
+    assert "<summary>Show full decision evidence</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
+
+
+def test_trade_evidence_disclosure_has_touch_target_css() -> None:
+    assert ".mc-evidence-disclosure summary" in MISSION_CONTROL_CSS
+    assert "min-height: 44px" in MISSION_CONTROL_CSS
