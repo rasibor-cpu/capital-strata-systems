@@ -26,21 +26,21 @@ def render(state: dict) -> str:
                 ("Risk State", risk.get("overall_risk_state"), risk.get("overall_risk_state")),
                 ("Unified Gate", risk.get("unified_trade_gate"), risk.get("unified_trade_gate")),
                 ("Kill Switch", risk.get("kill_switch"), risk.get("kill_switch")),
-                ("Drawdown", risk.get("drawdown"), "neutral"),
+                ("Drawdown", risk.get("drawdown"), risk.get("drawdown")),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-risk-priority",
             aria_label="Risk Command priority",
         )
         + metric_grid(
             (
-                ("Risk Score", risk.get("risk_score"), "neutral"),
-                ("Exposure", risk.get("exposure"), "neutral"),
+                ("Risk Score", risk.get("risk_score"), risk.get("risk_score")),
+                ("Exposure", risk.get("exposure"), risk.get("exposure")),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Risk Command secondary metrics",
         )
         + '<div class="mc-operator-stack">'
-        + _anchor_panel("mc-risk-limits", detail_table("Limit And Stress", {
+        + _anchor_panel("mc-risk-limits", detail_table("Limits & Stress", {
             "limit_breaches": risk.get("limit_breaches"),
             "warnings": risk.get("warnings"),
             "stress_tests": risk.get("stress_tests"),
