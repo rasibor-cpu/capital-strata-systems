@@ -1146,3 +1146,46 @@ def test_reports_mobile_metrics_and_touch_targets_are_prioritized() -> None:
     from dashboard.mission_control.theme import MISSION_CONTROL_CSS
     assert ".rc-subnav-link { min-height:44px;" in MISSION_CONTROL_CSS
     assert ".rc-actions .rc-btn { min-height:44px;" in MISSION_CONTROL_CSS
+
+
+def test_reports_mobile_shortlist_and_library_are_compact() -> None:
+    from dashboard.mission_control.pages.reports_center import _frequently_used, _library_panel
+
+    reports = [
+        {
+            "report_code": f"r{i}",
+            "title": f"Report {i}",
+            "status": "AVAILABLE",
+            "supported_formats": ["PDF"],
+            "required_view_permission": "reports_view",
+            "required_generate_permission": "reports_generate",
+            "required_print_permission": "reports_print_all",
+            "generatable": True,
+        }
+        for i in range(12)
+    ]
+    frequent = _frequently_used(reports, True)
+    assert "More generatable reports" in frequent
+    assert frequent.count('class="rc-card"') == 12
+
+    home = {
+        "recent_reports": [
+            {
+                "report_id": f"id{i}",
+                "report_type": "type",
+                "report_status": "FINAL",
+                "report_date": "2026-09-24",
+                "report_version": "v001",
+            }
+            for i in range(9)
+        ],
+        "report_generation_failures": [],
+        "latest_daily_executive_brief": {"status": "UNAVAILABLE"},
+        "executive_brief_readiness": {"status": "WAITING", "waiting_for": ["market_snapshot"]},
+    }
+    library = _library_panel(home)
+    assert "Recent reports <span class=\"rc-muted\">(latest 5)</span>" in library
+    assert "id0" in library and "id4" in library
+    assert "id5" not in library
+    assert "<pre class=\"rc-result\">" not in library
+    assert "<dt>status</dt><dd>UNAVAILABLE</dd>" in library
