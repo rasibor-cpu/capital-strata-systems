@@ -243,12 +243,26 @@ def _report_card(report: dict, can_generate: bool) -> str:
 
 
 def _frequently_used(generatable: list[dict], can_generate: bool) -> str:
-    cards = "".join(_report_card(r, can_generate) for r in generatable[:12])
+    primary = "".join(_report_card(r, can_generate) for r in generatable[:4])
+    additional = "".join(_report_card(r, can_generate) for r in generatable[4:12])
+    more = (
+        render_disclosure(
+            title="More generatable reports",
+            body_html=f'<div class="rc-card-grid">{additional}</div>',
+            panel_id="rc-frequent-more-panel",
+            anchor_id="rc-frequent-more",
+            meta=f"{min(max(len(generatable) - 4, 0), 8)} more shown",
+            open_by_default=False,
+            class_name="css-disclosure rc-category-disclosure",
+        )
+        if additional
+        else ""
+    )
     return (
         '<section class="mc-panel" id="rc-frequent" aria-label="Frequently used reports">'
         "<h2>Frequently Used / Generatable</h2>"
-        "<p class='rc-muted'>Click a title or View to inspect readiness. Generate opens Create Report with the code preselected.</p>"
-        f'<div class="rc-card-grid">{cards}</div></section>'
+        "<p class='rc-muted'>Top reports are shown first. Expand for additional generatable reports.</p>"
+        f'<div class="rc-card-grid">{primary}</div>{more}</section>'
     )
 
 
@@ -282,6 +296,22 @@ def _create_panel(generatable: list[dict], can_generate: bool) -> str:
 """
 
 
+def _latest_brief_summary(latest: dict) -> str:
+    if not isinstance(latest, dict):
+        latest = {}
+    fields = (
+        ("status", latest.get("status")),
+        ("report_id", latest.get("report_id")),
+        ("report_date", latest.get("report_date")),
+        ("report_version", latest.get("report_version")),
+    )
+    rows = "".join(
+        f"<div><dt>{_esc(label)}</dt><dd>{_esc(value if value not in (None, '') else 'UNAVAILABLE')}</dd></div>"
+        for label, value in fields
+    )
+    return f'<dl class="rc-meta rc-brief-summary">{rows}</dl>'
+
+
 def _library_panel(home: dict) -> str:
     recent = home.get("recent_reports") or []
     failed = home.get("report_generation_failures") or []
@@ -306,7 +336,7 @@ def _library_panel(home: dict) -> str:
           <td>{_esc(r.get('report_date'))}</td>
           <td>{_esc(r.get('report_version'))}</td>
         </tr>"""
-        for r in recent[:20]
+        for r in recent[:5]
     ) or "<tr><td colspan='5'>No archived reports yet.</td></tr>"
     failed_rows = "".join(
         f"<tr><td>{_esc(r.get('report_id'))}</td><td>{_esc(r.get('report_type'))}</td><td>{_esc(r.get('report_status'))}</td></tr>"
@@ -322,8 +352,8 @@ def _library_panel(home: dict) -> str:
   </div>
   <h3>Latest Daily Executive Brief</h3>
   {readiness_block}
-  <pre class="rc-result">{_esc(json.dumps(latest, indent=2, default=str))}</pre>
-  <h3>Recent reports</h3>
+  {_latest_brief_summary(latest)}
+  <h3>Recent reports <span class="rc-muted">(latest 5)</span></h3>
   <div class="rc-table-wrap"><table class="rc-table"><thead><tr><th>ID</th><th>Type</th><th>Status</th><th>Date</th><th>Version</th></tr></thead><tbody id="rc-library-body">{recent_rows}</tbody></table></div>
   <h3>Generation failures</h3>
   <div class="rc-table-wrap"><table class="rc-table"><thead><tr><th>ID</th><th>Type</th><th>Status</th></tr></thead><tbody>{failed_rows}</tbody></table></div>
@@ -563,7 +593,7 @@ def _scripts() -> str:
       const body = document.getElementById('rc-library-body');
       if (!body) return;
       const reports = data.reports || [];
-      body.innerHTML = reports.slice(0, 20).map((r) =>
+      body.innerHTML = reports.slice(0, 5).map((r) =>
         '<tr><td><button type="button" class="rc-linkish" data-rc-action="open-report" data-report-id="' +
         String(r.report_id || '').replace(/"/g, '') + '">' + String(r.report_id || '') +
         '</button></td><td>' + String(r.report_type || '') + '</td><td>' + String(r.report_status || '') +
