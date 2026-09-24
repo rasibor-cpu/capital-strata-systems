@@ -10,6 +10,7 @@ from dashboard.mission_control.pages.executive_overview import render as render_
 from dashboard.mission_control.pages.alerts_incidents import render as render_alerts_incidents
 from dashboard.mission_control.pages.risk_command import render as render_risk_command
 from dashboard.mission_control.pages.trade_operations import render as render_trade_operations
+from dashboard.mission_control.pages.runtime_operations import render as render_runtime_operations
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -591,3 +592,39 @@ def test_trade_operations_compacts_execution_and_lifecycle() -> None:
     assert "5353" in compact
     assert "state_hash" not in compact
     assert "provenance" not in compact
+
+
+def test_runtime_operations_mobile_priority_and_disclosures_are_read_only() -> None:
+    body = render_runtime_operations({
+        "runtime": {
+            "runtime_status": "DISABLED",
+            "runtime_mode": "ADVISORY",
+            "engine_mode": "PAPER",
+            "cycle": 12,
+            "heartbeat": "STALE",
+            "heartbeat_status": "FAIL_CLOSED",
+            "source": "RUNTIME",
+            "subsystem_health": {"certification": "NOT_READY"},
+            "controls": {"execution": "DISABLED"},
+        },
+        "system_metrics": {"cpu": "12%", "memory": "40%"},
+        "operations_timeline": {"events": [{"event": "sample"}]},
+        "event_stream": {"event_count": 1, "alert_count": 1, "queue_depth": 0, "source": "RUNTIME"},
+        "source_consistency": {"status": "UNKNOWN"},
+    })
+    assert 'aria-label="Runtime Operations sections"' in body
+    assert 'aria-label="Runtime Operations priority"' in body
+    assert 'href="#mc-runtime-health"' in body
+    assert 'href="#mc-runtime-metrics"' in body
+    assert 'href="#mc-runtime-timeline"' in body
+    assert 'href="#mc-runtime-evidence"' in body
+    assert body.find("<span>Runtime Status</span>") < body.find("<span>Engine Mode</span>")
+    assert "Runtime Snapshot" in body
+    assert "System Metrics" in body
+    assert "<summary>Show operations timeline</summary>" in body
+    assert "<summary>Show source-consistency evidence</summary>" in body
+    assert "<summary>Show full runtime counter evidence</summary>" in body
+    assert "<summary>Show disabled controls</summary>" in body
+    assert "<details open" not in body
+    assert "<form" not in body
+    assert "method=" not in body
