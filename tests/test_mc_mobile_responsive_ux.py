@@ -497,3 +497,30 @@ def test_trade_operations_adds_compact_account_and_margin_snapshots() -> None:
     assert "393.3379" in compact
     assert "provenance" not in compact
     assert "state_hash" not in compact
+
+
+def test_trade_operations_adds_compact_position_snapshot() -> None:
+    body = render_trade_operations({
+        "trading": {"execution_status": "BLOCKED"},
+        "decision_panel": {"status": "BLOCKED"},
+        "broker_balance_summary": {
+            "position_value": {
+                "EQUITIES": {"availability_state": "UNAVAILABLE"},
+                "CRYPTO": {"availability_state": "UNAVAILABLE"},
+                "FX": {"availability_state": "UNAVAILABLE"},
+                "OPTIONS": {"availability_state": "UNAVAILABLE"},
+                "FUTURES": {"availability_state": "UNAVAILABLE"},
+                "TOTAL_INVESTED_VALUE": {"availability_state": "UNAVAILABLE"},
+            }
+        },
+    })
+    assert "Position Snapshot" in body
+    assert "Position Value Evidence (Full)" in body
+    snapshot_start = body.find("Position Snapshot")
+    evidence_start = body.find("Position Value Evidence (Full)")
+    assert 0 <= snapshot_start < evidence_start
+    compact = body[snapshot_start:evidence_start]
+    for key in ("equities", "crypto", "fx", "options", "futures", "total_invested_value"):
+        assert key in compact
+    assert "provenance" not in compact
+    assert "state_hash" not in compact
