@@ -33,6 +33,39 @@ def test_min_password_length_is_twelve():
     assert auth.MIN_PASSWORD_LENGTH == 12
 
 
+def test_password_hashes_are_salted_pbkdf2_records():
+    first = auth.hash_password("UniquePassword!42")
+    second = auth.hash_password("UniquePassword!42")
+    assert first.startswith("pbkdf2_sha256$")
+    assert second.startswith("pbkdf2_sha256$")
+    assert first != second
+    assert auth.verify_password("UniquePassword!42", first) is True
+    assert auth.verify_password("wrong-password", first) is False
+
+
+def test_recovery_hashes_are_salted_and_normalized():
+    first = auth.hash_recovery_answer("  Toronto  ")
+    second = auth.hash_recovery_answer("toronto")
+    assert first.startswith("pbkdf2_sha256$")
+    assert second.startswith("pbkdf2_sha256$")
+    assert first != second
+    assert auth.verify_recovery_answer("TORONTO", first) is True
+    assert auth.verify_recovery_answer("Ottawa", first) is False
+
+
+def test_legacy_sha256_password_verifies_and_upgrades_on_login(tmp_path, monkeypatch):
+    users = _seed_user(tmp_path, monkeypatch)
+    record = users["00000"]
+    record["password_hash"] = auth._legacy_sha256("StrongBootstrap!9")
+    record["must_change_password"] = False
+    record["last_password_change"] = auth.datetime.now().isoformat(timespec="seconds")
+    _enroll_all(users)
+    ctx = auth.authenticate_credentials(users, "00000", "StrongBootstrap!9")
+    assert ctx["user_id"] == "00000"
+    assert users["00000"]["password_hash"].startswith("pbkdf2_sha256$")
+    assert auth.verify_password("StrongBootstrap!9", users["00000"]["password_hash"]) is True
+
+
 def test_password_policy_uses_minimum_not_exact_length():
     source = Path(auth.__file__).read_text(encoding="utf-8")
     assert "MIN_PASSWORD_LENGTH = 12" in source
@@ -86,7 +119,7 @@ def test_recovery_configured_and_reset_success(tmp_path, monkeypatch):
     record = users["00000"]
     assert auth.recovery_is_configured(record)
     assert record["recovery_question"] == auth.RECOVERY_QUESTIONS[0]
-    assert record["recovery_answer_hash"] == auth.hash_recovery_answer("Toronto")
+    assert auth.verify_recovery_answer("Toronto", record["recovery_answer_hash"]) is True
     assert "Toronto" not in Path(auth.USERS_FILE).read_text(encoding="utf-8")
 
     ctx = auth.reset_password_with_recovery(
@@ -98,7 +131,7 @@ def test_recovery_configured_and_reset_success(tmp_path, monkeypatch):
         recovery_question=auth.RECOVERY_QUESTIONS[0],
     )
     assert ctx["user_id"] == "00000"
-    assert users["00000"]["password_hash"] == auth.hash_password("RecoveredPass12!")
+    assert auth.verify_password("RecoveredPass12!", users["00000"]["password_hash"]) is True
 
 
 def test_recovery_not_configured_fails_closed(tmp_path, monkeypatch):
@@ -127,7 +160,7 @@ def test_incorrect_recovery_fails_closed(tmp_path, monkeypatch):
             recovery_question=auth.RECOVERY_QUESTIONS[1],
         )
     assert excinfo.value.code == "RECOVERY_FAILED"
-    assert users["00000"]["password_hash"] == auth.hash_password("StrongBootstrap!9")
+    assert auth.verify_password("StrongBootstrap!9", users["00000"]["password_hash"]) is True
 
 
 def test_recovery_reset_obeys_password_history(tmp_path, monkeypatch):
