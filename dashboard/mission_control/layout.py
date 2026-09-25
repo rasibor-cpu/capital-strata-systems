@@ -226,7 +226,11 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         )
 
     if not can_select:
-        return _badge(broker_label, selected or "NONE")
+        return (
+            '<span class="mc-broker-status-readonly" data-mc-status="broker">'
+            + _badge(broker_label, selected or "NONE")
+            + '</span>'
+        )
 
     paper_selected = " selected" if selected_mode == "PAPER" else ""
     read_selected = " selected" if selected_mode == "LIVE_READ_ONLY" else ""
