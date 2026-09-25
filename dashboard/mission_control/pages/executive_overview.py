@@ -196,8 +196,15 @@ def _financial_reporting_card(state: dict) -> str:
         summary = package.get("financial_summary") if isinstance(package.get("financial_summary"), dict) else {}
         period = summary.get("reporting_period") if isinstance(summary.get("reporting_period"), dict) else {}
         period_label = period.get("label")
-        ready_state = str(summary.get("reporting_readiness") or "NOT_READY")
+        package_ready_state = str(summary.get("reporting_readiness") or "NOT_READY")
         traffic = str(summary.get("profitability_traffic_light") or "NOT_AVAILABLE")
+        freshness = state.get("data_freshness") if isinstance(state.get("data_freshness"), dict) else {}
+        freshness_state = str(freshness.get("overall_freshness") or "UNAVAILABLE").strip().upper()
+        stale_reference = (
+            freshness_state in {"STALE", "EXPIRED", "UNAVAILABLE", "UNKNOWN"}
+            or bool(freshness.get("stale_mandatory_data"))
+        )
+        ready_state = "NOT_READY" if stale_reference else package_ready_state
         ready_cls = _readiness_state_class(ready_state)
         traffic_cls = _readiness_state_class(traffic)
         generated = summary.get("generated_at") or package.get("generated_at") or "—"
@@ -214,6 +221,8 @@ def _financial_reporting_card(state: dict) -> str:
         top_action = ""
         if actions and isinstance(actions[0], dict):
             top_action = str(actions[0].get("action") or "")
+        if stale_reference:
+            top_action = "Refresh or validate stale source evidence before relying on financial conclusions."
 
         return (
             '<section class="mc-panel" id="canonical-financial-reporting" '
@@ -224,7 +233,12 @@ def _financial_reporting_card(state: dict) -> str:
             "<h2>Executive Financial Summary</h2>"
             '<p class="mc-muted">Advisory management reporting (Phases 177/178) — not audited statutory statements. '
             "No trading or execution impact.</p>"
-            "<table>"
+            + (
+                '<p class="mc-warning warn"><strong>REFERENCE ONLY:</strong> Financial figures are based on stale or unavailable source evidence and must not be treated as current broker-authoritative results.</p>'
+                if stale_reference
+                else ""
+            )
+            + "<table>"
             f"<tr><th>Reporting Period</th><td>{escape(_disp(period_label))}</td></tr>"
             f"<tr><th>Net Profit</th><td>{escape(_disp(summary.get('net_profit')))}</td></tr>"
             f"<tr><th>Target Profit</th><td>{escape(_disp(summary.get('target_profit')))}</td></tr>"
@@ -238,6 +252,9 @@ def _financial_reporting_card(state: dict) -> str:
             f'<em class="mc-status {traffic_cls}">{escape(traffic)}</em></td></tr>'
             f"<tr><th>Financial Reporting Readiness</th><td>"
             f'<em class="mc-status {ready_cls}">{escape(ready_state)}</em></td></tr>'
+            f"<tr><th>Underlying Package Readiness</th><td>{escape(package_ready_state)}</td></tr>"
+            f"<tr><th>Source Freshness</th><td>{escape(freshness_state)}</td></tr>"
+            f"<tr><th>Use</th><td>{'REFERENCE_ONLY' if stale_reference else 'CURRENT_EVIDENCE'}</td></tr>"
             f"<tr><th>Last Generated</th><td>{escape(_disp(generated))}</td></tr>"
             f"<tr><th>Top Management Action</th><td>{escape(_disp(top_action or '—'))}</td></tr>"
             "</table>"
@@ -673,28 +690,56 @@ def render(state: dict) -> str:
             "live_trading_blocked": state.get("safety", {}).get("live_trading_blocked"),
         })
         + _evidence_panel("mc-exec-kpis", "Show executive KPI evidence", detail_table("Executive KPI Board", {
-            "uptime": kpis.get("uptime"),
-            "runtime_health": kpis.get("runtime_health"),
-            "broker_health": kpis.get("broker_health"),
-            "portfolio_health": kpis.get("portfolio_health"),
-            "risk_health": kpis.get("risk_health"),
-            "market_health": kpis.get("market_health"),
-            "alert_count": kpis.get("alert_count"),
-            "trade_quality": kpis.get("trade_quality"),
-            "system_readiness": kpis.get("system_readiness"),
-            "rc1_readiness": kpis.get("rc1_readiness"),
-            "source": kpis.get("source"),
+            "uptime": kpis.get("uptime") or "UNAVAILABLE",
+            "runtime_health": kpis.get("runtime_health") or "UNAVAILABLE",
+            "broker_health": kpis.get("broker_health") or "UNAVAILABLE",
+            "portfolio_health": kpis.get("portfolio_health") or "UNAVAILABLE",
+            "risk_health": kpis.get("risk_health") or "UNAVAILABLE",
+            "market_health": kpis.get("market_health") or "UNAVAILABLE",
+            "alert_count": kpis.get("alert_count") if kpis.get("alert_count") is not None else "UNAVAILABLE",
+            "trade_quality": kpis.get("trade_quality") or "UNAVAILABLE",
+            "system_readiness": kpis.get("system_readiness") or "UNAVAILABLE",
+            "rc1_readiness": kpis.get("rc1_readiness") or "UNAVAILABLE",
+            "source": kpis.get("source") or "UNAVAILABLE",
         }))
-        + _evidence_panel("mc-exec-institutional", "Show institutional dashboard evidence", detail_table("Institutional Dashboard", {
-            "platform_health": institutional.get("platform_health"),
-            "investment_health": institutional.get("investment_health"),
-            "risk_health": institutional.get("risk_health"),
-            "broker_health": institutional.get("broker_health"),
-            "runtime_health": institutional.get("runtime_health"),
-            "portfolio_health": institutional.get("portfolio_health"),
-            "capital_health": institutional.get("capital_health"),
-        }))
-        + _evidence_panel("mc-exec-reports", "Show institutional report index", detail_table("Institutional Reports", _sanitize_reports(reporting.get("summaries", []))))
-        + _evidence_panel("mc-exec-timeline", "Show recent operations timeline", detail_table("Operations Timeline", _sanitize_timeline(timeline.get("events", []))))
+        + _evidence_panel(
+            "mc-exec-institutional",
+            "Show institutional dashboard evidence",
+            detail_table(
+                "Institutional Dashboard",
+                {
+                    "status": "UNAVAILABLE",
+                    "note": "No institutional dashboard evidence is currently available.",
+                }
+                if not institutional
+                else {
+                    "platform_health": institutional.get("platform_health") or "UNAVAILABLE",
+                    "investment_health": institutional.get("investment_health") or "UNAVAILABLE",
+                    "risk_health": institutional.get("risk_health") or "UNAVAILABLE",
+                    "broker_health": institutional.get("broker_health") or "UNAVAILABLE",
+                    "runtime_health": institutional.get("runtime_health") or "UNAVAILABLE",
+                    "portfolio_health": institutional.get("portfolio_health") or "UNAVAILABLE",
+                    "capital_health": institutional.get("capital_health") or "UNAVAILABLE",
+                },
+            ),
+        )
+        + _evidence_panel(
+            "mc-exec-reports",
+            "Show institutional report index",
+            detail_table(
+                "Institutional Reports",
+                _sanitize_reports(reporting.get("summaries", []))
+                or {"status": "UNAVAILABLE", "note": "No institutional report evidence is currently available."},
+            ),
+        )
+        + _evidence_panel(
+            "mc-exec-timeline",
+            "Show recent operations timeline",
+            detail_table(
+                "Operations Timeline",
+                _sanitize_timeline(timeline.get("events", []))
+                or {"status": "UNAVAILABLE", "note": "No recent operations timeline evidence is currently available."},
+            ),
+        )
         + '</div>'
     )
