@@ -206,7 +206,7 @@ def test_executive_governance_dashboard_is_administrative_and_read_only() -> Non
     denied = render_mission_control_shell({}, active_section="enterprise_governance")
     assert "Administrator authentication is required" in denied
     assert resolve_section_slug("enterprise-governance").key == "enterprise_governance"
-    assert len(MISSION_CONTROL_SECTIONS) == 16
+    assert len(MISSION_CONTROL_SECTIONS) == 20
 
 
 def test_certification_engine_extension_uses_only_supplied_evidence() -> None:
