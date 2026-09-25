@@ -92,20 +92,41 @@ def broker_row_selectable(row: dict[str, Any]) -> bool:
 
 
 
-def load_broker_selection() -> dict[str, Any]:
+def load_broker_selection(user_id: str | None = None) -> dict[str, Any]:
     raw = _load_json(BROKER_SELECTION_FILE, {})
-    return dict(raw) if isinstance(raw, dict) else {}
+    if not isinstance(raw, dict):
+        return {}
+    profiles = raw.get("profiles")
+    if isinstance(profiles, dict):
+        uid = str(user_id or "").strip()
+        if not uid:
+            return {}
+        selected = profiles.get(uid)
+        return dict(selected) if isinstance(selected, dict) else {}
+
+    # Backward compatibility for the original single-user artifact. Only expose
+    # it to the operator who created it when a user id is supplied.
+    if "selected_broker" in raw:
+        uid = str(user_id or "").strip()
+        configured_by = str(raw.get("configured_by") or "").strip()
+        if uid and configured_by and uid != configured_by:
+            return {}
+        return dict(raw)
+    return {}
 
 
 def save_broker_selection(*, broker: str, broker_mode: str, actor_user_id: str, confirmed: bool = False) -> dict[str, Any]:
     selected = _choice(broker, VALID_BROKERS, "broker")
     mode = _choice(broker_mode, VALID_BROKER_MODES, "broker_mode")
+    uid = str(actor_user_id or "").strip()
+    if not uid:
+        raise ValueError("actor_user_id is required")
     if not confirmed:
         raise ValueError("broker selection must be explicitly confirmed")
     payload = {
         "selected_broker": selected,
         "broker_mode": mode,
-        "configured_by": str(actor_user_id or ""),
+        "configured_by": uid,
         "configured_at": _utc_now(),
         "confirmed": True,
         "confirmed_at": _utc_now(),
@@ -115,7 +136,18 @@ def save_broker_selection(*, broker: str, broker_mode: str, actor_user_id: str, 
         "advisory_only": True,
         "runtime_application": "NEXT_SAFE_RECONCILIATION",
     }
-    _atomic_write(BROKER_SELECTION_FILE, payload)
+    raw = _load_json(BROKER_SELECTION_FILE, {})
+    profiles: dict[str, Any] = {}
+    if isinstance(raw, dict) and isinstance(raw.get("profiles"), dict):
+        profiles = dict(raw["profiles"])
+    elif isinstance(raw, dict) and raw.get("selected_broker"):
+        legacy_owner = str(raw.get("configured_by") or uid).strip() or uid
+        profiles[legacy_owner] = dict(raw)
+    profiles[uid] = payload
+    _atomic_write(
+        BROKER_SELECTION_FILE,
+        {"schema_version": "css.operator.broker.selection.v2", "profiles": profiles},
+    )
     return payload
 
 
