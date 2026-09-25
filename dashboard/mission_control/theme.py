@@ -490,11 +490,6 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
   border: 0;
   border-radius: 0;
 }
-""" + CSS_DISCLOSURE
-
-
-__all__ = ["MISSION_CONTROL_CSS"]
-
 .mc-broker-select-card {
   display: block;
   margin: 0 0 14px;
@@ -526,3 +521,7 @@ __all__ = ["MISSION_CONTROL_CSS"]
 @media (max-width: 680px) {
   .mc-broker-select-card > summary { min-height: 68px; }
 }
+""" + CSS_DISCLOSURE
+
+
+__all__ = ["MISSION_CONTROL_CSS"]
