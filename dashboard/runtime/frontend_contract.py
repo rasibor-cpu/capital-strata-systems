@@ -1758,6 +1758,9 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
             limit_reconciliation.get("legacy_coinbase_max_live_order_usd", DATA_UNAVAILABLE),
         ),
         "broker_operational_status": broker_operational_status(dashboard_payload),
+        "coinbase_live_validation": coinbase_live_validation(dashboard_payload),
+        "oanda_live_validation": oanda_live_validation(dashboard_payload),
+        "questrade_read_only_status": _mapping(broker_payload.get("questrade_read_only_status")),
     }
     if selected_name == "QUESTRADE":
         from backend.brokers.questrade import QuestradeAdvisoryAdapter
