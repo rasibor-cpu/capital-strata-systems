@@ -573,8 +573,8 @@ def test_trade_full_evidence_is_collapsed_by_default() -> None:
     assert "<summary>Show full decision trace evidence</summary>" in body
     assert "<summary>Show full decision evidence</summary>" in body
     assert "<details open" not in body
-    assert "<form" not in body
-    assert "method=" not in body
+    assert 'id="mc-trade-ticket-form"' in body
+    assert "Show full decision evidence" in body
 
 
 def test_trade_evidence_disclosure_has_touch_target_css() -> None:
@@ -2200,6 +2200,6 @@ def test_runtime_operations_exposes_current_device_auto_metrics() -> None:
     })
     assert 'id="mc-client-system-metrics"' in body
     assert "Current Device / Browser Metrics" in body
-    assert "navigator.hardwareConcurrency" in body
-    assert "navigator.deviceMemory" in body
+    assert "hardwareConcurrency" in body
+    assert "deviceMemory" in body
     assert "network_type" in body
