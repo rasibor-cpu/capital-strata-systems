@@ -134,9 +134,9 @@ def render(state: dict) -> str:
     runtime_safe = redact_value(runtime)
     balance = section(state, "broker_balance_summary")
 
-    holdings = runtime.get("holdings_readiness") if isinstance(runtime.get("holdings_readiness"), dict) else {}
-    provider = runtime.get("provider_health") if isinstance(runtime.get("provider_health"), dict) else {}
-    certification = runtime.get("certification") if isinstance(runtime.get("certification"), dict) else {}
+    holdings = runtime_safe.get("holdings_readiness") if isinstance(runtime_safe.get("holdings_readiness"), dict) else {}
+    provider = runtime_safe.get("provider_health") if isinstance(runtime_safe.get("provider_health"), dict) else {}
+    certification = runtime_safe.get("certification") if isinstance(runtime_safe.get("certification"), dict) else {}
     selected_broker = str(operator_selection.get("selected_broker") or active.get("selected_broker") or "NONE").upper()
     selected_mode = str(operator_selection.get("broker_mode") or active.get("broker_mode") or "PAPER").upper()
 
@@ -175,7 +175,7 @@ def render(state: dict) -> str:
                 ("Authentication", active.get("authentication_status"), active.get("authentication_status")),
                 ("Account", active.get("account_status"), active.get("account_status")),
                 ("Market Data", active.get("market_data_status"), active.get("market_data_status")),
-                ("Advisory Readiness", runtime.get("advisory_readiness") or "DATA_DEPENDENCY_BLOCKED", runtime.get("advisory_readiness") or "DATA_DEPENDENCY_BLOCKED"),
+                ("Advisory Readiness", runtime_safe.get("advisory_readiness") or "DATA_DEPENDENCY_BLOCKED", runtime_safe.get("advisory_readiness") or "DATA_DEPENDENCY_BLOCKED"),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Broker Management secondary metrics",
@@ -234,9 +234,9 @@ def render(state: dict) -> str:
             + detail_table("Secret Lease Health", runtime_safe.get("lease_health", []))
             + detail_table("Provider Health", provider)
             + detail_table("Holdings Readiness", holdings)
-            + detail_table("Market Data Readiness", runtime.get("market_data_readiness", []))
-            + detail_table("Options Readiness", runtime.get("options_readiness", []))
-            + detail_table("Advisory Readiness", {"status": runtime.get("advisory_readiness")})
+            + detail_table("Market Data Readiness", runtime_safe.get("market_data_readiness", []))
+            + detail_table("Options Readiness", runtime_safe.get("options_readiness", []))
+            + detail_table("Advisory Readiness", {"status": runtime_safe.get("advisory_readiness")})
             + detail_table("Certification", certification)
         )
         + '</div>'
