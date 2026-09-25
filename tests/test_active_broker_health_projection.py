@@ -5,7 +5,9 @@ from dashboard.mission_control.contracts import _brokers
 
 def test_active_broker_projects_runtime_broker_health():
     runtime_snapshot = {
+        "source": "RUNTIME",
         "runtime_status": "ONLINE",
+        "heartbeat_status": "FRESH",
         "broker": {
             "selected_broker": "COINBASE",
             "broker_mode": "paper",
@@ -35,7 +37,9 @@ def test_active_broker_projects_runtime_broker_health():
 
 def test_active_broker_legacy_health_is_only_fallback():
     runtime_snapshot = {
+        "source": "RUNTIME",
         "runtime_status": "ONLINE",
+        "heartbeat_status": "FRESH",
         "broker": {
             "selected_broker": "OANDA",
             "broker_mode": "paper",
