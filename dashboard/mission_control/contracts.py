@@ -135,6 +135,18 @@ def build_mission_control_state(
         and isinstance(dashboard_state.get("production_readiness"), Mapping)
         else {}
     )
+    transaction_history_source = (
+        dashboard_state.get("transaction_history")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("transaction_history"), Mapping)
+        else {}
+    )
+    broker_selection_source = (
+        dashboard_state.get("operator_broker_selection")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("operator_broker_selection"), Mapping)
+        else {}
+    )
     enterprise_broker_runtime_safe_source = _safe_enterprise_broker_runtime_source(
         enterprise_broker_runtime_source
     )
@@ -170,6 +182,13 @@ def build_mission_control_state(
             )
         ),
         "portfolio": _portfolio(account, positions, pnl, runtime_snapshot, frontend, execution),
+        "transaction_history": redact_value({
+            "transactions": [],
+            "source": "PERSISTENCE",
+            "read_only": True,
+            "printable": True,
+            **dict(transaction_history_source),
+        }),
         "market_intelligence": _market(market, runtime_snapshot),
         "risk": _risk(risk, governance, runtime_snapshot),
         "profit_protection_governance": build_profit_protection_governance_projection(
@@ -179,7 +198,7 @@ def build_mission_control_state(
             runtime_state_hash=str(runtime_snapshot.get("state_hash") or DATA_UNAVAILABLE),
         ),
         "options_income": _options_income(sections),
-        "brokers": _brokers(broker, runtime_snapshot),
+        "brokers": {**_brokers(broker, runtime_snapshot), "operator_selection": dict(broker_selection_source)},
         "alerts": _alerts_from_runtime(alerts, runtime_snapshot),
         "certification": _certification(certification, broker, runtime_snapshot),
         "audit": _audit(sections),
