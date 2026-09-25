@@ -80,6 +80,20 @@ body.mc-body {
   background: var(--mc-panel);
   border-color: var(--mc-line);
 }
+.mc-logout-form { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--mc-line); }
+.mc-logout-btn {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid rgba(255, 107, 107, .48);
+  border-radius: 8px;
+  background: rgba(255, 107, 107, .12);
+  color: #ffd5d5;
+  font: inherit;
+  font-weight: 800;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.mc-logout-btn:focus-visible { outline: 2px solid var(--mc-bad); outline-offset: 2px; }
 .mc-main { min-width: 0; position: relative; z-index: 1; }
 .mc-topbar {
   position: sticky;
