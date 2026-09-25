@@ -1071,6 +1071,8 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                         "role": user_ctx.get("role"),
                         "unit_code": user_ctx.get("unit_code"),
                         "home_branch": user_ctx.get("home_branch"),
+                        "selected_broker": str(user_ctx.get("selected_broker") or "").strip().upper() or None,
+                        "broker_mode": str(user_ctx.get("broker_mode") or "").strip().upper() or None,
                         "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                         "login_persistence": True,
                     },
