@@ -1885,7 +1885,7 @@ def test_broker_registry_distinguishes_questrade_reactivation_from_unconfigured(
             "status": "DISABLED",
             "reason": "NOT_ACTIVATED",
             "attempted": False,
-            "secure_token_store_present": True,
+            "secure_store_configured": True,
         },
     })
     by_broker = {row["broker"]: row for row in rows}
@@ -1893,7 +1893,7 @@ def test_broker_registry_distinguishes_questrade_reactivation_from_unconfigured(
     assert questrade["operational_state"] == "REACTIVATION_REQUIRED"
     assert questrade["readiness"] == "CONFIGURED_REACTIVATION_REQUIRED"
     assert questrade["certification"] == "NOT_CERTIFIED"
-    assert questrade["evidence_source"] == "SECURE_TOKEN_STORE_PRESENT"
+    assert questrade["evidence_source"] == "SECURE_STORE_CONFIGURED"
     assert questrade["execution"] == "DISABLED"
 
 
@@ -1929,5 +1929,5 @@ def test_frontend_contract_carries_multi_broker_read_only_evidence() -> None:
     broker = payload["sections"]["broker"]
     assert broker["coinbase_live_validation"]["validation_status"] == "PASS"
     assert broker["oanda_live_validation"]["validation_status"] == "PASS"
-    assert broker["questrade_read_only_status"]["secure_token_store_present"] is True
+    assert broker["questrade_read_only_status"]["secure_store_configured"] is True
     assert broker["questrade_read_only_status"].get("execution_allowed") is False
