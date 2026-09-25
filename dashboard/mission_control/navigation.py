@@ -23,6 +23,7 @@ MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
     MissionControlSection("portfolio", "Portfolio", "/mission-control/portfolio", "Equity, cash, exposure, allocation, PnL, drawdown, and performance attribution.", "briefcase"),
     MissionControlSection("market_intelligence", "Market Intelligence", "/mission-control/market-intelligence", "Regime, trend, volatility, liquidity, rankings, watchlists, and data freshness.", "waves"),
     MissionControlSection("risk_command", "Risk Command", "/mission-control/risk-command", "Risk state, limits, breaches, stress, Greeks, margin, kill switch, and governance gates.", "shield"),
+    MissionControlSection("asset_classes", "Asset Classes", "/mission-control/asset-classes", "Multi-asset read-only hub for equities/ETFs, crypto, FX, futures, options, and other derivatives.", "layers"),
     MissionControlSection("options_income", "Options Income", "/mission-control/options-income", "Options Income Engine opportunities, premium, collateral, rolling, Greeks, assignment, and certification.", "layers"),
     MissionControlSection("broker_management", "Broker Management", "/mission-control/broker-management", "Active broker, broker list, selection preview, onboarding shell, capabilities, and safety gates.", "plug"),
     MissionControlSection("alerts_incidents", "Alerts and Incidents", "/mission-control/alerts-incidents", "Active alerts, incident timeline, runtime failures, broker failures, and stale data alerts.", "bell"),
