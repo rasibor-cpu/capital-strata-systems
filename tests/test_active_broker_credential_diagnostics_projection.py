@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dashboard.mission_control.contracts import _brokers
+from dashboard.mission_control.safety import validate_no_secret_payload
 
 
 def test_active_broker_projects_only_redacted_credential_diagnostics():
@@ -31,8 +32,38 @@ def test_active_broker_projects_only_redacted_credential_diagnostics():
     active = _brokers(broker, runtime_snapshot)["active_broker"]
 
     assert active["credential_status"] == "MISSING"
-    assert active["credential_failure_reason"] == "KEY_MISSING"
+    assert active["setup_failure_reason"] == "KEY_MISSING"
     assert len(active["missing_credential_fields"]) == 2
-    assert active["credential_recommended_action"] == "Configure the Coinbase CDP key name"
+    assert active["setup_recommended_action"] == "Configure the Coinbase CDP key name"
     assert active["credential_values_exposed"] is False
     assert "secret_value" not in active
+
+
+def test_public_active_broker_diagnostics_do_not_trip_secret_validator():
+    runtime_snapshot = {
+        "source": "RUNTIME",
+        "runtime_status": "ONLINE",
+        "broker": {
+            "selected_broker": "COINBASE",
+            "broker_health": "RED",
+            "transport": "FAIL",
+            "failure_reason": "CONNECTION_FAILED",
+        },
+    }
+    broker = {
+        "selected_broker": "COINBASE",
+        "broker_credential_diagnostics": {
+            "credentials_present": False,
+            "canonical_failure_reason": "KEY_MISSING",
+            "missing_credential_fields": [
+                "COINBASE_CDP_KEY_NAME|COINBASE_KEY_NAME|COINBASE_API_KEY",
+            ],
+            "recommended_action": "Configure the Coinbase CDP key name",
+        },
+    }
+
+    active = _brokers(broker, runtime_snapshot)["active_broker"]
+    ok, reasons = validate_no_secret_payload({"active_broker": active})
+
+    assert ok is True
+    assert reasons == []
