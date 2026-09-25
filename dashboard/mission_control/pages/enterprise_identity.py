@@ -29,6 +29,12 @@ def _count(value: object) -> object:
     return "EVIDENCE_MISSING"
 
 
+def _source_count(source: dict, key: str) -> object:
+    if key not in source:
+        return "EVIDENCE_MISSING"
+    return _count(source.get(key))
+
+
 def _risk_status(risk: dict, key: str) -> str:
     if key not in risk:
         return "EVIDENCE_MISSING"
@@ -52,7 +58,8 @@ def render(state: dict) -> str:
             + warning_banner("Administrator authentication is required.")
         )
     raw = state.get("identity_governance")
-    data = redact_value(raw if isinstance(raw, dict) else {})
+    source = raw if isinstance(raw, dict) else {}
+    data = redact_value(source)
     identities = data.get("enterprise_identity") if isinstance(data.get("enterprise_identity"), list) else []
     secrets = data.get("enterprise_secrets") if isinstance(data.get("enterprise_secrets"), list) else []
     vault = data.get("vault_health") if isinstance(data.get("vault_health"), dict) else {}
@@ -84,42 +91,42 @@ def render(state: dict) -> str:
             (
                 ("Vault", vault.get("status", "UNCONFIGURED"), vault.get("status", "UNCONFIGURED")),
                 ("Vault Health Score", health_score.get("score", "EVIDENCE_MISSING"), health_score.get("status", "EVIDENCE_MISSING")),
-                ("Identities", _count(identities), "neutral"),
-                ("Managed Entries", _count(secrets), "neutral"),
+                ("Identities", _source_count(source, "enterprise_identity"), _source_count(source, "enterprise_identity")),
+                ("Managed Entries", _source_count(source, "enterprise_secrets"), _source_count(source, "enterprise_secrets")),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority mc-id-priority",
             aria_label="Enterprise Identity priority",
         )
         + metric_grid(
             (
-                ("Rotation Reminders", _count(rotation.get("reminders")), "warning" if rotation.get("reminders") else "neutral"),
+                ("Rotation Reminders", _source_count(rotation, "reminders"), "warning" if rotation.get("reminders") else _source_count(rotation, "reminders")),
                 ("High Risk", risk.get("high_risk_count", "EVIDENCE_MISSING"), _risk_status(risk, "high_risk_count")),
-                ("Orphaned Entries", _count(orphaned), "warning" if orphaned else "neutral"),
-                ("Access Violations", _count(violations), "warning" if violations else "neutral"),
+                ("Orphaned Entries", _source_count(source, "orphaned_secrets"), "warning" if orphaned else _source_count(source, "orphaned_secrets")),
+                ("Access Violations", _source_count(source, "direct_access_violations"), "warning" if violations else _source_count(source, "direct_access_violations")),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Enterprise Identity secondary metrics",
         )
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-id-status", detail_table("Identity & Vault Snapshot", {
-            "identity_count": _count(identities),
-            "managed_entry_count": _count(secrets),
+            "identity_count": _source_count(source, "enterprise_identity"),
+            "managed_entry_count": _source_count(source, "enterprise_secrets"),
             "vault_status": vault.get("status", "UNCONFIGURED"),
-            "certificate_count": _count(certificates),
-            "oauth_registration_count": _count(oauth),
-            "broker_auth_record_count": _count(broker_auth),
+            "certificate_count": _source_count(source, "certificates"),
+            "oauth_registration_count": _source_count(source, "oauth"),
+            "broker_auth_record_count": _source_count(source, "broker_authentication"),
         }))
         + _anchor_panel("mc-id-risk", detail_table("Risk Snapshot", {
             "high_risk_count": risk.get("high_risk_count", "EVIDENCE_MISSING"),
-            "orphaned_entry_count": _count(orphaned),
-            "direct_access_violation_count": _count(violations),
-            "audit_event_count": _count(audit),
+            "orphaned_entry_count": _source_count(source, "orphaned_secrets"),
+            "direct_access_violation_count": _source_count(source, "direct_access_violations"),
+            "audit_event_count": _source_count(source, "audit"),
         }))
         + _anchor_panel("mc-id-migration", detail_table("Migration Snapshot", {
             "migration_status": migration.get("status", "EVIDENCE_MISSING"),
             "ownership_coverage": ownership.get("status", ownership.get("coverage", "EVIDENCE_MISSING")),
-            "legacy_compatibility_count": _count(compatibility),
-            "rotation_reminder_count": _count(rotation.get("reminders")),
+            "legacy_compatibility_count": _source_count(source, "legacy_compatibility"),
+            "rotation_reminder_count": _source_count(rotation, "reminders"),
         }))
         + _evidence_panel("mc-id-evidence", "Show identity and vault metadata", detail_table("Enterprise Identity", identities) + detail_table("Vault Health", vault))
         + _evidence_panel("mc-id-rotation", "Show rotation and certificate metadata", detail_table("Rotation", rotation) + detail_table("Certificates", certificates))
