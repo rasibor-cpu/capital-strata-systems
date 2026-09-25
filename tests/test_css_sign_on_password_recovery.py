@@ -33,6 +33,41 @@ def test_min_password_length_is_twelve():
     assert auth.MIN_PASSWORD_LENGTH == 12
 
 
+def test_new_users_always_require_first_password_change(tmp_path, monkeypatch):
+    users = _seed_user(tmp_path, monkeypatch)
+    actor = {"user_id": "00000", "role": "SUPER_USER"}
+    auth.create_user(
+        users,
+        actor,
+        "42",
+        "New User",
+        "VIEWER",
+        "InitialStrong!42",
+        must_change_password=False,
+    )
+    assert users["00042"]["must_change_password"] is True
+
+
+def test_local_reset_preserves_recovery_and_forces_change(tmp_path, monkeypatch):
+    users = _seed_user(tmp_path, monkeypatch)
+    answers = _enroll_all(users)
+    original_answers = dict(users["00000"]["recovery_answers"])
+    users["00000"]["must_change_password"] = False
+    auth.save_users(users)
+
+    from tools.css_reset_local_password import reset_local_password
+    session_file = tmp_path / "css_auth_session.json"
+    session_file.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(auth, "SESSION_AUTH_FILE", session_file)
+
+    reset_local_password("00000", "ABCDEFGHIJKL")
+    reloaded = auth.load_users(auth.USERS_FILE)
+    assert auth.verify_password("ABCDEFGHIJKL", reloaded["00000"]["password_hash"]) is True
+    assert reloaded["00000"]["must_change_password"] is True
+    assert reloaded["00000"]["recovery_answers"] == original_answers
+    assert session_file.exists() is False
+
+
 def test_password_hashes_are_salted_pbkdf2_records():
     first = auth.hash_password("UniquePassword!42")
     second = auth.hash_password("UniquePassword!42")
