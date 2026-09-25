@@ -544,13 +544,12 @@ def _platform(frontend: Mapping[str, Any], broker: Mapping[str, Any], certificat
             or "DISABLED"
         ),
         "engine_mode": runtime_snapshot.get("engine_mode", "UNAVAILABLE"),
-        "cycle": (
+        "cycle": _reported_cycle(
             (frontend.get("sections") or {}).get("runtime_telemetry", {}).get("display_cycle")
             if isinstance(frontend.get("sections"), Mapping)
             and isinstance((frontend.get("sections") or {}).get("runtime_telemetry"), Mapping)
-            and (frontend.get("sections") or {}).get("runtime_telemetry", {}).get("display_cycle")
-            not in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE")
-            else runtime_snapshot.get("cycle", "UNAVAILABLE")
+            else None,
+            runtime_snapshot.get("cycle"),
         ),
         "heartbeat": runtime_snapshot.get("last_heartbeat", "UNAVAILABLE"),
         "selected_broker": selected_broker,
@@ -571,14 +570,11 @@ def _runtime(frontend: Mapping[str, Any], governance: Mapping[str, Any], certifi
     telemetry = sections.get("runtime_telemetry") if isinstance(sections.get("runtime_telemetry"), Mapping) else {}
     platform = sections.get("runtime_status") if isinstance(sections.get("runtime_status"), Mapping) else {}
     # Prefer canonical telemetry; never invent cycle 0 from missing session fields.
-    display_cycle = telemetry.get("display_cycle")
-    if display_cycle in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE"):
-        if "cycle" in runtime_snapshot and runtime_snapshot.get("cycle") is not None:
-            display_cycle = runtime_snapshot.get("cycle")
-        elif "cycle_number" in session and session.get("cycle_number") is not None:
-            display_cycle = session.get("cycle_number")
-        else:
-            display_cycle = DATA_UNAVAILABLE
+    display_cycle = _reported_cycle(
+        telemetry.get("display_cycle"),
+        runtime_snapshot.get("cycle"),
+        session.get("cycle_number") if "cycle_number" in session else None,
+    )
     restart = telemetry.get("managed_service_restart_count")
     if restart in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE"):
         restart = runtime_snapshot.get("restart_count", DATA_UNAVAILABLE)
@@ -1581,6 +1577,29 @@ def _data_freshness(
         "stale_mandatory_data": bool(freshness.get("stale_mandatory_data")),
         "sections": freshness.get("sections", {}),
     }
+
+
+def _reported_cycle(*values: Any) -> Any:
+    """Return a genuinely reported cycle; never promote legacy default zero."""
+    for value in values:
+        if value in (None, "", "UNKNOWN", "NOT_REPORTED", "UNAVAILABLE"):
+            continue
+        if isinstance(value, bool):
+            continue
+        if isinstance(value, (int, float)):
+            if int(value) == 0:
+                continue
+            return int(value)
+        text = str(value).strip()
+        if not text or text.upper() in {"UNKNOWN", "NOT_REPORTED", "UNAVAILABLE", "N/A"}:
+            continue
+        if text.isdigit():
+            numeric = int(text)
+            if numeric == 0:
+                continue
+            return numeric
+        return value
+    return DATA_UNAVAILABLE
 
 
 def _first_status(*values: Any) -> str:
