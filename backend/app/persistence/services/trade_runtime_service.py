@@ -144,6 +144,14 @@ class TradeRuntimeService:
             closed_at=closed_at,
         )
 
+
+    def recent_transactions(self, limit: int = 200) -> list[dict[str, Any]]:
+        return self.persistence.trades.get_recent_trades(limit=limit)
+
+    def transaction_by_id(self, trade_id: str) -> dict[str, Any] | None:
+        return self.persistence.trades.get_trade(trade_id)
+
+
     def _build_canonical_close_payload(
         self,
         *,
