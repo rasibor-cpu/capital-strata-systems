@@ -47,6 +47,7 @@ def build_broker_balance_summary(
     )
     paper = broker_name in {"NONE", "PAPER", "CSS_PAPER", "SIMULATED"} or account_mode == "PAPER"
     values = _provider_values(source, broker_name)
+    provider_available_supplied = values.get("available_to_trade") is not None
     configuration_source = None
     simulation_ceiling = _number(source.get("simulation_collateral_ceiling"))
     if paper:
@@ -71,7 +72,7 @@ def build_broker_balance_summary(
     pending_credits = values.get("pending_credits")
     held_reserved = values.get("held_reserved")
     settled_cash = _first_number(values.get("settled_cash"), values.get("cash"))
-    if values.get("available_to_trade") is None and settled_cash is not None:
+    if not provider_available_supplied and settled_cash is not None:
         values["available_to_trade"] = (
             settled_cash
             + (pending_credits or 0.0)
