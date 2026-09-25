@@ -63,6 +63,99 @@ def section(payload: Mapping[str, Any], name: str) -> dict[str, Any]:
     return {"status": DATA_UNAVAILABLE}
 
 
+def _broker_evidence_overlays(active_broker: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Return sanitized per-broker read-only evidence for Mission Control display.
+
+    Tier-1 registry rows are static capability records. This overlay lets
+    Mission Control distinguish "never configured" from evidence that was
+    previously captured for Coinbase/OANDA or a Questrade secure token store
+    that needs reactivation after process restart. It never enables execution.
+    """
+
+    overlays: dict[str, dict[str, Any]] = {}
+
+    for broker, key in (
+        ("COINBASE", "coinbase_live_validation"),
+        ("OANDA", "oanda_live_validation"),
+    ):
+        payload = active_broker.get(key)
+        if not isinstance(payload, Mapping):
+            continue
+        validation = str(payload.get("validation_status") or "").strip().upper()
+        timestamp = str(payload.get("validation_timestamp") or "").strip()
+        last_sync = str(payload.get("last_successful_sync") or "").strip()
+        operational = payload.get("broker_operational_status")
+        operational = dict(operational) if isinstance(operational, Mapping) else {}
+        state = str(
+            operational.get("operational_state")
+            or payload.get("operational_state")
+            or ""
+        ).strip().upper()
+        has_evidence = (
+            validation not in {"", "DATA UNAVAILABLE", "UNAVAILABLE", "NOT_AVAILABLE"}
+            or timestamp not in {"", "DATA UNAVAILABLE", "UNAVAILABLE", "NOT_AVAILABLE"}
+            or last_sync not in {"", "DATA UNAVAILABLE", "UNAVAILABLE", "NOT_AVAILABLE"}
+        )
+        if not has_evidence:
+            continue
+        if validation == "PASS":
+            readiness = "READ_ONLY_READY"
+            certification = "READ_ONLY_VALIDATED"
+            state = state or "READ_ONLY_READY"
+        else:
+            readiness = "FAIL_CLOSED" if validation in {"FAIL", "FAIL_CLOSED", "FAILED"} else "EVIDENCE_PRESENT"
+            certification = "NOT_CERTIFIED"
+            state = state or readiness
+        overlays[broker] = {
+            "operational_state": state,
+            "status": state,
+            "readiness": readiness,
+            "certification": certification,
+            "authentication": "AUTHENTICATED" if bool(payload.get("authentication")) else "UNAVAILABLE",
+            "market_data": "OK" if bool(payload.get("market_data_loaded")) else str(payload.get("market_data_status") or "UNAVAILABLE"),
+            "account": "AVAILABLE" if bool(payload.get("account_loaded")) else str(payload.get("account_sync_status") or "UNAVAILABLE"),
+            "last_sync": last_sync or timestamp or "UNAVAILABLE",
+            "evidence_source": "PERSISTED_READ_ONLY_VALIDATION",
+            "execution": "DISABLED",
+            "execution_authority": "BLOCKED",
+            "execution_blocked": True,
+            "advisory_only": True,
+        }
+
+    questrade = active_broker.get("questrade_read_only_status")
+    if isinstance(questrade, Mapping):
+        status = str(questrade.get("status") or "").strip().upper()
+        secure_store = bool(questrade.get("secure_token_store_present"))
+        if status == "READY":
+            overlays["QUESTRADE"] = {
+                "operational_state": "READ_ONLY_READY",
+                "status": "READ_ONLY_READY",
+                "readiness": "READ_ONLY_READY",
+                "certification": "READ_ONLY_VALIDATED",
+                "authentication": "AUTHENTICATED",
+                "evidence_source": "IN_PROCESS_READ_ONLY_ACTIVATION",
+                "execution": "DISABLED",
+                "execution_authority": "BLOCKED",
+                "execution_blocked": True,
+                "advisory_only": True,
+            }
+        elif secure_store:
+            overlays["QUESTRADE"] = {
+                "operational_state": "REACTIVATION_REQUIRED",
+                "status": "REACTIVATION_REQUIRED",
+                "readiness": "CONFIGURED_REACTIVATION_REQUIRED",
+                "certification": "NOT_CERTIFIED",
+                "authentication": "REACTIVATION_REQUIRED",
+                "evidence_source": "SECURE_TOKEN_STORE_PRESENT",
+                "execution": "DISABLED",
+                "execution_authority": "BLOCKED",
+                "execution_blocked": True,
+                "advisory_only": True,
+            }
+
+    return overlays
+
+
 def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Phase 177C — Mission Control rows from canonical Tier-1 registry (no IBKR)."""
     selected = str(active_broker.get("selected_broker", active_broker.get("broker", "NONE"))).upper()
@@ -75,7 +168,12 @@ def build_broker_registry(active_broker: Mapping[str, Any]) -> list[dict[str, An
         active=active_broker,
         contamination_by_broker=contamination.findings_by_broker(),
     )
+    overlays = _broker_evidence_overlays(active_broker)
     for row in rows:
+        broker_name = str(row.get("broker") or "").upper()
+        overlay = overlays.get(broker_name)
+        if overlay:
+            row.update(overlay)
         row["profile"] = profile if row.get("selected") else _inactive_profile()
         row["account_data"] = row.get("account")
         row["broker_status"] = row.get("status")
