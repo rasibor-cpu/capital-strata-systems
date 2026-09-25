@@ -224,6 +224,21 @@ class AccountStatementService:
             "read_only": True,
         }
 
+
+    def entry_by_id(self, ledger_id: str, *, user_id: str | None = None) -> dict[str, Any] | None:
+        target = str(ledger_id or "").strip()
+        uid = str(user_id or "").strip()
+        if not target:
+            return None
+        for row in self._entries():
+            if str(row.get("ledger_id") or "") != target:
+                continue
+            if uid and str(row.get("user_id") or "") != uid:
+                continue
+            return dict(row)
+        return None
+
+
     @staticmethod
     def to_csv(statement: dict[str, Any]) -> str:
         output = io.StringIO()
