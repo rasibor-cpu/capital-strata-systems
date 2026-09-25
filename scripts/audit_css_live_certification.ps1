@@ -38,6 +38,31 @@ Write-Host ("Safety live blocked : {0}" -f $state.safety.live_trading_blocked)
 Write-Host ("Broker armed        : {0}" -f $state.safety.broker_execution_armed)
 Write-Host ("Advisory only       : {0}" -f $state.safety.advisory_only)
 
+Write-Host ""
+Write-Host "Runtime evidence:"
+Write-Host ("  source                : {0}" -f $state.runtime.source)
+Write-Host ("  source_status         : {0}" -f $state.runtime.source_status)
+Write-Host ("  source_freshness      : {0}" -f $state.runtime.source_freshness)
+Write-Host ("  source_confidence     : {0}" -f $state.runtime.source_confidence)
+Write-Host ("  runtime_health        : {0}" -f $state.platform.runtime_health)
+Write-Host ("  supervisor_state      : {0}" -f $state.runtime.supervisor_state)
+Write-Host ("  selected_broker       : {0}" -f $state.brokers.active_broker.selected_broker)
+Write-Host ("  broker_health         : {0}" -f $state.brokers.active_broker.broker_health)
+Write-Host ("  broker_connection     : {0}" -f $state.brokers.active_broker.connection_status)
+Write-Host ("  broker_failure_reason : {0}" -f $state.runtime_snapshot.broker.failure_reason)
+Write-Host ("  rc1_certification     : {0}" -f $state.runtime_snapshot.certification.rc1_certification)
+Write-Host ("  rc1_operational       : {0}" -f $state.runtime_snapshot.certification.rc1_operational_readiness)
+Write-Host ("  runtime_readiness     : {0}" -f $state.runtime_snapshot.certification.runtime_readiness)
+Write-Host ("  broker_readiness      : {0}" -f $state.runtime_snapshot.certification.broker_readiness)
+
+$runtimeBlockers = @($state.runtime_snapshot.certification.blockers)
+if ($runtimeBlockers.Count -gt 0) {
+    Write-Host "  runtime blockers:"
+    foreach ($item in $runtimeBlockers) {
+        Write-Host ("    - {0}" -f $item)
+    }
+}
+
 $prod = $state.production_readiness
 $contradictions = @()
 if ($overall -eq "CERTIFIED") {
