@@ -328,14 +328,14 @@ document.getElementById('recovery_new_password')?.addEventListener('input',ev=>{
 
 def _launcher_recovery_enrollment_page(message: str = "", status: str = "info") -> str:
     from html import escape
-    from dashboard.auth.css_sign_on import RECOVERY_QUESTIONS
+    from dashboard.auth.css_sign_on import canonical_recovery_questions
 
     notice = ""
     if message:
         notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
 
     rows = []
-    for index, question in enumerate(RECOVERY_QUESTIONS, start=1):
+    for index, question in enumerate(canonical_recovery_questions(), start=1):
         field = f"recovery_answer_{index}"
         rows.append(
             '<div class="recovery-row">'
