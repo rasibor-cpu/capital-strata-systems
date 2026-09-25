@@ -55,7 +55,7 @@ def _top_opportunity_snapshot(opportunities: dict) -> dict:
 def _safe_opportunity_rows(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
-    blocked = {"provenance", "state_hash", "evidence", "source_payload", "raw_payload"}
+    blocked = {"provenance", "state_hash", "evidence", "source_payload", "raw_payload", "runtime_id", "trace_id", "correlation_id"}
     rows: list[dict] = []
     for row in value:
         if not isinstance(row, dict):
