@@ -283,12 +283,43 @@ def _snapshot_from_artifacts(source: Any, *, source_name: str) -> dict[str, Any]
 def _broker_snapshot(broker: Mapping[str, Any], account: Mapping[str, Any]) -> dict[str, Any]:
     canonical = _mapping(broker.get("canonical_broker_runtime_state"))
     source = canonical if canonical else broker
+    transport = _first_text(
+        source.get("transport_status"),
+        source.get("connection_status"),
+        broker.get("connection_status"),
+        broker.get("api_health"),
+        default="UNAVAILABLE",
+    )
+    broker_health = _first_text(
+        source.get("overall_status"),
+        broker.get("broker_health"),
+        default="",
+    )
+    if not broker_health and str(transport).upper() in {
+        "FAIL",
+        "FAILED",
+        "ERROR",
+        "UNAVAILABLE",
+        "NOT_AVAILABLE",
+    }:
+        broker_health = "RED"
+    broker_failure_reason = _first_text(
+        source.get("failure_reason"),
+        broker.get("connection_error"),
+        default="",
+    )
+    if (
+        broker_failure_reason.upper() in {"", "NONE", "NO_FAILURE"}
+        and str(transport).upper() in {"FAIL", "FAILED", "ERROR", "UNAVAILABLE", "NOT_AVAILABLE"}
+    ):
+        broker_failure_reason = "CONNECTION_FAILED"
+
     return {
         "selected_broker": _first_text(broker.get("selected_broker"), source.get("broker"), default="UNAVAILABLE"),
         "broker_mode": _first_text(broker.get("broker_mode"), source.get("mode"), default="UNAVAILABLE"),
-        "broker_health": _first_text(source.get("overall_status"), broker.get("broker_health"), default="UNAVAILABLE"),
+        "broker_health": broker_health or "UNAVAILABLE",
         "authentication": _first_text(source.get("authentication_status"), broker.get("authentication_status"), broker.get("auth_status"), default="UNAVAILABLE"),
-        "transport": _first_text(source.get("transport_status"), source.get("connection_status"), broker.get("connection_status"), broker.get("api_health"), default="UNAVAILABLE"),
+        "transport": transport,
         "account": _first_text(source.get("account_status"), broker.get("account_data_health"), broker.get("account_status"), default="UNAVAILABLE"),
         "balances": _first_text(source.get("balance_status"), broker.get("balance_position_status"), broker.get("balance_status"), default="UNAVAILABLE"),
         "buying_power": _first_text(source.get("buying_power_status"), broker.get("buying_power"), account.get("buying_power"), default="UNAVAILABLE"),
@@ -299,7 +330,7 @@ def _broker_snapshot(broker: Mapping[str, Any], account: Mapping[str, Any]) -> d
         "overall_status": _first_text(source.get("overall_status"), broker.get("overall_status"), broker.get("broker_health"), default="UNAVAILABLE"),
         "state_hash": _first_text(source.get("state_hash"), broker.get("state_hash"), default="UNAVAILABLE"),
         "provenance": source.get("status_provenance", broker.get("status_provenance", {})),
-        "failure_reason": _first_text(source.get("failure_reason"), broker.get("connection_error"), default="UNAVAILABLE"),
+        "failure_reason": broker_failure_reason or "UNAVAILABLE",
         "warnings": source.get("warning_reasons", broker.get("readiness_reasons", [])),
         "execution_scope": _first_text(source.get("execution_scope"), broker.get("execution_scope"), default="READ_ONLY"),
     }
