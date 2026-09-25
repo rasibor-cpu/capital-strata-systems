@@ -21,6 +21,7 @@ MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
     MissionControlSection("runtime_operations", "Runtime Operations", "/mission-control/runtime-operations", "Runtime cycle, supervisor, subsystem, dependency, API, dashboard, and mobile health.", "activity"),
     MissionControlSection("trade_operations", "Trade / Transaction", "/mission-control/trade-operations", "Transaction entry plus trade decisions, gates, positions, orders, fills, rejections, and execution quality.", "route"),
     MissionControlSection("transaction_history", "Transaction History", "/mission-control/transaction-history", "Persisted trade history, printable transaction receipts, and read-only transaction snapshots.", "history"),
+    MissionControlSection("account_funding", "Balances & Funding", "/mission-control/account-funding", "Verified multi-currency balances, pending postings, funding verification, margin and set-off controls.", "wallet"),
     MissionControlSection("portfolio", "Portfolio", "/mission-control/portfolio", "Equity, cash, exposure, allocation, PnL, drawdown, and performance attribution.", "briefcase"),
     MissionControlSection("market_intelligence", "Market Intelligence", "/mission-control/market-intelligence", "Regime, trend, volatility, liquidity, rankings, watchlists, and data freshness.", "waves"),
     MissionControlSection("risk_command", "Risk Command", "/mission-control/risk-command", "Risk state, limits, breaches, stress, Greeks, margin, kill switch, and governance gates.", "shield"),
