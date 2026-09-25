@@ -3,6 +3,7 @@ from __future__ import annotations
 from dashboard.mission_control.pages import (
     alerts_incidents,
     audit_explainability,
+    asset_classes,
     broker_management,
     broker_management_mobile,
     certification_readiness,
@@ -35,6 +36,7 @@ PAGE_MODULES = {
     "portfolio": portfolio,
     "market_intelligence": market_intelligence,
     "risk_command": risk_command,
+    "asset_classes": asset_classes,
     "options_income": options_income,
     "broker_management": broker_management_mobile,
     "alerts_incidents": alerts_incidents,
