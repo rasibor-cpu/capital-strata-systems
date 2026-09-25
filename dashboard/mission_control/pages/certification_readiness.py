@@ -59,6 +59,7 @@ def render(state: dict) -> str:
             "blockers": cert.get("blockers"),
             "warnings": cert.get("warnings"),
         }))
+        + _anchor_panel("mc-cert-governance-summary", detail_table("Governance Summary", summary))
         + _anchor_panel("mc-cert-governance", detail_table("Governance Snapshot", {
             "security_posture": summary.get("security_posture"),
             "audit_posture": summary.get("audit_posture"),
