@@ -225,14 +225,17 @@ def render(state: dict) -> str:
             "api_availability": telemetry.get("api_availability"),
             "overall_health": telemetry.get("overall_health"),
         }))
-        + _evidence_panel("mc-broker-runtime", "Show sanitized provider and readiness evidence", detail_table("Provider & Readiness", {
-            "provider_health": provider.get("status") or "UNAVAILABLE",
-            "holdings_readiness": holdings.get("status") or "UNAVAILABLE",
-            "market_data_readiness": runtime.get("market_data_readiness"),
-            "options_readiness": runtime.get("options_readiness"),
-            "advisory_readiness": runtime.get("advisory_readiness"),
-            "certification": certification.get("outcome"),
-        }))
+        + _evidence_panel("mc-broker-runtime", "Show sanitized provider and readiness evidence",
+            detail_table("Enterprise Broker Health", runtime.get("broker_health", {}))
+            + detail_table("OAuth Status", runtime.get("oauth_status", []))
+            + detail_table("Secret Lease Health", runtime.get("lease_health", []))
+            + detail_table("Provider Health", provider)
+            + detail_table("Holdings Readiness", holdings)
+            + detail_table("Market Data Readiness", runtime.get("market_data_readiness", []))
+            + detail_table("Options Readiness", runtime.get("options_readiness", []))
+            + detail_table("Advisory Readiness", {"status": runtime.get("advisory_readiness")})
+            + detail_table("Certification", certification)
+        )
         + '</div>'
     )
 
