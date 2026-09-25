@@ -55,7 +55,18 @@ def _top_opportunity_snapshot(opportunities: dict) -> dict:
 def _safe_opportunity_rows(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
-    blocked = {"provenance", "state_hash", "evidence", "source_payload", "raw_payload", "runtime_id", "trace_id", "correlation_id"}
+    blocked = {
+        "provenance",
+        "state_hash",
+        "decision_hash",
+        "runtime_id",
+        "trace_id",
+        "correlation_id",
+        "evidence",
+        "source_payload",
+        "raw_payload",
+        "source_module",
+    }
     rows: list[dict] = []
     for row in value:
         if not isinstance(row, dict):
@@ -109,10 +120,9 @@ def render(state: dict) -> str:
         }))
         + _anchor_panel("mc-market-opportunities", detail_table("Top Opportunity Snapshot", _top_opportunity_snapshot(opportunities)))
         + _anchor_panel("mc-market-opportunity-ranking", detail_table("Opportunity Ranking", {
-            "opportunities": _safe_opportunity_rows(opportunities.get("opportunities")),
-            "status": opportunities.get("status"),
-            "source": opportunities.get("source"),
-            "freshness": opportunities.get("freshness"),
+            "opportunity_count": len(_safe_opportunity_rows(opportunities.get("opportunities"))),
+            "status": opportunities.get("status") or "UNAVAILABLE",
+            "freshness": opportunities.get("freshness") or "UNAVAILABLE",
         }))
         + _evidence_panel("mc-market-opportunity-evidence", "Show full opportunity evidence", detail_table("Opportunity Evidence (Full)", _safe_opportunity_rows(opportunities.get("opportunities"))))
         + _evidence_panel("mc-market-signal-evidence", "Show full signal-surface evidence", detail_table("Signal Surface Evidence (Full)", {
