@@ -165,6 +165,40 @@ class TradeRepository(BaseRepository):
         )
         return [dict(row) for row in rows]
 
+
+    def get_recent_trades(
+        self,
+        limit: int = 200,
+    ) -> list[dict[str, Any]]:
+        safe_limit = max(1, min(int(limit or 200), 1000))
+        rows = self.fetch_all(
+            """
+            SELECT
+                trade_id,
+                session_id,
+                broker_name,
+                broker_mode,
+                symbol,
+                direction,
+                status,
+                order_type,
+                quantity,
+                filled_quantity,
+                entry_price,
+                exit_price,
+                realized_pnl,
+                opened_at,
+                closed_at,
+                updated_at
+            FROM trades
+            ORDER BY COALESCE(closed_at, opened_at) DESC
+            LIMIT ?
+            """,
+            (safe_limit,),
+        )
+        return [dict(row) for row in rows]
+
+
     def trade_exists(
         self,
         session_id: str,
