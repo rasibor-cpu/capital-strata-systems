@@ -166,6 +166,7 @@ BRAND = get_brand_service()
 launcher_router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
+_LAUNCHER_PASSWORD_CHANGES: Dict[str, str] = {}
 
 _QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
 _QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(_QUESTRADE_MISSION_CONTROL_CACHE)
@@ -185,6 +186,175 @@ def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) 
     payload["broker_execution_armed"] = False
     payload["advisory_only"] = True
     return payload
+
+
+def _launcher_login_page(message: str = "", status: str = "info") -> str:
+    from html import escape
+
+    notice = ""
+    if message:
+        notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Sign In</title>
+  <style>
+    body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:480px;margin:0 auto;padding:38px 18px}
+    .card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
+    h1{margin:0 0 8px;font-size:1.65rem} p{color:#a8b4c0}
+    label{display:block;margin:14px 0 6px;font-weight:700}
+    input{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    button,a.button{box-sizing:border-box;width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800;display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}
+    .notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}
+    .foot{margin-top:16px;font-size:.9rem}
+  </style>
+</head>
+<body><main><section class="card">
+  <h1>CSS Sign In</h1>
+  <p>Sign in to Capital Strata Systems.</p>
+  __NOTICE__
+  <form method="post" action="/login">
+    <label for="user_id">User ID</label>
+    <input id="user_id" name="user_id" inputmode="numeric" autocomplete="username" required>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button type="submit">Log on to CSS</button>
+  </form>
+  <p class="foot">Your broker and trading permissions are applied only after authentication and remain subject to CSS safety controls.</p>
+</section></main></body></html>""".replace("__NOTICE__", notice)
+
+
+def _launcher_password_change_page(message: str = "") -> str:
+    from html import escape
+
+    notice = ""
+    if message:
+        notice = '<p class="notice error">' + escape(message) + '</p>'
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Password Change</title>
+  <style>
+    body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:480px;margin:0 auto;padding:38px 18px}.card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
+    label{display:block;margin:14px 0 6px;font-weight:700}input{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    button{width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800}.notice{padding:10px 12px;border-radius:8px;background:#47252a}
+  </style>
+</head>
+<body><main><section class="card">
+<h1>Change Password</h1><p>CSS requires a password change before this account can continue.</p>__NOTICE__
+<form method="post" action="/password-change">
+<label for="new_password">New password</label><input id="new_password" name="new_password" type="password" autocomplete="new-password" required>
+<label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required>
+<button type="submit">Change password and continue</button>
+</form></section></main></body></html>""".replace("__NOTICE__", notice)
+
+
+@launcher_router.get("/login", response_class=HTMLResponse)
+async def launcher_login_screen():
+    return HTMLResponse(_launcher_login_page())
+
+
+@launcher_router.post("/login", response_class=HTMLResponse)
+async def launcher_login_submit(request: Request):
+    import secrets
+    from dashboard.auth.css_sign_on import (
+        AuthFailure,
+        PasswordChangeRequired,
+        authenticate_credentials,
+        load_users,
+        persist_login_session,
+        save_users,
+    )
+    from backend.security.mutation_guard import secure_cookie_kwargs
+
+    form = await _read_mobile_trade_payload(request)
+    users = load_users()
+    try:
+        user_ctx = authenticate_credentials(
+            users,
+            str(form.get("user_id") or ""),
+            str(form.get("password") or ""),
+        )
+        save_users(users)
+    except PasswordChangeRequired as required:
+        save_users(users)
+        token = secrets.token_urlsafe(32)
+        _LAUNCHER_PASSWORD_CHANGES[token] = str(required.user_id)
+        response = HTMLResponse(_launcher_password_change_page())
+        response.set_cookie(
+            "css_mobile_pw_change",
+            token,
+            max_age=600,
+            **secure_cookie_kwargs(request.url.scheme),
+        )
+        return response
+    except AuthFailure as exc:
+        save_users(users)
+        return HTMLResponse(_launcher_login_page(exc.message, "error"), status_code=401)
+
+    persist_login_session(user_ctx)
+    response = RedirectResponse("/mobile-launcher", status_code=303)
+    response.set_cookie(
+        "css_mobile_session",
+        secrets.token_urlsafe(32),
+        **secure_cookie_kwargs(request.url.scheme),
+    )
+    return response
+
+
+@launcher_router.get("/password-change", response_class=HTMLResponse)
+async def launcher_password_change_screen(request: Request):
+    token = str(request.cookies.get("css_mobile_pw_change") or "")
+    if not token or token not in _LAUNCHER_PASSWORD_CHANGES:
+        return RedirectResponse("/login", status_code=303)
+    return HTMLResponse(_launcher_password_change_page())
+
+
+@launcher_router.post("/password-change", response_class=HTMLResponse)
+async def launcher_password_change_submit(request: Request):
+    import secrets
+    from dashboard.auth.css_sign_on import (
+        PasswordValidationError,
+        change_password,
+        load_users,
+        persist_login_session,
+        save_users,
+    )
+    from backend.security.mutation_guard import secure_cookie_kwargs
+
+    token = str(request.cookies.get("css_mobile_pw_change") or "")
+    user_id = _LAUNCHER_PASSWORD_CHANGES.get(token)
+    if not user_id:
+        return RedirectResponse("/login", status_code=303)
+    form = await _read_mobile_trade_payload(request)
+    users = load_users()
+    try:
+        user_ctx = change_password(
+            users,
+            user_id,
+            str(form.get("new_password") or ""),
+            str(form.get("confirm_password") or ""),
+        )
+        save_users(users)
+    except PasswordValidationError as exc:
+        return HTMLResponse(_launcher_password_change_page(str(exc)), status_code=400)
+
+    persist_login_session(user_ctx)
+    _LAUNCHER_PASSWORD_CHANGES.pop(token, None)
+    response = RedirectResponse("/mobile-launcher", status_code=303)
+    response.delete_cookie("css_mobile_pw_change")
+    response.set_cookie(
+        "css_mobile_session",
+        secrets.token_urlsafe(32),
+        **secure_cookie_kwargs(request.url.scheme),
+    )
+    return response
 
 
 
@@ -214,13 +384,11 @@ async def launcher_logged_out():
     main{max-width:560px;margin:0 auto;padding:48px 20px}
     .card{border:1px solid #2b3b4a;border-radius:12px;background:#151d25;padding:22px}
     h1{margin:0 0 10px;font-size:1.6rem}
-    p{color:#a8b4c0}
-  </style>
+    p{color:#a8b4c0}\n    a.button{display:flex;align-items:center;justify-content:center;min-height:48px;margin-top:18px;border-radius:9px;background:#2c78c4;color:#fff;text-decoration:none;font-weight:800}\n  </style>
 </head>
 <body><main><section class="card">
 <h1>Signed out</h1>
-<p>Your CSS operator session has been invalidated. You can safely close this browser tab or app window.</p>
-</section></main></body></html>"""
+<p>Your CSS operator session has been invalidated. You can safely close this browser tab or app window.</p>\n<a class="button" href="/login">Log on again</a>\n</section></main></body></html>"""
     )
 
 
