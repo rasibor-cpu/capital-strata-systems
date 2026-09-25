@@ -37,6 +37,7 @@ body.mc-body {
 .mc-mobile-chrome,
 .mc-nav-backdrop,
 .mc-nav-close { display: none; }
+.mc-back-btn { display: none; }
 .mc-sidebar {
   position: sticky;
   top: 0;
@@ -317,6 +318,23 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
     background: #101820;
     border-bottom: 1px solid var(--mc-line);
   }
+  .mc-back-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 54px;
+    min-height: 44px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid var(--mc-line);
+    background: var(--mc-panel);
+    color: var(--mc-text);
+    font: inherit;
+    font-weight: 700;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .mc-back-btn:focus-visible { outline: 2px solid var(--mc-info); outline-offset: 2px; }
   .mc-nav-toggle-btn {
     display: inline-flex;
     align-items: center;
