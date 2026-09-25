@@ -6446,8 +6446,9 @@ if __name__ == "__main__":
     if not managed and not standalone_override:
         print(
             "Standalone CSS Mobile startup is blocked by default. "
-            "Start CSS with .venv\\Scripts\\python.exe launcher\\css_runtime_launcher.py "
-            "so the canonical supervisor heartbeat remains authoritative and current. "
+            "Use scripts\\restart_css_canonical.ps1 to restart the managed mobile service, "
+            "or scripts\\install_css_logon_task.ps1 -StartNow if the persistent task is not installed. "
+            "The canonical supervisor heartbeat must remain authoritative and current. "
             "For deliberate development-only standalone testing, set "
             "CSS_ALLOW_STANDALONE_MOBILE=1."
         )
