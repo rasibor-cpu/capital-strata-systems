@@ -70,6 +70,7 @@ def render(state: dict) -> str:
     brokers = section(state, "brokers")
     active = brokers.get("active_broker", {}) if isinstance(brokers.get("active_broker"), dict) else {}
     selection = brokers.get("selection", {}) if isinstance(brokers.get("selection"), dict) else {}
+    operator_selection = brokers.get("operator_selection", {}) if isinstance(brokers.get("operator_selection"), dict) else {}
     onboarding = brokers.get("onboarding", {}) if isinstance(brokers.get("onboarding"), dict) else {}
     safety = brokers.get("safety", {}) if isinstance(brokers.get("safety"), dict) else {}
     roles = brokers.get("primary_roles", {}) if isinstance(brokers.get("primary_roles"), dict) else {}
@@ -107,11 +108,13 @@ def render(state: dict) -> str:
         )
     return (
         page_header("Broker Management", "Canonical Tier-1 states with secure Questrade read-only onboarding — execution remains blocked.")
-        + warning_banner("Broker selection and onboarding controls are disabled. LIVE_READ_ONLY only — execution blocked.", status="bad")
+        + warning_banner("Broker settings record operator preference only. They do not connect a broker, change canonical runtime authority, or arm execution. LIVE_READ_ONLY only — execution blocked.", status="bad")
         + metric_grid(
             (
-                ("Selected Broker", active.get("selected_broker"), active.get("selected_broker")),
-                ("Broker Mode", active.get("broker_mode"), active.get("broker_mode")),
+                ("Preferred Broker", operator_selection.get("selected_broker") or "NOT_CONFIGURED", "neutral"),
+                ("Runtime Active Broker", active.get("selected_broker") or "UNAVAILABLE", active.get("selected_broker")),
+                ("Preferred Mode", operator_selection.get("broker_mode") or "NOT_CONFIGURED", "neutral"),
+                ("Runtime Broker Mode", active.get("broker_mode") or "UNAVAILABLE", active.get("broker_mode")),
                 ("Primary Crypto", roles.get("PRIMARY_CRYPTO_BROKER", "COINBASE"), "neutral"),
                 ("Primary FX", roles.get("PRIMARY_FX_BROKER", "OANDA"), "neutral"),
                 ("Primary CA Equities", roles.get("PRIMARY_CANADIAN_EQUITIES_BROKER", "QUESTRADE"), "neutral"),
@@ -158,6 +161,18 @@ def render(state: dict) -> str:
                 "supported_products": registry.get("supported_products"),
                 "editing_enabled": registry.get("editing_enabled"),
                 "protected_fields_redacted": registry.get("protected_fields_redacted"),
+            }),
+            detail_table("Operator Broker Settings", {
+                "preferred_broker": operator_selection.get("selected_broker") or "NOT_CONFIGURED",
+                "preferred_mode": operator_selection.get("broker_mode") or "NOT_CONFIGURED",
+                "confirmed": operator_selection.get("confirmed") if operator_selection else False,
+                "configured_at": operator_selection.get("configured_at") or "UNAVAILABLE",
+                "runtime_application": operator_selection.get("runtime_application") or "UNAVAILABLE",
+                "runtime_active_broker": active.get("selected_broker") or "UNAVAILABLE",
+                "runtime_active_mode": active.get("broker_mode") or "UNAVAILABLE",
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
             }),
             detail_table("Selection Preview", selection),
             detail_table("Onboarding Shell", onboarding),
