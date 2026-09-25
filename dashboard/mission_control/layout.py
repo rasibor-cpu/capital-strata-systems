@@ -139,6 +139,9 @@ def render_mission_control_shell(
         <a href="{escape(home_href)}" data-css-home="1">{_nav_icon()}<span class="mc-nav-label">Home</span></a>
       </nav>
       {nav}
+      <form class="mc-logout-form" method="post" action="/logout">
+        <button class="mc-logout-btn" type="submit">Log out / Exit</button>
+      </form>
     </aside>
     <main class="mc-main">
       <header class="mc-topbar">
