@@ -29,6 +29,17 @@ def _count(value: object) -> object:
     return "EVIDENCE_MISSING"
 
 
+def _risk_status(risk: dict, key: str) -> str:
+    if key not in risk:
+        return "EVIDENCE_MISSING"
+    value = risk.get(key)
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return "EVIDENCE_MISSING"
+    return "PASS" if count == 0 else "WARNING"
+
+
 def render(state: dict) -> str:
     auth = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
     if not (
@@ -82,7 +93,7 @@ def render(state: dict) -> str:
         + metric_grid(
             (
                 ("Rotation Reminders", _count(rotation.get("reminders")), "warning" if rotation.get("reminders") else "neutral"),
-                ("High Risk", risk.get("high_risk_count", "EVIDENCE_MISSING"), risk.get("high_risk_count", "EVIDENCE_MISSING")),
+                ("High Risk", risk.get("high_risk_count", "EVIDENCE_MISSING"), _risk_status(risk, "high_risk_count")),
                 ("Orphaned Entries", _count(orphaned), "warning" if orphaned else "neutral"),
                 ("Access Violations", _count(violations), "warning" if violations else "neutral"),
             ),
