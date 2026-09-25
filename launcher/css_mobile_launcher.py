@@ -930,7 +930,7 @@ def build_launcher_frontend_state(
                 "reason": str(questrade_activation.get("reason") or "NOT_ACTIVATED"),
                 "attempted": bool(questrade_activation.get("attempted", False)),
                 "provider_available": bool(questrade_activation.get("provider_available", False)),
-                "secure_token_store_present": questrade_token_store_present,
+                "secure_store_configured": questrade_token_store_present,
                 "execution_allowed": False,
                 "live_trading_blocked": True,
                 "broker_execution_armed": False,
