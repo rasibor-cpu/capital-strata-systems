@@ -63,7 +63,7 @@ Write-Host ("  broker_account        : {0}" -f $state.brokers.active_broker.acco
 Write-Host ("  broker_market_data    : {0}" -f $state.brokers.active_broker.market_data_status)
 Write-Host ("  broker_failure_reason : {0}" -f $state.runtime_snapshot.broker.failure_reason)
 Write-Host ("  credential_status     : {0}" -f $state.brokers.active_broker.credential_status)
-Write-Host ("  credential_reason     : {0}" -f $state.brokers.active_broker.credential_failure_reason)
+Write-Host ("  credential_reason     : {0}" -f $state.brokers.active_broker.setup_failure_reason)
 $missingCredentialFields = @($state.brokers.active_broker.missing_credential_fields)
 if ($missingCredentialFields.Count -gt 0) {
     Write-Host "  missing credential fields:"
@@ -71,7 +71,7 @@ if ($missingCredentialFields.Count -gt 0) {
         Write-Host ("    - {0}" -f $item)
     }
 }
-Write-Host ("  credential_action     : {0}" -f $state.brokers.active_broker.credential_recommended_action)
+Write-Host ("  credential_action     : {0}" -f $state.brokers.active_broker.setup_recommended_action)
 $brokerWarnings = @($state.brokers.active_broker.warnings)
 if ($brokerWarnings.Count -gt 0) {
     Write-Host "  broker warnings:"
