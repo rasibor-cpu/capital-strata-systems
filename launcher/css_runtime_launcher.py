@@ -126,13 +126,20 @@ def _is_python_inline_invocation(args_after_interpreter: list[str]) -> bool:
 
 
 def _path_has_canonical_suffix(token: str, suffix_norm: str) -> bool:
-    """Exact path-suffix match using path separators (not arbitrary endswith)."""
+    """Exact canonical path-suffix match independent of host path semantics."""
     if not token or token.startswith("-") or "=" in token:
         return False
-    normalized = os.path.normcase(token.replace("/", os.sep).replace("\\", os.sep))
-    if normalized == suffix_norm:
+
+    def _portable(value: str) -> str:
+        normalized = str(value or "").replace("\\", "/")
+        normalized = re.sub(r"/+", "/", normalized)
+        return normalized.rstrip("/").casefold()
+
+    normalized = _portable(token)
+    suffix = _portable(suffix_norm)
+    if normalized == suffix:
         return True
-    return normalized.endswith(os.sep + suffix_norm)
+    return normalized.endswith("/" + suffix)
 
 
 def _classify_python_invocation(args_after_interpreter: list[str]) -> str | None:
