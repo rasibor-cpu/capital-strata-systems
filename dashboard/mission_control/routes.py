@@ -775,6 +775,8 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         if row is None:
             return HTMLResponse("Transaction receipt not found.", status_code=404)
         fields = (
+            ("Receipt / Ledger ID", row.get("ledger_id")),
+            ("User account", row.get("user_id")),
             ("Transaction date", row.get("transaction_date")),
             ("Value date", row.get("value_date")),
             ("Settlement date", row.get("settlement_date")),
@@ -784,9 +786,11 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
             ("Description", row.get("description")),
             ("Reference", row.get("reference")),
             ("Source", row.get("source_type")),
+            ("Source transaction ID", row.get("source_id")),
             ("Broker", row.get("broker")),
             ("Asset class", row.get("asset_class")),
             ("Symbol", row.get("symbol")),
+            ("Recorded at", row.get("recorded_at")),
         )
         body = "".join(
             f"<tr><th>{escape(str(label))}</th><td>{escape(str(value if value not in (None, '') else '—'))}</td></tr>"
@@ -800,8 +804,8 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
             "main{max-width:780px;margin:auto}table{border-collapse:collapse;width:100%}"
             "th,td{border:1px solid #ccc;padding:10px;text-align:left}th{width:35%}"
             ".actions{margin:18px 0}@media print{.actions{display:none}}</style></head>"
-            "<body><main><h1>CSS Transaction Receipt</h1>"
-            "<p>Read-only transaction record. Printing does not repeat or modify the transaction.</p>"
+            "<body><main><h1>CSS Transaction Receipt</h1><p><strong>Capital Strata Systems</strong></p>"
+            "<p>Generated from the authenticated user account ledger. Read-only transaction record; printing does not repeat or modify the transaction.</p>"
             "<div class='actions'><button onclick='history.back()'>Back</button> "
             "<button onclick='window.print()'>Print Receipt</button></div>"
             f"<table>{body}</table></main></body></html>"
