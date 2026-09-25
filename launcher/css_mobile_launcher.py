@@ -192,9 +192,15 @@ def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) 
     snapshot = _QUESTRADE_MISSION_CONTROL_CACHE.read()
     if not snapshot:
         return payload
-    payload["selected_broker"] = "QUESTRADE"
-    payload["canonical_mode"] = "LIVE_READ_ONLY"
     payload["questrade"] = dict(snapshot)
+    selected = str(
+        (payload.get("broker_summary") or {}).get("selected_broker")
+        if isinstance(payload.get("broker_summary"), dict)
+        else payload.get("selected_broker")
+        or ""
+    ).strip().upper()
+    if selected == "QUESTRADE":
+        payload["canonical_mode"] = "LIVE_READ_ONLY"
     payload["execution_allowed"] = False
     payload["live_trading_blocked"] = True
     payload["broker_execution_armed"] = False
@@ -1451,18 +1457,50 @@ def build_launcher_frontend_state(
     auth_identity = _launcher_auth_identity(session_state if isinstance(session_state, dict) else {})
     positions = _launcher_positions_for_frontend()
     broker_startup = get_broker_startup_summary()
+    operator_selection: Dict[str, Any] = {}
+    authenticated_user_id = str(auth_identity.get("user_id") or "").strip()
+    if authenticated_user_id:
+        try:
+            from dashboard.enterprise_shell.operator_configuration import load_broker_selection
+            operator_selection = load_broker_selection(authenticated_user_id)
+        except Exception:
+            operator_selection = {}
+
     runtime_mode_resolution = _canonical_runtime_resolution(
         session=session,
         broker_startup=broker_startup if isinstance(broker_startup, dict) else {},
     )
     runtime_mode = str(runtime_mode_resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).lower()
-    broker = str(broker_startup.get("selected_broker") or session.get("broker", session.get("selected_broker", "NONE")))
-    broker_mode = str(broker_startup.get("broker_mode") or session.get("broker_mode") or "").lower()
-    if broker_mode not in {"live", "paper"}:
-        # Phase 177A: do not invent paper; leave empty and let resolver reason surface
-        broker_mode = str(runtime_mode_resolution.get("broker_mode") or "").lower()
+
+    startup_broker = str(broker_startup.get("selected_broker") or "").strip().upper()
+    preferred_broker = str(operator_selection.get("selected_broker") or "").strip().upper()
+    broker = preferred_broker or str(
+        session.get("broker")
+        or session.get("selected_broker")
+        or startup_broker
+        or "NONE"
+    ).strip().upper()
+
+    preferred_mode = str(operator_selection.get("broker_mode") or "").strip().upper()
+    if preferred_mode == "LIVE_READ_ONLY":
+        broker_mode = "live"
+    elif preferred_mode == "PAPER":
+        broker_mode = "paper"
+    else:
+        broker_mode = str(
+            session.get("broker_mode")
+            or broker_startup.get("broker_mode")
+            or ""
+        ).lower()
         if broker_mode not in {"live", "paper"}:
-            broker_mode = "unresolved"
+            # Phase 177A: do not invent paper; leave empty and let resolver reason surface
+            broker_mode = str(runtime_mode_resolution.get("broker_mode") or "").lower()
+            if broker_mode not in {"live", "paper"}:
+                broker_mode = "unresolved"
+
+    startup_matches_preference = bool(
+        startup_broker and startup_broker == str(broker).strip().upper()
+    )
     credential_diagnostics = (
         broker_startup.get("credential_diagnostics")
         if isinstance(broker_startup.get("credential_diagnostics"), dict)
@@ -1526,6 +1564,7 @@ def build_launcher_frontend_state(
         "runtime_mode_resolution": runtime_mode_resolution,
         "live_or_paper": "live" if live_family else ("paper" if canonical_mode == RuntimeMode.PAPER.value else "disabled"),
         "resolved_mode": canonical_mode,
+        "selected_broker": broker,
         "broker_mode": broker_mode,
         "execution_enabled": bool(runtime_mode_resolution.get("execution_enabled")),
         "execution_authority": runtime_mode_resolution.get("execution_authority") or "BLOCKED",
@@ -1537,6 +1576,8 @@ def build_launcher_frontend_state(
             "runtime_mode": canonical_mode,
             "live_or_paper": "live" if live_family else ("paper" if canonical_mode == RuntimeMode.PAPER.value else "disabled"),
             "resolved_mode": canonical_mode,
+            "selected_broker": broker,
+            "broker_mode": preferred_mode or broker_mode.upper(),
             # Phase 176D: never invent TRADER; use authenticated identity when present.
             "role": str(auth_identity.get("role") or session.get("role") or "UNAUTHENTICATED"),
             "user_id": str(auth_identity.get("user_id") or session.get("user_id") or "UNAUTHENTICATED"),
@@ -1614,14 +1655,20 @@ def build_launcher_frontend_state(
             "selected_broker": broker,
             "broker_type": str(broker_startup.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
             "broker_mode": broker_mode,
-            "connected": bool(broker_startup.get("broker_connected", False)),
-            "broker_connected": bool(broker_startup.get("broker_connected", False)),
-            "broker_authenticated": bool(broker_startup.get("broker_authenticated", False)),
-            "broker_health": str(broker_startup.get("broker_health", "UNKNOWN")),
-            "broker_infrastructure_health": str(
-                broker_startup.get("broker_infrastructure_health", broker_startup.get("broker_health", "UNKNOWN"))
+            "connected": bool(broker_startup.get("broker_connected", False)) if startup_matches_preference else False,
+            "broker_connected": bool(broker_startup.get("broker_connected", False)) if startup_matches_preference else False,
+            "broker_authenticated": bool(broker_startup.get("broker_authenticated", False)) if startup_matches_preference else False,
+            "broker_health": str(broker_startup.get("broker_health", "UNKNOWN")) if startup_matches_preference else "UNAVAILABLE",
+            "broker_infrastructure_health": (
+                str(broker_startup.get("broker_infrastructure_health", broker_startup.get("broker_health", "UNKNOWN")))
+                if startup_matches_preference
+                else "UNAVAILABLE"
             ),
-            "broker_ready": bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False))),
+            "broker_ready": (
+                bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False)))
+                if startup_matches_preference
+                else False
+            ),
             "broker_readiness": dict(broker_readiness),
             "broker_parity": dict(broker_parity),
             "broker_credential_diagnostics": dict(broker_credential_diagnostics),
@@ -1647,17 +1694,37 @@ def build_launcher_frontend_state(
                     oanda_validation.get("broker_operational_status", {})
                     if str(broker).upper() == "OANDA"
                     else coinbase_validation.get("broker_operational_status", {})
+                    if str(broker).upper() == "COINBASE"
+                    else {
+                        "broker": "QUESTRADE",
+                        "status": str(questrade_activation.get("status") or "UNAVAILABLE"),
+                        "reason": str(questrade_activation.get("reason") or "NOT_ACTIVATED"),
+                        "execution_allowed": False,
+                        "live_trading_blocked": True,
+                        "broker_execution_armed": False,
+                        "advisory_only": True,
+                    }
+                    if str(broker).upper() == "QUESTRADE"
+                    else {
+                        "broker": str(broker).upper() or "UNAVAILABLE",
+                        "status": "UNAVAILABLE",
+                        "reason": "BROKER_SERVICE_NOT_CONFIGURED",
+                        "execution_allowed": False,
+                        "live_trading_blocked": True,
+                        "broker_execution_armed": False,
+                        "advisory_only": True,
+                    }
                 ),
                 "coinbase": dict(coinbase_validation.get("broker_operational_status", {})),
                 "oanda": dict(oanda_validation.get("broker_operational_status", {})),
             },
-            "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))),
+            "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))) if startup_matches_preference else False,
             "authenticated": bool(
                 broker_startup.get("authenticated", broker_startup.get("broker_authenticated", broker_readiness.get("authenticated", False)))
             ),
-            "account_loaded": bool(broker_startup.get("account_loaded", broker_readiness.get("account_loaded", False))),
-            "market_data_ready": bool(broker_startup.get("market_data_ready", broker_readiness.get("market_data_ready", False))),
-            "execution_supported": bool(broker_startup.get("execution_supported", broker_readiness.get("execution_supported", False))),
+            "account_loaded": bool(broker_startup.get("account_loaded", broker_readiness.get("account_loaded", False))) if startup_matches_preference else False,
+            "market_data_ready": bool(broker_startup.get("market_data_ready", broker_readiness.get("market_data_ready", False))) if startup_matches_preference else False,
+            "execution_supported": bool(broker_startup.get("execution_supported", broker_readiness.get("execution_supported", False))) if startup_matches_preference else False,
             "infrastructure_health": str(broker_startup.get("infrastructure_health", broker_readiness.get("infrastructure_health", "UNKNOWN"))),
             "credentials_health": str(broker_startup.get("credentials_health", broker_readiness.get("credentials_health", "UNKNOWN"))),
             "authentication_health": str(broker_startup.get("authentication_health", broker_readiness.get("authentication_health", "UNKNOWN"))),
