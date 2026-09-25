@@ -6,6 +6,14 @@ import copy
 from urllib.parse import parse_qs
 from typing import Dict, Any, List, Optional
 
+_LAUNCHER_RECOVERY_QUESTIONS = (
+    "What city were you born in?",
+    "What was the name of your first school?",
+    "What was the make of your first car?",
+    "What was the first company you worked for?",
+    "What was your best subject in secondary school?",
+)
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 from backend.runtime.live_environment_loader import load_css_runtime_environment
 
@@ -328,14 +336,12 @@ document.getElementById('recovery_new_password')?.addEventListener('input',ev=>{
 
 def _launcher_recovery_enrollment_page(message: str = "", status: str = "info") -> str:
     from html import escape
-    from dashboard.auth.css_sign_on import canonical_recovery_questions
-
     notice = ""
     if message:
         notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
 
     rows = []
-    for index, question in enumerate(canonical_recovery_questions(), start=1):
+    for index, question in enumerate(_LAUNCHER_RECOVERY_QUESTIONS, start=1):
         field = f"recovery_answer_{index}"
         rows.append(
             '<div class="recovery-row">'
