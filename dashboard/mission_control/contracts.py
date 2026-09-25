@@ -147,6 +147,12 @@ def build_mission_control_state(
         and isinstance(dashboard_state.get("operator_broker_selection"), Mapping)
         else {}
     )
+    account_controls_source = (
+        dashboard_state.get("account_controls")
+        if isinstance(dashboard_state, Mapping)
+        and isinstance(dashboard_state.get("account_controls"), Mapping)
+        else {}
+    )
     enterprise_broker_runtime_safe_source = _safe_enterprise_broker_runtime_source(
         enterprise_broker_runtime_source
     )
@@ -182,6 +188,13 @@ def build_mission_control_state(
             )
         ),
         "portfolio": _portfolio(account, positions, pnl, runtime_snapshot, frontend, execution),
+        "account_controls": redact_value({
+            "funding_requests": [],
+            "margin_control": {"status": "DISABLED"},
+            "funding_requires_external_verification": True,
+            "overdraft_allowed_without_margin": False,
+            **dict(account_controls_source),
+        }),
         "transaction_history": redact_value({
             "transactions": [],
             "source": "PERSISTENCE",
