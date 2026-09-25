@@ -7,7 +7,7 @@ from typing import Any, Mapping
 
 REDACTED = "[REDACTED]"
 _SENSITIVE_KEY = re.compile(
-    r"(api[_-]?key|oauth[_-]?code|refresh[_-]?token|access[_-]?token|client[_-]?secret|"
+    r"(api[_-]?key|oauth[_-]?code|refresh[_-]?token|access[_-]?token|token|client[_-]?secret|"
     r"private[_-]?key|password|passphrase|certificate|account[_-]?(number|id)|"
     r"authorization|cookie|secret)",
     re.IGNORECASE,
