@@ -229,9 +229,9 @@ def render(state: dict) -> str:
             "execution": "BLOCKED",
             "execution_state": "EXECUTION_BLOCKED",
             "safety_status": safety.get("status") or safety.get("execution") or "FAIL_CLOSED",
-            "primary_crypto": roles.get("PRIMARY_CRYPTO_BROKER", "COINBASE"),
-            "primary_fx": roles.get("PRIMARY_FX_BROKER", "OANDA"),
-            "primary_canadian_equities": roles.get("PRIMARY_CANADIAN_EQUITIES_BROKER", "QUESTRADE"),
+            "primary_crypto": roles.get("PRIMARY_CRYPTO_BROKER", "UNAVAILABLE"),
+            "primary_fx": roles.get("PRIMARY_FX_BROKER", "UNAVAILABLE"),
+            "primary_canadian_equities": roles.get("PRIMARY_CANADIAN_EQUITIES_BROKER", "UNAVAILABLE"),
         }))
         + _evidence_panel("mc-broker-evidence", "Show sanitized broker telemetry", detail_table("Broker Telemetry", {
             "broker": telemetry.get("broker"),
