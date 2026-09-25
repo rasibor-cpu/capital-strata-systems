@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.pages.transaction_history import render as render_transaction_history
+from launcher.css_mobile_launcher import _launcher_login_page, _launcher_password_change_page
 
 
 def test_broker_picker_greys_unavailable_brokers_and_requires_confirmation() -> None:
@@ -78,3 +79,18 @@ def test_account_ledger_entry_exposes_generate_receipt_link() -> None:
     })
     assert "Generate Receipt" in body
     assert "/mission-control/transaction-receipt/12345-20260924220000000000" in body
+
+
+def test_launcher_exposes_mobile_login_and_password_change_pages() -> None:
+    login = _launcher_login_page()
+    assert "<title>CSS Sign In</title>" in login
+    assert 'form method="post" action="/login"' in login
+    assert 'name="user_id"' in login
+    assert 'name="password"' in login
+    assert "Log on to CSS" in login
+
+    password_change = _launcher_password_change_page()
+    assert "<title>CSS Password Change</title>" in password_change
+    assert 'form method="post" action="/password-change"' in password_change
+    assert 'name="new_password"' in password_change
+    assert 'name="confirm_password"' in password_change
