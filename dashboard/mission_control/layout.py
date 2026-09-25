@@ -155,7 +155,7 @@ def render_mission_control_shell(
         <div class="mc-status-strip" aria-label="Global status indicators">
           {_badge('Runtime', runtime_mode)}
           {_badge('Execution', execution_state)}
-          {_badge('Broker', platform_status.get('broker_mode') or platform.get('selected_broker') or 'NONE')}
+          {_broker_quick_control(state_dict)}
           {_badge('Broker Health', platform.get('broker_health'))}
           {_badge('Platform', platform.get('platform_status'))}
           {_badge('Safety', safety.get('safety_status'))}
@@ -175,6 +175,77 @@ def render_mission_control_shell(
   {debug_script}
 </body>
 </html>"""
+
+
+
+
+def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
+    from dashboard.enterprise_shell.operator_configuration import broker_row_selectable
+
+    brokers = _mapping(state_dict.get("brokers"))
+    active = _mapping(brokers.get("active_broker"))
+    selection = _mapping(brokers.get("operator_selection"))
+    auth = _mapping(state_dict.get("authorization_context"))
+    rows = brokers.get("broker_list") if isinstance(brokers.get("broker_list"), list) else []
+    selected = str(
+        selection.get("selected_broker")
+        or active.get("selected_broker")
+        or "NONE"
+    ).strip().upper()
+    selected_mode = str(selection.get("broker_mode") or active.get("broker_mode") or "PAPER").strip().upper()
+    can_select = bool(auth.get("authenticated", True)) and bool(auth.get("active", True))
+
+    options = []
+    selectable_count = 0
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        broker = str(row.get("broker") or "").strip().upper()
+        if not broker or broker == "PAPER":
+            continue
+        available = broker_row_selectable(dict(row))
+        if available:
+            selectable_count += 1
+        disabled = "" if available else " disabled"
+        selected_attr = " selected" if broker == selected else ""
+        state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
+        label = broker + (" — Available" if available else " — Unavailable: " + state)
+        options.append(
+            '<option value="' + escape(broker) + '"' + disabled + selected_attr + '>'
+            + escape(label) + '</option>'
+        )
+
+    if not can_select:
+        return _badge("Broker", selected or "NONE")
+
+    paper_selected = " selected" if selected_mode == "PAPER" else ""
+    read_selected = " selected" if selected_mode == "LIVE_READ_ONLY" else ""
+    submit_disabled = " disabled" if selectable_count == 0 else ""
+    return (
+        '<details class="mc-broker-quick" data-mc-status="broker">'
+        '<summary class="mc-badge neutral"><span class="mc-badge-label">Broker</span>'
+        '<span class="mc-badge-sep">: </span><span class="mc-badge-value">' + escape(selected or "NONE") + '</span>'
+        '<span class="mc-broker-caret" aria-hidden="true"> ▾</span></summary>'
+        '<div class="mc-broker-quick-popover">'
+        '<form class="mc-broker-quick-form">'
+        '<label>Preferred broker<select name="broker" required>' + ''.join(options) + '</select></label>'
+        '<label>Mode<select name="broker_mode" required>'
+        '<option value="PAPER"' + paper_selected + '>Paper</option>'
+        '<option value="LIVE_READ_ONLY"' + read_selected + '>Live read-only</option></select></label>'
+        '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> Confirm broker choice</label>'
+        '<button type="submit"' + submit_disabled + '>Use This Broker</button>'
+        '</form><p class="mc-broker-quick-result" aria-live="polite"></p>'
+        '<a href="/mission-control/broker-management">Open Broker Management</a>'
+        '</div></details>'
+        '<script>(function(){const forms=document.querySelectorAll(".mc-broker-quick-form");'
+        'forms.forEach(form=>form.addEventListener("submit",async(ev)=>{ev.preventDefault();'
+        'const out=form.parentElement.querySelector(".mc-broker-quick-result");'
+        'const body=new URLSearchParams(new FormData(form));try{'
+        'const response=await fetch("/operator-config/broker-selection",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/x-www-form-urlencoded","X-Requested-With":"XMLHttpRequest"},body});'
+        'const data=await response.json();if(!response.ok)throw new Error(data.detail||"Save failed");'
+        'out.textContent="Broker choice confirmed. Refreshing…";window.location.reload();'
+        '}catch(err){out.textContent=String(err.message||err);}}));})();</script>'
+    )
 
 
 
