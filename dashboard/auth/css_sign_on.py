@@ -207,6 +207,7 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
             "lockout_started_at": None,
             "recovery_question": None,
             "recovery_answer_hash": None,
+            "recovery_answers": {},
             "recovery_required": True,
             "recovery_configured_at": None,
         }
@@ -310,6 +311,7 @@ def create_user(
         "lockout_started_at": None,
         "recovery_question": None,
         "recovery_answer_hash": None,
+        "recovery_answers": {},
         "recovery_required": True,
         "recovery_configured_at": None,
         "created_at": datetime.now().isoformat(timespec="seconds"),
@@ -546,9 +548,62 @@ def hash_recovery_answer(answer: str) -> str:
 
 
 def recovery_is_configured(user_record: Dict[str, Any]) -> bool:
-    return bool(
-        str(user_record.get("recovery_question", "") or "").strip()
-        and str(user_record.get("recovery_answer_hash", "") or "").strip()
+    answers = user_record.get("recovery_answers")
+    if not isinstance(answers, dict):
+        return False
+    return all(
+        bool(str(answers.get(question, "") or "").strip())
+        for question in RECOVERY_QUESTIONS
+    )
+
+
+def recovery_question_hashes(user_record: Dict[str, Any]) -> dict[str, str]:
+    answers = user_record.get("recovery_answers")
+    if not isinstance(answers, dict):
+        return {}
+    return {
+        question: str(answers.get(question, "") or "").strip()
+        for question in RECOVERY_QUESTIONS
+        if str(answers.get(question, "") or "").strip()
+    }
+
+
+def enroll_all_password_recovery(
+    users: Dict[str, Any],
+    user_id: str,
+    recovery_answers: Dict[str, str],
+) -> None:
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        raise AuthFailure("USER_NOT_FOUND", "User ID not recognized.")
+
+    if not isinstance(recovery_answers, dict):
+        raise PasswordValidationError("All five recovery answers are required.")
+
+    answer_hashes: dict[str, str] = {}
+    for question in RECOVERY_QUESTIONS:
+        answer_hash = hash_recovery_answer(recovery_answers.get(question, ""))
+        if not answer_hash:
+            raise PasswordValidationError(
+                f"Recovery answer required for: {question}"
+            )
+        answer_hashes[question] = answer_hash
+
+    user_record["recovery_answers"] = answer_hashes
+    # Retain legacy fields only as a non-authoritative compatibility marker.
+    user_record["recovery_question"] = RECOVERY_QUESTIONS[0]
+    user_record["recovery_answer_hash"] = answer_hashes[RECOVERY_QUESTIONS[0]]
+    user_record["recovery_required"] = False
+    user_record["recovery_configured_at"] = datetime.now(timezone.utc).isoformat()
+    save_users(users)
+
+    record_auth_audit_event(
+        "password_recovery_configured",
+        normalized_user_id,
+        "SUCCESS",
+        auth_source="interactive",
+        details={"recovery_question_count": len(RECOVERY_QUESTIONS)},
     )
 
 
@@ -559,6 +614,8 @@ def enroll_password_recovery(
     recovery_answer: str,
     confirm_answer: str | None = None,
 ) -> None:
+    """Compatibility helper for one question; account remains recovery-required
+    until all five approved questions have answers."""
     normalized_user_id = normalize_user_id(user_id)
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
@@ -576,17 +633,26 @@ def enroll_password_recovery(
     if not answer_hash:
         raise PasswordValidationError("Recovery answer cannot be blank.")
 
+    answers = user_record.get("recovery_answers")
+    if not isinstance(answers, dict):
+        answers = {}
+    answers[question] = answer_hash
+    user_record["recovery_answers"] = answers
     user_record["recovery_question"] = question
     user_record["recovery_answer_hash"] = answer_hash
-    user_record["recovery_required"] = False
-    user_record["recovery_configured_at"] = datetime.now(timezone.utc).isoformat()
+    complete = recovery_is_configured(user_record)
+    user_record["recovery_required"] = not complete
+    user_record["recovery_configured_at"] = (
+        datetime.now(timezone.utc).isoformat() if complete else None
+    )
     save_users(users)
 
     record_auth_audit_event(
-        "password_recovery_configured",
+        "password_recovery_partial_configured" if not complete else "password_recovery_configured",
         normalized_user_id,
         "SUCCESS",
         auth_source="interactive",
+        details={"configured_count": len(recovery_question_hashes(user_record))},
     )
 
 
@@ -623,6 +689,7 @@ def reset_password_with_recovery(
     recovery_answer: str,
     new_password: str,
     confirm_password: str,
+    recovery_question: str | None = None,
 ) -> Dict[str, Any]:
     normalized_user_id = normalize_user_id(user_id)
     user_record = users.get(normalized_user_id)
@@ -632,11 +699,16 @@ def reset_password_with_recovery(
     if not recovery_is_configured(user_record):
         raise AuthFailure(
             "RECOVERY_NOT_CONFIGURED",
-            "Password recovery has not been configured for this account.",
+            "All five password recovery questions have not been configured for this account.",
         )
 
+    question = str(recovery_question or "").strip()
+    if question not in RECOVERY_QUESTIONS:
+        raise AuthFailure("RECOVERY_FAILED", "Password recovery challenge is invalid.")
+
+    answers = recovery_question_hashes(user_record)
     supplied_hash = hash_recovery_answer(recovery_answer)
-    expected_hash = str(user_record.get("recovery_answer_hash", "")).strip()
+    expected_hash = str(answers.get(question, "") or "").strip()
 
     if not supplied_hash or supplied_hash != expected_hash:
         record_auth_audit_event(
@@ -645,6 +717,7 @@ def reset_password_with_recovery(
             "FAIL",
             "recovery_answer_incorrect",
             auth_source="interactive",
+            details={"challenge_question": question},
         )
         raise AuthFailure(
             "RECOVERY_FAILED",
@@ -664,6 +737,7 @@ def reset_password_with_recovery(
         normalized_user_id,
         "SUCCESS",
         auth_source="interactive",
+        details={"challenge_question": question},
     )
 
     return user_ctx
@@ -2361,6 +2435,7 @@ def _default_admin_record(bootstrap_password: str) -> Dict[str, Any]:
         "lockout_started_at": None,
         "recovery_question": None,
         "recovery_answer_hash": None,
+        "recovery_answers": {},
         "recovery_required": True,
         "recovery_configured_at": None,
     }
