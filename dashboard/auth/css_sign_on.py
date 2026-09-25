@@ -1048,6 +1048,8 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                     "role": user_ctx.get("role"),
                     "unit_code": user_ctx.get("unit_code"),
                     "home_branch": user_ctx.get("home_branch"),
+                    "selected_broker": str(user_ctx.get("selected_broker") or "").strip().upper() or None,
+                    "broker_mode": str(user_ctx.get("broker_mode") or "").strip().upper() or None,
                     "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "login_persistence": True,
                 },
@@ -1085,6 +1087,40 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                 temp_file.unlink()
         except Exception:
             pass
+
+
+def update_persisted_session_broker(
+    *,
+    selected_broker: str | None,
+    broker_mode: str | None,
+    user_id: str | None = None,
+) -> bool:
+    """Update broker preference in the current persisted auth session only.
+
+    This does not grant execution authority. It preserves the original login
+    timestamp and all identity fields while carrying the operator's broker
+    choice across the authenticated session.
+    """
+    if not SESSION_AUTH_FILE.exists():
+        return False
+    try:
+        data = json.loads(SESSION_AUTH_FILE.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return False
+        persisted_user = normalize_user_id(data.get("user_id"))
+        requested_user = normalize_user_id(user_id) if user_id else persisted_user
+        if not persisted_user or persisted_user != requested_user:
+            return False
+        broker = str(selected_broker or "").strip().upper()
+        mode = str(broker_mode or "").strip().upper()
+        data["selected_broker"] = broker or None
+        data["broker_mode"] = mode or None
+        temp_file = SESSION_AUTH_FILE.with_name(SESSION_AUTH_FILE.name + ".tmp")
+        temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(str(temp_file), str(SESSION_AUTH_FILE))
+        return True
+    except Exception:
+        return False
 
 
 def invalidate_login_session() -> None:
@@ -1469,6 +1505,12 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         or None
     )
     user_ctx["last_auth_event"] = "restored_session_success"
+    selected_broker = str(data.get("selected_broker") or "").strip().upper()
+    broker_mode = str(data.get("broker_mode") or "").strip().upper()
+    if selected_broker:
+        user_ctx["selected_broker"] = selected_broker
+    if broker_mode:
+        user_ctx["broker_mode"] = broker_mode
 
     record_auth_audit_event(
         "restored_session_success",
