@@ -283,7 +283,7 @@ def _global_balance_bar(state_dict: Mapping[str, Any]) -> str:
         '<div class="mc-balance-main">'
         '<span class="mc-balance-label">Available Balance</span>'
         '<strong class="mc-sensitive-balance" data-balance-value="' + escape(amount(available)) + '">' + escape(amount(available)) + '</strong>'
-        '<button class="mc-balance-eye" type="button" aria-pressed="false" aria-label="Mask balance" title="Mask / unmask balance">'
+        '<button class="mc-balance-eye" type="button" data-mc-balance-mask="1" aria-pressed="false" aria-label="Mask balance" title="Mask / unmask balance">'
         '<span class="mc-eye-open" aria-hidden="true">◉</span><span class="mc-eye-closed" aria-hidden="true">◌</span></button>'
         '</div>'
         '<div class="mc-balance-meta">'
