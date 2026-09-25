@@ -5747,12 +5747,25 @@ async def operator_config_user_account(request: Request):
             agreement_version=str(payload.get("agreement_version") or ""),
             actor_user_id=actor["user_id"],
         )
+        from backend.accounting.account_funding_control import save_margin_setoff_control
+        margin_enabled = str(payload.get("margin_enabled") or "").lower() in {"1", "true", "yes", "on"}
+        margin_profile = save_margin_setoff_control(
+            user_id=user_id,
+            status="PENDING" if margin_enabled else "DISABLED",
+            currency=str(payload.get("margin_currency") or payload.get("system_access_currency") or "USD"),
+            margin_limit=payload.get("margin_limit", "0"),
+            linked_credit_account_alias=str(payload.get("linked_credit_account_alias") or ""),
+            setoff_form_version=str(payload.get("setoff_form_version") or ""),
+            setoff_executed=False,
+            actor_user_id=actor["user_id"],
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
     return JSONResponse({
         "status": "SAVED",
         "profile": profile,
+        "margin_profile": margin_profile,
         "role_updated": True,
         "execution_allowed": False,
     })
