@@ -16,6 +16,10 @@ BALANCE_FIELDS = (
     "margin_available",
     "held_reserved",
     "pending",
+    "pending_debits",
+    "pending_credits",
+    "settled_cash",
+    "effective_available_balance",
     "unrealized_pnl",
     "realized_pnl",
     "total_pnl",
@@ -63,6 +67,22 @@ def build_broker_balance_summary(
             if capital is not None and ratio is not None
             else None
         )
+    pending_debits = values.get("pending_debits")
+    pending_credits = values.get("pending_credits")
+    held_reserved = values.get("held_reserved")
+    settled_cash = _first_number(values.get("settled_cash"), values.get("cash"))
+    if values.get("available_to_trade") is None and settled_cash is not None:
+        values["available_to_trade"] = (
+            settled_cash
+            + (pending_credits or 0.0)
+            - (pending_debits or 0.0)
+            - (held_reserved or 0.0)
+        )
+    values["effective_available_balance"] = _first_number(
+        values.get("effective_available_balance"),
+        values.get("available_to_trade"),
+    )
+    values["settled_cash"] = settled_cash
     total_pnl = _sum_if_available(values.get("realized_pnl"), values.get("unrealized_pnl"))
     values["total_pnl"] = _first_number(values.get("total_pnl"), total_pnl)
     source_name = "CSS_PAPER_CAPITAL" if paper else (broker_name or "UNAVAILABLE")
@@ -125,6 +145,10 @@ def _provider_values(source: Mapping[str, Any], broker: str) -> dict[str, float 
         "margin_available": ("margin_available", "available_margin", "free_margin", "maintenance_excess"),
         "held_reserved": ("held_reserved", "held", "locked", "reserved"),
         "pending": ("pending", "pending_balance"),
+        "pending_debits": ("pending_debits", "pending_outflows", "unsettled_debits"),
+        "pending_credits": ("pending_credits", "pending_inflows", "unsettled_credits"),
+        "settled_cash": ("settled_cash", "cash", "cash_balance", "balance"),
+        "effective_available_balance": ("effective_available_balance",),
         "unrealized_pnl": ("unrealized_pnl", "unrealizedPL"),
         "realized_pnl": ("realized_pnl", "realizedPL"),
         "total_pnl": ("total_pnl",),
@@ -188,6 +212,16 @@ def _paper_collateral_policy(source: Mapping[str, Any]) -> tuple[float | None, s
 
 
 def _value_contract(value: float | None, *, currency: str, source: str, provenance: str, freshness: Any, as_of: str) -> dict[str, Any]:
+    available = value is not None
+    freshness_text = str(freshness or "UNAVAILABLE").strip().upper()
+    if not available:
+        verification = "UNVERIFIED"
+    elif provenance == "BROKER_REPORTED" and freshness_text not in {"STALE", "UNAVAILABLE", "UNKNOWN"}:
+        verification = "BROKER_VERIFIED"
+    elif provenance == "SIMULATED_PAPER_ACCOUNT":
+        verification = "SIMULATED_VERIFIED"
+    else:
+        verification = "UNVERIFIED"
     return {
         "value": value,
         "currency": currency,
@@ -195,7 +229,8 @@ def _value_contract(value: float | None, *, currency: str, source: str, provenan
         "provenance": provenance,
         "freshness": freshness or "UNAVAILABLE",
         "as_of": as_of,
-        "availability_state": "AVAILABLE" if value is not None else "UNAVAILABLE",
+        "availability_state": "AVAILABLE" if available else "UNAVAILABLE",
+        "verification_state": verification,
     }
 
 
