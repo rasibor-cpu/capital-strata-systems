@@ -219,7 +219,7 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         disabled = "" if available else " disabled"
         selected_attr = " selected" if broker == selected else ""
         state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
-        label = broker + (" — Service available" if available else " — Preference only; service currently " + state)
+        label = broker + (" — Available" if available else " — Preference only; service currently " + state)
         options.append(
             '<option value="' + escape(broker) + '"' + disabled + selected_attr + '>'
             + escape(label) + '</option>'
@@ -233,10 +233,11 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
     submit_disabled = " disabled" if selectable_count == 0 else ""
     return (
         '<details class="mc-broker-quick" data-mc-status="broker">'
-        '<summary class="mc-badge neutral"><span class="mc-badge-label">Broker Settings</span>'
+        '<summary class="mc-badge neutral"><span class="mc-badge-label">' + escape(broker_label) + '</span>'
         '<span class="mc-badge-sep">: </span><span class="mc-badge-value">' + escape(selected or "NONE") + '</span>'
         '<span class="mc-broker-caret" aria-hidden="true"> ▾</span></summary>'
         '<div class="mc-broker-quick-popover">'
+        '<strong>Broker Settings</strong>'
         '<p class="mc-muted">Preference only. This control does not connect a broker, change the runtime-active broker, or arm execution.</p>'
         '<p class="mc-muted"><strong>Runtime active broker:</strong> ' + escape(active_selected or "UNAVAILABLE") + '</p>'
         '<form class="mc-broker-quick-form">'
