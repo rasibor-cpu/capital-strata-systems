@@ -119,9 +119,16 @@ def test_mc_readonly_pages_ssr() -> None:
         res = client.get(path)
         assert res.status_code == 200, path
         assert "READ ONLY" in res.text
-        # No writable forms on these pages
+        # Read-only pages may expose the shell's explicit logout POST, but no
+        # page-level writable forms are allowed.
         soup = BeautifulSoup(res.text, "html.parser")
-        assert soup.select("form") == []
+        forms = soup.select("form")
+        assert all(
+            form.get("action") == "/logout"
+            and str(form.get("method") or "").lower() == "post"
+            and "mc-logout-form" in (form.get("class") or [])
+            for form in forms
+        )
 
 
 def test_web_scc_nav_links_clickable() -> None:
