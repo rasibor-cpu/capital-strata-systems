@@ -1931,3 +1931,24 @@ def test_frontend_contract_carries_multi_broker_read_only_evidence() -> None:
     assert broker["oanda_live_validation"]["validation_status"] == "PASS"
     assert broker["questrade_read_only_status"]["secure_store_configured"] is True
     assert broker["questrade_read_only_status"].get("execution_allowed") is False
+
+
+def test_mission_control_menu_exposes_post_logout_action() -> None:
+    html = _shell()
+    assert '<form class="mc-logout-form" method="post" action="/logout">' in html
+    assert '<button class="mc-logout-btn" type="submit">Log out / Exit</button>' in html
+
+
+def test_mobile_landing_exposes_post_logout_action() -> None:
+    body = render_mobile_landing(
+        {
+            "canonical_home": "/mobile-launcher",
+            "landing": [
+                {"label": "Home", "href": "/mobile-launcher"},
+                {"label": "Mission Control", "href": "/mission-control/executive-overview"},
+            ],
+        },
+        manifest_href="/manifest.json",
+    )
+    assert '<form class="logout-form" method="post" action="/logout">' in body
+    assert 'Log out / Exit' in body
