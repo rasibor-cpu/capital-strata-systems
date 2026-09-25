@@ -1725,9 +1725,9 @@ def test_broker_management_tier1_snapshot_is_mobile_compact() -> None:
     end = body.find("Account &amp; Balance Snapshot", start)
     snapshot = body[start:end]
     assert "<th>COINBASE</th>" in snapshot
-    assert "PRIMARY_CRYPTO_BROKER" in snapshot
-    assert "readiness NOT_INITIALIZED" in snapshot
-    assert "certification NOT_INITIALIZED" in snapshot
+    assert "PRIMARY CRYPTO BROKER" in snapshot
+    assert "readiness NOT INITIALIZED" in snapshot
+    assert "certification NOT INITIALIZED" in snapshot
     assert "execution DISABLED" in snapshot
     assert "<thead>" not in snapshot
 
