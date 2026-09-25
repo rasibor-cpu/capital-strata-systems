@@ -286,7 +286,7 @@ def test_certification_and_mission_control_governance_are_metadata_only() -> Non
     assert metadata.vcid in html
     assert "synthetic-test-credential" not in html
     assert resolve_section_slug("credential-governance").key == "credential_governance"
-    assert len(MISSION_CONTROL_SECTIONS) == 16
+    assert len(MISSION_CONTROL_SECTIONS) == 20
     denied = render_mission_control_shell(
         {"credential_governance": state["credential_governance"]},
         active_section="credential_governance",
