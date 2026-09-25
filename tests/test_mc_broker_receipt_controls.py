@@ -88,7 +88,7 @@ def test_launcher_exposes_mobile_login_and_password_change_pages() -> None:
     assert 'name="user_id"' in login
     assert 'name="password"' in login
     assert "Masked:" in login
-    assert "one-way hash" in login
+    assert "PBKDF2" in login
     assert "Log on to CSS" in login
 
     password_change = _launcher_password_change_page()
@@ -162,7 +162,7 @@ def test_launcher_requires_recovery_setup_screen_before_first_access() -> None:
         assert f'name="recovery_answer_{index}"' in page
     assert "All five recovery answers are required before first access" in page
     assert "Save All 5 Answers and Continue" in page
-    assert "stored only as one-way hashes" in page
+    assert "PBKDF2" in page
 
 
 def test_global_mission_control_broker_badge_is_clickable_for_authenticated_user() -> None:
@@ -241,5 +241,5 @@ def test_recovery_challenge_page_masks_answer_and_password() -> None:
     assert 'id="recovery_answer" name="recovery_answer" type="password"' in page
     assert 'id="recovery_new_password" name="new_password" type="password"' in page
     assert "Masked:" in page
-    assert "stored as one-way hash" in page
+    assert "PBKDF2" in page
     assert "Show / Hide Entries" in page
