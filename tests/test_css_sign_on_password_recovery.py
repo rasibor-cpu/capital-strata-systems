@@ -1,3 +1,4 @@
+import json
 """CSS forward-state auth/recovery acceptance: password policy and recovery."""
 
 from __future__ import annotations
@@ -94,6 +95,38 @@ def test_password_change_preserves_recovery_and_noncredential_state(tmp_path, mo
     assert updated["ui_preferences"] == ui_before
     assert updated["feature_preferences"] == features_before
     assert updated["must_change_password"] is False
+
+
+def test_persisted_auth_session_carries_broker_preference(tmp_path, monkeypatch):
+    session_file = tmp_path / "css_auth_session.json"
+    monkeypatch.setattr(auth, "SESSION_AUTH_FILE", session_file)
+
+    auth.persist_login_session(
+        {
+            "user_id": "00000",
+            "display_name": "CSS Administrator",
+            "role": "SUPER_USER",
+            "unit_code": "HQ",
+            "home_branch": "HQ",
+            "selected_broker": "OANDA",
+            "broker_mode": "LIVE_READ_ONLY",
+        }
+    )
+
+    payload = json.loads(session_file.read_text(encoding="utf-8"))
+    assert payload["selected_broker"] == "OANDA"
+    assert payload["broker_mode"] == "LIVE_READ_ONLY"
+
+    assert auth.update_persisted_session_broker(
+        selected_broker="QUESTRADE",
+        broker_mode="LIVE_READ_ONLY",
+        user_id="00000",
+    ) is True
+    updated = json.loads(session_file.read_text(encoding="utf-8"))
+    assert updated["selected_broker"] == "QUESTRADE"
+    assert updated["broker_mode"] == "LIVE_READ_ONLY"
+    assert updated["user_id"] == "00000"
+    assert updated["last_login"] == payload["last_login"]
 
 
 def test_password_hashes_are_salted_pbkdf2_records():
