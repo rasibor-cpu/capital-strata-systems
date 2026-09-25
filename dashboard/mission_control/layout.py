@@ -219,7 +219,7 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         disabled = "" if available else " disabled"
         selected_attr = " selected" if broker == selected else ""
         state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
-        label = broker + (" — Available" if available else " — Preference only; service currently " + state)
+        label = broker + (" — Available" if available else " — Unavailable: " + state)
         options.append(
             '<option value="' + escape(broker) + '"' + disabled + selected_attr + '>'
             + escape(label) + '</option>'
