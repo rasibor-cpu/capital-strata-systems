@@ -44,13 +44,18 @@ USER_ADMIN_ROLES = {"SUPER_USER"}
 
 CSS_AUTH_PANEL_WIDTH = 78
 
-RECOVERY_QUESTIONS = (
+_CANONICAL_RECOVERY_QUESTIONS = (
     "What city were you born in?",
     "What was the name of your first school?",
     "What was the make of your first car?",
     "What was the first company you worked for?",
     "What was your best subject in secondary school?",
 )
+RECOVERY_QUESTIONS = _CANONICAL_RECOVERY_QUESTIONS
+
+
+def canonical_recovery_questions() -> tuple[str, ...]:
+    return _CANONICAL_RECOVERY_QUESTIONS
 
 
 
