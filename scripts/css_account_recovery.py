@@ -13,27 +13,12 @@ from dashboard.auth.css_sign_on import (
     RECOVERY_QUESTIONS,
     PasswordValidationError,
     change_password,
-    hash_recovery_answer,
+    enroll_all_password_recovery,
     load_users,
     normalize_user_id,
     record_auth_audit_event,
     save_users,
 )
-
-
-def _choose_question() -> str:
-    print("\nCSS password recovery questions:")
-    for index, question in enumerate(RECOVERY_QUESTIONS, start=1):
-        print(f"  {index}. {question}")
-    while True:
-        raw = input("\nSelect question number: ").strip()
-        try:
-            index = int(raw)
-        except ValueError:
-            index = 0
-        if 1 <= index <= len(RECOVERY_QUESTIONS):
-            return RECOVERY_QUESTIONS[index - 1]
-        print("Enter a valid question number.")
 
 
 def main() -> int:
@@ -59,31 +44,25 @@ def main() -> int:
 
     new_password = getpass.getpass(f"New password (minimum {MIN_PASSWORD_LENGTH} characters): ")
     confirm_password = getpass.getpass("Confirm new password: ")
-    question = _choose_question()
-    answer = getpass.getpass("Recovery answer: ")
-    confirm_answer = getpass.getpass("Confirm recovery answer: ")
 
-    if answer != confirm_answer:
-        print("Recovery answers do not match.")
-        return 2
-    answer_hash = hash_recovery_answer(answer)
-    if not answer_hash:
-        print("Recovery answer cannot be blank.")
-        return 2
+    print("\nAll five recovery questions must be answered.")
+    answers: dict[str, str] = {}
+    for index, question in enumerate(RECOVERY_QUESTIONS, start=1):
+        print(f"\n{index}. {question}")
+        answer = getpass.getpass("Recovery answer: ")
+        confirm_answer = getpass.getpass("Confirm recovery answer: ")
+        if answer != confirm_answer:
+            print("Recovery answers do not match.")
+            return 2
+        answers[question] = answer
 
     try:
         change_password(users, user_id, new_password, confirm_password)
+        enroll_all_password_recovery(users, user_id, answers)
     except PasswordValidationError as exc:
-        print(f"Password reset failed: {exc}")
+        print(f"Password / recovery reset failed: {exc}")
         return 2
 
-    record = users[user_id]
-    record["recovery_question"] = question
-    record["recovery_answer_hash"] = answer_hash
-    record["recovery_configured_at"] = __import__("datetime").datetime.now(
-        __import__("datetime").timezone.utc
-    ).isoformat()
-    record["recovery_required"] = False
     save_users(users)
 
     record_auth_audit_event(
@@ -91,9 +70,9 @@ def main() -> int:
         user_id,
         "SUCCESS",
         auth_source="local_maintenance",
-        details={"recovery_question_configured": True},
+        details={"recovery_question_count": len(RECOVERY_QUESTIONS)},
     )
-    print("\nPassword and recovery question were reset successfully.")
+    print("\nPassword and all five recovery questions were reset successfully.")
     print("Failed sign-on lockout state has also been cleared.")
     print("You can now use the new password or the Forgot password flow.")
     return 0
