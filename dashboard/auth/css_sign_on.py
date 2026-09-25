@@ -1052,6 +1052,11 @@ def persist_login_session(user_ctx: Dict[str, Any]) -> None:
                     "home_branch": user_ctx.get("home_branch"),
                     "selected_broker": str(user_ctx.get("selected_broker") or "").strip().upper() or None,
                     "broker_mode": str(user_ctx.get("broker_mode") or "").strip().upper() or None,
+                    "broker_preference_only": True,
+                    "broker_runtime_activation_changed": False,
+                    "broker_execution_armed": False,
+                    "execution_allowed": False,
+                    "live_trading_blocked": True,
                     "last_login": datetime.now(timezone.utc).isoformat(timespec="seconds"),
                     "login_persistence": True,
                 },
@@ -1119,6 +1124,11 @@ def update_persisted_session_broker(
         mode = str(broker_mode or "").strip().upper()
         data["selected_broker"] = broker or None
         data["broker_mode"] = mode or None
+        data["broker_preference_only"] = True
+        data["broker_runtime_activation_changed"] = False
+        data["broker_execution_armed"] = False
+        data["execution_allowed"] = False
+        data["live_trading_blocked"] = True
         temp_file = SESSION_AUTH_FILE.with_name(SESSION_AUTH_FILE.name + ".tmp")
         temp_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(str(temp_file), str(SESSION_AUTH_FILE))
