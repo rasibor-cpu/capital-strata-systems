@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from html import unescape
 import re
 
 import pytest
@@ -161,10 +162,10 @@ def _parse(html: str) -> dict[str, str]:
     if current is None:
         current = re.search(r'<a[^>]*aria-current="page"[^>]*>(.*?)</a>', nav_html, re.S)
     return {
-        "title": (title.group(1).strip() if title else ""),
-        "breadcrumb": (breadcrumb.group(1).strip() if breadcrumb else ""),
-        "h1": (h1.group(1).strip() if h1 else ""),
-        "aria_current": re.sub(r"<[^>]+>", "", current.group(1)).strip() if current else "",
+        "title": unescape(title.group(1).strip()) if title else "",
+        "breadcrumb": unescape(breadcrumb.group(1).strip()) if breadcrumb else "",
+        "h1": unescape(h1.group(1).strip()) if h1 else "",
+        "aria_current": unescape(re.sub(r"<[^>]+>", "", current.group(1)).strip()) if current else "",
     }
 
 
