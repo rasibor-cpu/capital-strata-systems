@@ -95,7 +95,12 @@ def test_reports_generate_disabled_for_viewer() -> None:
     assert "disabled" in html
 
 
-def test_mc_readonly_pages_ssr() -> None:
+def test_mc_readonly_pages_ssr(monkeypatch) -> None:
+    # Keep this certification deterministic and independent of any persisted
+    # operator session on the machine running the suite.
+    monkeypatch.setenv("CSS_AUTH_BRIDGE_MODE", "off")
+    monkeypatch.setenv("CSS_TRUST_INTERNAL_AUTH_HEADERS", "0")
+
     app = FastAPI()
     register_mission_control(app, lambda: None)
     client = TestClient(app)
@@ -119,16 +124,28 @@ def test_mc_readonly_pages_ssr() -> None:
         res = client.get(path)
         assert res.status_code == 200, path
         assert "READ ONLY" in res.text
-        # Read-only pages may expose the shell's explicit logout POST, but no
-        # page-level writable forms are allowed.
         soup = BeautifulSoup(res.text, "html.parser")
         forms = soup.select("form")
-        assert all(
-            form.get("action") == "/logout"
-            and str(form.get("method") or "").lower() == "post"
-            and "mc-logout-form" in (form.get("class") or [])
-            for form in forms
-        )
+
+        # The shell may expose logout. Trade Operations additionally exposes a
+        # controlled paper/preview request form; it must remain explicitly
+        # non-live and must not grant broker execution authority.
+        for form in forms:
+            classes = form.get("class") or []
+            if (
+                form.get("action") == "/logout"
+                and str(form.get("method") or "").lower() == "post"
+                and "mc-logout-form" in classes
+            ):
+                continue
+
+            assert path == "/mission-control/trade-operations"
+            assert form.get("id") == "mc-trade-ticket-form"
+            assert form.select_one('input[name="paper_only"][value="true"]') is not None
+            assert form.select_one('input[name="broker_execution_allowed"][value="false"]') is not None
+            submit = form.select_one('button[type="submit"]')
+            assert submit is not None
+            assert submit.has_attr("disabled")
 
 
 def test_web_scc_nav_links_clickable() -> None:
