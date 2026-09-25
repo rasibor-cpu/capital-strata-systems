@@ -24,9 +24,13 @@ $overall = [string]$final.overall
 $blockers = @($final.blockers)
 $checks = @($final.checks)
 
-Write-Host ("Final certification : {0}" -f ($overall ? $overall : "UNAVAILABLE"))
-Write-Host ("Runtime status      : {0}" -f ($runtime.runtime_status ? $runtime.runtime_status : "UNAVAILABLE"))
-Write-Host ("Heartbeat status    : {0}" -f ($runtime.heartbeat_status ? $runtime.heartbeat_status : "UNAVAILABLE"))
+$overallDisplay = if ([string]::IsNullOrWhiteSpace($overall)) { "UNAVAILABLE" } else { $overall }
+$runtimeStatusDisplay = if ([string]::IsNullOrWhiteSpace([string]$runtime.runtime_status)) { "UNAVAILABLE" } else { [string]$runtime.runtime_status }
+$heartbeatStatusDisplay = if ([string]::IsNullOrWhiteSpace([string]$runtime.heartbeat_status)) { "UNAVAILABLE" } else { [string]$runtime.heartbeat_status }
+
+Write-Host ("Final certification : {0}" -f $overallDisplay)
+Write-Host ("Runtime status      : {0}" -f $runtimeStatusDisplay)
+Write-Host ("Heartbeat status    : {0}" -f $heartbeatStatusDisplay)
 Write-Host ("State hash present  : {0}" -f [bool]($state.state_hash))
 Write-Host ("Runtime hash present: {0}" -f [bool]($state.runtime.state_hash))
 Write-Host ("Safety execution    : {0}" -f $state.safety.execution_allowed)
