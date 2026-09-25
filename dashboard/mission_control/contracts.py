@@ -1334,6 +1334,20 @@ def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> 
             "margin": "UNAVAILABLE",
             "execution_scope": "READ_ONLY",
         }
+    credential_diagnostics = (
+        broker.get("broker_credential_diagnostics")
+        if isinstance(broker.get("broker_credential_diagnostics"), Mapping)
+        else broker.get("credential_diagnostics")
+        if isinstance(broker.get("credential_diagnostics"), Mapping)
+        else {}
+    )
+    missing_credential_fields = credential_diagnostics.get(
+        "missing_credential_fields",
+        credential_diagnostics.get("missing_credentials", []),
+    )
+    if not isinstance(missing_credential_fields, list):
+        missing_credential_fields = []
+
     active = {
         "selected_broker": runtime_broker.get("selected_broker", broker.get("selected_broker", "UNAVAILABLE")),
         "broker_mode": runtime_broker.get("broker_mode", broker.get("broker_mode", "UNAVAILABLE")),
@@ -1362,6 +1376,20 @@ def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> 
         "state_provenance": runtime_broker.get("provenance", canonical.get("status_provenance", broker.get("status_provenance", {}))),
         "failure_reason": runtime_broker.get("failure_reason", canonical.get("failure_reason", broker.get("failure_reason", DATA_UNAVAILABLE))),
         "warnings": runtime_broker.get("warnings", broker.get("warning_reasons", [])),
+        "credential_status": credential_diagnostics.get(
+            "credential_status",
+            "PRESENT" if credential_diagnostics.get("credentials_present") is True else "MISSING",
+        ),
+        "credential_failure_reason": credential_diagnostics.get(
+            "canonical_failure_reason",
+            credential_diagnostics.get("failure_reason", DATA_UNAVAILABLE),
+        ),
+        "missing_credential_fields": [str(item) for item in missing_credential_fields],
+        "credential_recommended_action": credential_diagnostics.get(
+            "remediation_hint",
+            credential_diagnostics.get("recommended_action", DATA_UNAVAILABLE),
+        ),
+        "credential_values_exposed": False,
     }
     registry = get_canonical_broker_registry()
     return {
