@@ -1339,6 +1339,13 @@ def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> 
         "broker_mode": runtime_broker.get("broker_mode", broker.get("broker_mode", "UNAVAILABLE")),
         "provider_version": broker.get("provider_version", DATA_UNAVAILABLE),
         "connection_status": runtime_broker.get("transport", broker.get("connection_status", DATA_UNAVAILABLE)),
+        "broker_health": runtime_broker.get(
+            "broker_health",
+            runtime_broker.get(
+                "overall_status",
+                broker.get("broker_health", canonical.get("overall_status", DATA_UNAVAILABLE)),
+            ),
+        ),
         "authentication_status": runtime_broker.get("authentication", broker.get("authentication_status", DATA_UNAVAILABLE)),
         "account_status": runtime_broker.get("account", canonical.get("account_status", broker.get("account_data_health", DATA_UNAVAILABLE))),
         "market_data_status": runtime_broker.get("market_data", broker.get("market_data_status", DATA_UNAVAILABLE)),
