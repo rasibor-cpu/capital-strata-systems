@@ -188,6 +188,43 @@ def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) 
 
 
 
+@launcher_router.post("/logout")
+async def launcher_logout():
+    """Explicit operator logout for the launcher / Mission Control surface."""
+    from dashboard.auth.session_bridge import invalidate_bridged_session
+
+    invalidate_bridged_session()
+    response = RedirectResponse("/logged-out", status_code=303)
+    response.delete_cookie("css_mobile_session")
+    response.delete_cookie("css_mobile_pw_change")
+    return response
+
+
+@launcher_router.get("/logged-out", response_class=HTMLResponse)
+async def launcher_logged_out():
+    return HTMLResponse(
+        """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Signed Out</title>
+  <style>
+    body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:560px;margin:0 auto;padding:48px 20px}
+    .card{border:1px solid #2b3b4a;border-radius:12px;background:#151d25;padding:22px}
+    h1{margin:0 0 10px;font-size:1.6rem}
+    p{color:#a8b4c0}
+  </style>
+</head>
+<body><main><section class="card">
+<h1>Signed out</h1>
+<p>Your CSS operator session has been invalidated. You can safely close this browser tab or app window.</p>
+</section></main></body></html>"""
+    )
+
+
+
 def _utc_iso_z() -> str:
     return datetime.datetime.now(datetime.UTC).replace(tzinfo=None).isoformat() + "Z"
 
