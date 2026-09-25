@@ -128,6 +128,7 @@ def render(state: dict) -> str:
     auth = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
     can_configure = bool(auth.get("authenticated")) and bool(auth.get("active"))
     telemetry = section(state, "broker_telemetry")
+    registry = section(state, "broker_registry_console")
     runtime = section(state, "enterprise_broker_runtime")
     balance = section(state, "broker_balance_summary")
 
@@ -197,6 +198,7 @@ def render(state: dict) -> str:
             "execution_scope": active.get("execution_scope") or "BLOCKED",
         }))
         + _anchor_panel("mc-broker-tier1", detail_table("Tier-1 Broker Snapshot", _tier_summary(broker_list)))
+        + _anchor_panel("mc-broker-registry", detail_table("Broker Registry Console", registry))
         + _anchor_panel("mc-broker-account", detail_table("Account & Balance Snapshot", {
             "balance_status": balance.get("status") or balance.get("availability_state") or "UNAVAILABLE",
             "account_value": balance.get("total_account_value") or balance.get("account_value") or "UNAVAILABLE",
