@@ -52,12 +52,13 @@ def test_broker_picker_greys_unavailable_brokers_and_requires_confirmation() -> 
         },
     })
     assert 'id="mc-selected-broker-card"' in body
-    assert "Tap to choose and confirm" in body
+    assert "Tap to change preference" in body
     assert "COINBASE — Available" in body
     assert "OANDA — Unavailable: CONFIGURATION REQUIRED" in body
     assert '<option value="OANDA" disabled' in body
     assert 'name="confirm_choice" value="YES" required' in body
-    assert "Confirm Broker Choice" in body
+    assert "Save Broker Preference" in body
+    assert "does not connect a broker, change the runtime-active broker, or arm execution" in body
     assert "Execution remains subject to all CSS safety and certification gates" in body
 
 
@@ -241,7 +242,10 @@ def test_global_mission_control_broker_badge_is_clickable_for_authenticated_user
     assert "OANDA — Available" in html
     assert "QUESTRADE — Unavailable: REACTIVATION REQUIRED" in html
     assert '<option value="QUESTRADE" disabled' in html
-    assert "Use This Broker" in html
+    assert "Broker Settings" in html
+    assert "Save Broker Preference" in html
+    assert "Preference only. This control does not connect a broker" in html
+    assert "Runtime active broker:" in html
 
 
 def test_recovery_challenge_page_masks_answer_and_password() -> None:
