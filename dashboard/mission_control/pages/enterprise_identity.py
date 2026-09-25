@@ -131,7 +131,7 @@ def render(state: dict) -> str:
         + _evidence_panel("mc-id-evidence", "Show identity and vault metadata", detail_table("Enterprise Identity", identities) + detail_table("Vault Health", vault))
         + _evidence_panel("mc-id-rotation", "Show rotation and certificate metadata", detail_table("Rotation", rotation) + detail_table("Certificates", certificates))
         + _evidence_panel("mc-id-auth", "Show authentication registration metadata", detail_table("OAuth", oauth) + detail_table("Broker Authentication", broker_auth))
-        + _evidence_panel("mc-id-risk-evidence", "Show risk and audit metadata", detail_table("Risk", risk) + detail_table("Audit", audit) + detail_table("Orphaned Entries", orphaned) + detail_table("Direct Access Violations", violations))
+        + _evidence_panel("mc-id-risk-evidence", "Show risk and audit metadata", detail_table("Risk", risk) + detail_table("Audit", audit) + detail_table("Orphaned Secrets", orphaned) + detail_table("Direct Access Violations", violations))
         + _evidence_panel("mc-id-governance", "Show authority and migration metadata", detail_table("Secret Authority", authority) + detail_table("Legacy Compatibility", compatibility) + detail_table("Ownership Coverage", ownership) + detail_table("Migration Progress", migration) + detail_table("Vault Health Score", health_score))
         + '</div>'
     )
