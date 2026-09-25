@@ -260,6 +260,77 @@ def _parse_windows_discovery_payload(
     return processes, anchor_pid, None
 
 
+def _is_proven_interpreter_parent_shim(
+    *,
+    candidate_pid: int,
+    candidate_parent_pid: int | None,
+    candidate_command_line: str,
+    expected_pid: int,
+    process_rows: list[dict[str, Any]],
+) -> bool:
+    """Identify a Windows venv/interpreter launcher shim without PID-only exclusion.
+
+    The candidate is excluded only when all of these are true:
+    - it is the direct parent of the expected current interpreter;
+    - both parent and current process are Python interpreter invocations;
+    - both classify to the same canonical CSS role;
+    - their normalized command lines represent the same launcher target.
+
+    This preserves fail-closed duplicate-owner behavior for unrelated processes.
+    """
+    if os.name != "nt":
+        return False
+
+    expected_row = None
+    for row in process_rows:
+        if not isinstance(row, dict):
+            continue
+        if canonical_process_pid(row.get("ProcessId")) == expected_pid:
+            expected_row = row
+            break
+    if not isinstance(expected_row, dict):
+        return False
+
+    expected_parent = canonical_process_pid(expected_row.get("ParentProcessId"))
+    if expected_parent != candidate_pid:
+        return False
+
+    expected_cmd = expected_row.get("CommandLine")
+    if not isinstance(expected_cmd, str) or not expected_cmd.strip():
+        return False
+    if not isinstance(candidate_command_line, str) or not candidate_command_line.strip():
+        return False
+
+    expected_role = classify_canonical_process_command(expected_cmd)
+    candidate_role = classify_canonical_process_command(candidate_command_line)
+    if not expected_role or expected_role != candidate_role:
+        return False
+
+    def _target_signature(command_line: str) -> tuple[str, ...]:
+        tokens = _tokenize_command(command_line)
+        for index, token in enumerate(tokens):
+            if not _is_python_interpreter_token(token):
+                continue
+            args = tokens[index + 1 :]
+            if "-m" in args:
+                mi = args.index("-m")
+                if mi + 1 < len(args):
+                    return ("module", args[mi + 1])
+            for arg in args:
+                if _path_has_canonical_suffix(arg, CANONICAL_LAUNCHER_SCRIPT_SUFFIX):
+                    return ("script", CANONICAL_LAUNCHER_SCRIPT_SUFFIX)
+                if _path_has_canonical_suffix(arg, CANONICAL_MOBILE_SCRIPT_SUFFIX):
+                    return ("script", CANONICAL_MOBILE_SCRIPT_SUFFIX)
+                if _path_has_canonical_suffix(arg, CANONICAL_DASHBOARD_SCRIPT_SUFFIX):
+                    return ("script", CANONICAL_DASHBOARD_SCRIPT_SUFFIX)
+            break
+        return ()
+
+    return bool(_target_signature(expected_cmd)) and (
+        _target_signature(expected_cmd) == _target_signature(candidate_command_line)
+    )
+
+
 def discover_canonical_runtime_processes(
     *,
     repo_root: str = REPO_ROOT,
@@ -397,6 +468,17 @@ def discover_canonical_runtime_processes(
             # Windows often returns null CommandLine under ACL denial. Such rows
             # cannot be classified as owners and are skipped (not counted).
             # Envelope/subprocess failures still fail closed above.
+            continue
+
+        parent_raw = row.get("ParentProcessId")
+        parent_pid_value = canonical_process_pid(parent_raw)
+        if _is_proven_interpreter_parent_shim(
+            candidate_pid=pid,
+            candidate_parent_pid=parent_pid_value,
+            candidate_command_line=cmd,
+            expected_pid=expected_pid,
+            process_rows=list(process_rows or []),
+        ):
             continue
 
         cmd_norm = os.path.normcase(cmd)
