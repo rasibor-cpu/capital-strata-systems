@@ -29,6 +29,12 @@ def _count(value: object) -> object:
     return "EVIDENCE_MISSING"
 
 
+def _source_count(source: dict, key: str) -> object:
+    if key not in source:
+        return "EVIDENCE_MISSING"
+    return _count(source.get(key))
+
+
 def _risk_status(risk: dict, key: str) -> str:
     if key not in risk:
         return "EVIDENCE_MISSING"
@@ -52,7 +58,8 @@ def render(state: dict) -> str:
             + warning_banner("Administrator authentication is required.")
         )
     raw = state.get("oauth_governance")
-    data = redact_value(raw if isinstance(raw, dict) else {})
+    source = raw if isinstance(raw, dict) else {}
+    data = redact_value(source)
     providers = data.get("provider_inventory") if isinstance(data.get("provider_inventory"), list) else []
     authorization = data.get("authorization_status") if isinstance(data.get("authorization_status"), list) else []
     scopes = data.get("scope_summary") if isinstance(data.get("scope_summary"), dict) else {}
@@ -75,8 +82,8 @@ def render(state: dict) -> str:
           '</nav>'
         + metric_grid(
             (
-                ("Providers", _count(providers), "neutral"),
-                ("Registrations", _count(authorization), "neutral"),
+                ("Providers", _source_count(source, "provider_inventory"), _source_count(source, "provider_inventory")),
+                ("Registrations", _source_count(source, "authorization_status"), _source_count(source, "authorization_status")),
                 ("Certification", certification.get("outcome", "NOT_CERTIFIED"), certification.get("outcome", "NOT_CERTIFIED")),
                 ("Execution", "BLOCKED", "blocked"),
             ),
@@ -86,29 +93,29 @@ def render(state: dict) -> str:
         + metric_grid(
             (
                 ("High Risk", risk.get("high_risk_count", "EVIDENCE_MISSING"), _risk_status(risk, "high_risk_count")),
-                ("Expiry Forecast", _count(expiry), "neutral"),
-                ("Audit Events", _count(audit), "neutral"),
-                ("Scope Groups", _count(scopes), "neutral"),
+                ("Expiry Forecast", _source_count(source, "expiry_forecast"), _source_count(source, "expiry_forecast")),
+                ("Audit Events", _source_count(source, "audit"), _source_count(source, "audit")),
+                ("Scope Groups", _source_count(source, "scope_summary"), _source_count(source, "scope_summary")),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Enterprise OAuth secondary metrics",
         )
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-oauth-status", detail_table("OAuth Governance Snapshot", {
-            "provider_count": _count(providers),
-            "registration_count": _count(authorization),
+            "provider_count": _source_count(source, "provider_inventory"),
+            "registration_count": _source_count(source, "authorization_status"),
             "certification": certification.get("outcome", "NOT_CERTIFIED"),
             "execution": "BLOCKED",
         }))
         + _anchor_panel("mc-oauth-risk", detail_table("OAuth Risk Snapshot", {
             "high_risk_count": risk.get("high_risk_count", "EVIDENCE_MISSING"),
-            "expiry_forecast_count": _count(expiry),
-            "audit_event_count": _count(audit),
+            "expiry_forecast_count": _source_count(source, "expiry_forecast"),
+            "audit_event_count": _source_count(source, "audit"),
             "rotation_readiness": rotation.get("status", rotation.get("outcome", "EVIDENCE_MISSING")),
         }))
         + _anchor_panel("mc-oauth-policy", detail_table("OAuth Policy Snapshot", {
             "policy_status": policy.get("status", policy.get("outcome", "EVIDENCE_MISSING")),
-            "scope_group_count": _count(scopes),
+            "scope_group_count": _source_count(source, "scope_summary"),
             "authorization_flow_enabled": "DISABLED",
             "refresh_flow_enabled": "DISABLED",
             "browser_launch_enabled": "DISABLED",
