@@ -52,6 +52,18 @@ def _top_opportunity_snapshot(opportunities: dict) -> dict:
     }
 
 
+def _safe_opportunity_rows(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    blocked = {"provenance", "state_hash", "evidence", "source_payload", "raw_payload"}
+    rows: list[dict] = []
+    for row in value:
+        if not isinstance(row, dict):
+            continue
+        rows.append({key: item for key, item in row.items() if key not in blocked})
+    return rows
+
+
 def render(state: dict) -> str:
     market = section(state, "market_intelligence")
     opportunities = section(state, "opportunity_ranking")
@@ -97,7 +109,7 @@ def render(state: dict) -> str:
         }))
         + _anchor_panel("mc-market-opportunities", detail_table("Top Opportunity Snapshot", _top_opportunity_snapshot(opportunities)))
         + _anchor_panel("mc-market-opportunity-ranking", detail_table("Opportunity Ranking", opportunities))
-        + _evidence_panel("mc-market-opportunity-evidence", "Show full opportunity evidence", detail_table("Opportunity Evidence (Full)", opportunities.get("opportunities", [])))
+        + _evidence_panel("mc-market-opportunity-evidence", "Show full opportunity evidence", detail_table("Opportunity Evidence (Full)", _safe_opportunity_rows(opportunities.get("opportunities"))))
         + _evidence_panel("mc-market-signal-evidence", "Show full signal-surface evidence", detail_table("Signal Surface Evidence (Full)", {
             "pressure": market.get("pressure"),
             "probability": market.get("probability"),
