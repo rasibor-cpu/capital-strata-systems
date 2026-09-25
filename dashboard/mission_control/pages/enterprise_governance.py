@@ -136,7 +136,7 @@ def render(state: dict) -> str:
             "low_count": _risk_count(risk, "low_count"),
             "risk_register_count": _count(data.get("enterprise_risk_register")),
         }))
-        + _anchor_panel("mc-gov-blockers", detail_table("Outstanding Certification Blockers", {
+        + _anchor_panel("mc-gov-blockers", detail_table("Certification Blockers Snapshot — Outstanding Certification Blockers", {
             "blocker_count": _count(data.get("outstanding_blockers")),
             "blockers": data.get("outstanding_blockers", "EVIDENCE_MISSING"),
         }))
