@@ -12,6 +12,10 @@ from dashboard.auth import css_sign_on as auth
 pytestmark = pytest.mark.live_session
 
 
+def _configured_recovery_answers():
+    return {question: auth.hash_recovery_answer("test answer") for question in auth.RECOVERY_QUESTIONS}
+
+
 @pytest.fixture(autouse=True)
 def _disable_automated_auth_bypass(monkeypatch):
     """Persistence restoration must exercise real restore/console paths (AR-023)."""
@@ -46,6 +50,8 @@ def mock_registry():
             "home_branch": "HQ",
             "locked": False,
             "lockout_until": None,
+            "recovery_answers": _configured_recovery_answers(),
+            "recovery_required": False,
         },
         "00001": {
             "user_id": "00001",
@@ -55,6 +61,8 @@ def mock_registry():
             "home_branch": "HQ",
             "locked": False,
             "lockout_until": None,
+            "recovery_answers": _configured_recovery_answers(),
+            "recovery_required": False,
         },
         "00002": {
             "user_id": "00002",
@@ -64,6 +72,8 @@ def mock_registry():
             "home_branch": "HQ",
             "locked": True,
             "lockout_until": None,
+            "recovery_answers": _configured_recovery_answers(),
+            "recovery_required": False,
         }
     }
 
