@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from html import escape
 
+from backend.security.vault_redaction import redact_value
 from dashboard.mission_control.pages._components import (
     detail_table,
     metric_grid,
@@ -130,6 +131,7 @@ def render(state: dict) -> str:
     telemetry = section(state, "broker_telemetry")
     registry = section(state, "broker_registry_console")
     runtime = section(state, "enterprise_broker_runtime")
+    runtime_safe = redact_value(runtime)
     balance = section(state, "broker_balance_summary")
 
     holdings = runtime.get("holdings_readiness") if isinstance(runtime.get("holdings_readiness"), dict) else {}
@@ -227,9 +229,9 @@ def render(state: dict) -> str:
             "overall_health": telemetry.get("overall_health"),
         }))
         + _evidence_panel("mc-broker-runtime", "Show sanitized provider and readiness evidence",
-            detail_table("Enterprise Broker Health", runtime.get("broker_health", {}))
-            + detail_table("OAuth Status", runtime.get("oauth_status", []))
-            + detail_table("Secret Lease Health", runtime.get("lease_health", []))
+            detail_table("Enterprise Broker Health", runtime_safe.get("broker_health", {}))
+            + detail_table("OAuth Status", runtime_safe.get("oauth_status", []))
+            + detail_table("Secret Lease Health", runtime_safe.get("lease_health", []))
             + detail_table("Provider Health", provider)
             + detail_table("Holdings Readiness", holdings)
             + detail_table("Market Data Readiness", runtime.get("market_data_readiness", []))
