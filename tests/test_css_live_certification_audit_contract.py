@@ -85,9 +85,9 @@ def test_live_certification_audit_reports_missing_credential_field_names_only():
         encoding="utf-8"
     )
     assert "credential_status" in text
-    assert "credential_reason" in text
+    assert "setup_failure_reason" in text
     assert "missing credential fields" in text
-    assert "credential_action" in text
+    assert "setup_recommended_action" in text
 
 
 def test_live_certification_audit_reports_contract_validation_reasons():
