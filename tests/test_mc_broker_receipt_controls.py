@@ -87,6 +87,14 @@ def test_launcher_exposes_mobile_login_and_password_change_pages() -> None:
     assert 'form method="post" action="/login"' in login
     assert 'name="user_id"' in login
     assert 'name="password"' in login
+    assert 'name="broker"' in login
+    assert '<option value="">Choose later</option>' in login
+    assert '<option value="COINBASE">Coinbase</option>' in login
+    assert '<option value="OANDA">OANDA</option>' in login
+    assert '<option value="QUESTRADE">Questrade</option>' in login
+    assert '<option value="BINANCE">Binance</option>' in login
+    assert 'name="broker_mode"' in login
+    assert "does not enable trading or arm broker execution" in login
     assert "Masked:" in login
     assert "PBKDF2" in login
     assert "Log on to CSS" in login
