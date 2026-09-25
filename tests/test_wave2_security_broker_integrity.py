@@ -89,7 +89,10 @@ def test_ar023_bootstrap_seeds_with_strong_secret(tmp_path, monkeypatch):
     monkeypatch.setenv("CSS_BOOTSTRAP_ADMIN_PASSWORD", "StrongBootstrap!9")
     users = auth.load_users(tmp_path / "users.json")
     assert "00000" in users
-    assert users["00000"]["password_hash"] == auth.hash_password("StrongBootstrap!9")
+    password_hash = users["00000"]["password_hash"]
+    assert password_hash.startswith("pbkdf2_sha256$")
+    assert auth.verify_password("StrongBootstrap!9", password_hash) is True
+    assert auth.verify_password("WrongBootstrap!9", password_hash) is False
     assert users["00000"]["must_change_password"] is True
 
 
