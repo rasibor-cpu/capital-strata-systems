@@ -41,6 +41,7 @@ def render_mobile_landing(
         "Portfolio",
         "Market Intelligence",
         "Risk Command",
+        "Asset Classes",
         "Options Income",
     }
 
