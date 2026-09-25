@@ -6,7 +6,12 @@ from dashboard.mission_control.pages._components import metric_grid, page_header
 
 
 def _opt(value: str, label: str, selected: str) -> str:
-    return f'<option value="{escape(value, quote=True)}"{" selected" if value == selected else ""}>{escape(label)}</option>'
+    selected_attr = " selected" if value == selected else ""
+    return (
+        '<option value="' + escape(value, quote=True) + '"' + selected_attr + '>'
+        + escape(label)
+        + '</option>'
+    )
 
 
 def _profile_table(profiles: dict[str, dict]) -> str:
@@ -53,13 +58,13 @@ def render(state: dict) -> str:
 
     admin_form = ""
     if admin:
-        admin_form = f"""
+        admin_form = """
 <section class="mc-panel">
   <h2>Configure User Account</h2>
   <p class="mc-muted">Administrative configuration is persisted separately from execution authority. Saving these terms does not enable trading.</p>
   <form id="mc-user-account-config" class="mc-filter-form">
-    <label>User<select name="user_id" required><option value="">Select user</option>{user_options}</select></label>
-    <label>Role / privilege<select name="role" required><option value="">Select role</option>{role_options}</select></label>
+    <label>User<select name="user_id" required><option value="">Select user</option>__USER_OPTIONS__</select></label>
+    <label>Role / privilege<select name="role" required><option value="">Select role</option>__ROLE_OPTIONS__</select></label>
     <label>User mode<select name="user_mode" required>
       <option value="SELF_DIRECTED">Self-directed — user trades and accepts trading risk</option>
       <option value="CSS_ADVISORY_CONFIRM">CSS advisory — user accepts/rejects suggestions; accepted trades may execute only when the platform is separately authorized</option>
@@ -85,65 +90,70 @@ def render(state: dict) -> str:
   <p id="mc-user-config-result" class="mc-muted" aria-live="polite"></p>
 </section>
 <script>
-document.getElementById('mc-user-account-config')?.addEventListener('submit', async (ev) => {{
+document.getElementById('mc-user-account-config')?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const result = document.getElementById('mc-user-config-result');
   const body = new URLSearchParams(new FormData(ev.currentTarget));
-  try {{
-    const response = await fetch('/operator-config/user-account', {{
+  try {
+    const response = await fetch('/operator-config/user-account', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: {{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'}},
+      headers: {'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},
       body
-    }});
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Save failed');
     result.textContent = 'Configuration saved. User acceptance remains ' + (data.profile?.acceptance_status || 'PENDING') + '.';
-  }} catch (err) {{
+  } catch (err) {
     result.textContent = String(err.message || err);
-  }}
-}});
+  }
+});
 </script>
 """
+        admin_form = admin_form.replace("__USER_OPTIONS__", user_options).replace("__ROLE_OPTIONS__", role_options)
 
     current_user = str(auth.get("user_id") or "")
     own = profiles.get(current_user) if isinstance(profiles.get(current_user), dict) else {}
     acceptance = ""
     if own and own.get("acceptance_status") != "ACCEPTED":
         agreement = escape(str(own.get("agreement_version") or ""), quote=True)
-        acceptance = f"""
+        acceptance = """
 <section class="mc-panel">
   <h2>Accept Account Terms</h2>
-  <p>Review the configured access charges, trade commissions, user mode, and trading-risk acknowledgement before accepting version <strong>{agreement}</strong>.</p>
+  <p>Review the configured access charges, trade commissions, user mode, and trading-risk acknowledgement before accepting version <strong>__AGREEMENT__</strong>.</p>
   <form id="mc-user-account-accept">
-    <input type="hidden" name="user_id" value="{escape(current_user, quote=True)}">
-    <input type="hidden" name="agreement_version" value="{agreement}">
+    <input type="hidden" name="user_id" value="__CURRENT_USER__">
+    <input type="hidden" name="agreement_version" value="__AGREEMENT__">
     <label><input type="checkbox" required> I accept the configured charges, commission terms, selected user mode, and the stated trading risks.</label>
     <button type="submit">Accept Terms</button>
   </form>
   <p id="mc-user-accept-result" class="mc-muted" aria-live="polite"></p>
 </section>
 <script>
-document.getElementById('mc-user-account-accept')?.addEventListener('submit', async (ev) => {{
+document.getElementById('mc-user-account-accept')?.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const result = document.getElementById('mc-user-accept-result');
   const body = new URLSearchParams(new FormData(ev.currentTarget));
-  try {{
-    const response = await fetch('/operator-config/user-account/accept', {{
+  try {
+    const response = await fetch('/operator-config/user-account/accept', {
       method: 'POST',
       credentials: 'same-origin',
-      headers: {{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'}},
+      headers: {'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},
       body
-    }});
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.detail || 'Acceptance failed');
     result.textContent = 'Terms accepted and timestamped.';
-  }} catch (err) {{
+  } catch (err) {
     result.textContent = String(err.message || err);
-  }}
-}});
+  }
+});
 </script>
 """
+        acceptance = (
+            acceptance.replace("__AGREEMENT__", agreement)
+            .replace("__CURRENT_USER__", escape(current_user, quote=True))
+        )
 
     return (
         page_header(
