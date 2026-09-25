@@ -37,6 +37,21 @@ if (-not (Test-Path $Launcher)) { throw "Canonical CSS runtime launcher not foun
 
 Set-Location $RepoRoot
 
+# Import only non-secret Coinbase references from the user's persistent
+# environment. The private key remains inside the referenced local JSON file.
+foreach ($name in @(
+    "COINBASE_CDP_KEY_NAME",
+    "COINBASE_KEY_JSON_PATH"
+)) {
+    $userValue = [Environment]::GetEnvironmentVariable($name, "User")
+    if (-not [string]::IsNullOrWhiteSpace($userValue)) {
+        Set-Item -Path ("Env:" + $name) -Value $userValue
+    }
+}
+# Canonical startup never imports live-order authority from user configuration.
+$env:COINBASE_ENABLE_LIVE_ORDERS = "false"
+$env:COINBASE_ENABLE_LIVE_TRADING = "false"
+
 # If the canonical runtime is already running under the repo venv, do nothing.
 $existingCanonical = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     $_.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe$' -and
