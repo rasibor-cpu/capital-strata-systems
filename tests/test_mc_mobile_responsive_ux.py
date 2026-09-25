@@ -354,14 +354,22 @@ def test_trade_operations_mobile_priority_is_read_only() -> None:
     })
     assert 'aria-label="Trade Operations priority"' in body
     assert 'aria-label="Trade Operations sections"' in body
+    assert 'href="#mc-trade-ticket"' in body
     assert 'href="#mc-trade-account"' in body
     assert 'href="#mc-trade-decisions"' in body
     assert 'href="#mc-trade-execution"' in body
     assert 'href="#mc-trade-lifecycle"' in body
     assert body.find("<span>Execution Status</span>") < body.find("<span>Account Value</span>")
     assert "1000 CAD" in body
-    assert "<form" not in body
-    assert "method=" not in body
+    assert 'id="mc-trade-ticket-form"' in body
+    assert 'name="instrument"' in body
+    assert 'name="amount"' in body
+    assert 'name="tenor"' in body
+    assert 'name="rate"' in body
+    assert 'name="side"' in body
+    assert 'name="value_date"' in body
+    assert "/operator-trade/request" in body
+    assert "paper/preview" in body
 
 
 def test_operator_mobile_stack_css_preserves_touch_layout() -> None:
@@ -1961,8 +1969,8 @@ def test_mobile_landing_exposes_post_logout_action() -> None:
 def test_mission_control_mobile_chrome_has_back_button() -> None:
     html = _shell()
     assert 'class="mc-back-btn"' in html
-    assert 'aria-label="Back to previous screen"' in html
-    assert "window.history.back()" in html
+    assert 'aria-label="Back one screen"' in html
+    assert "window.history.go(-1)" in html
 
 
 def test_transaction_history_supports_period_and_accounting_date_filters() -> None:
@@ -2135,3 +2143,63 @@ def test_accounting_retention_policy_covers_audit_and_account_records() -> None:
     assert "audit_and_provenance_metadata" in policy["hot_storage_scope"]
     assert policy["archive_integrity"] == "SHA256_VERIFIED"
     assert policy["deletion_by_age_alone"] is False
+
+
+def test_reports_selection_toggle_is_prominent_and_drives_create_panel() -> None:
+    from dashboard.mission_control.pages.reports_center import _report_selection_toggle
+    body = _report_selection_toggle(
+        [
+            {"report_code": "daily_summary", "title": "Daily Summary", "status": "AVAILABLE"},
+            {"report_code": "account_statement", "title": "Account Statement", "status": "AVAILABLE"},
+        ],
+        True,
+    )
+    assert 'aria-label="Report selection toggle"' in body
+    assert 'id="rc-report-toggle"' in body
+    assert "Daily Summary" in body
+    assert "Account Statement" in body
+    assert "Open Selection" in body
+
+
+def test_runtime_metrics_pull_from_active_runtime_and_broker() -> None:
+    from dashboard.mission_control.system_metrics import build_system_metrics
+    metrics = build_system_metrics({
+        "runtime": {
+            "source": "CANONICAL_RUNTIME",
+            "uptime": 123,
+            "heartbeat_age_seconds": 2,
+            "metrics": {
+                "cpu_percent": 17.5,
+                "memory_percent": 42.0,
+                "latency_ms": 8,
+                "queue_depth": 3,
+                "cycle_duration_seconds": 1.25,
+            },
+        },
+        "brokers": {
+            "active_broker": {
+                "selected_broker": "COINBASE",
+                "broker_mode": "LIVE_READ_ONLY",
+            }
+        },
+    })
+    assert metrics["cpu"] == 17.5
+    assert metrics["memory"] == 42.0
+    assert metrics["runtime_latency"] == 8
+    assert metrics["event_queue"] == 3
+    assert metrics["cycle_duration"] == 1.25
+    assert metrics["source_selected"] == "CANONICAL_RUNTIME"
+    assert metrics["active_broker"] == "COINBASE"
+    assert metrics["broker_mode"] == "LIVE_READ_ONLY"
+
+
+def test_runtime_operations_exposes_current_device_auto_metrics() -> None:
+    body = render_runtime_operations({
+        "runtime": {"runtime_status": "RUNNING", "heartbeat_status": "OK", "runtime_mode": "READ_ONLY"},
+        "system_metrics": {"source_selected": "CANONICAL_RUNTIME", "active_broker": "OANDA"},
+    })
+    assert 'id="mc-client-system-metrics"' in body
+    assert "Current Device / Browser Metrics" in body
+    assert "navigator.hardwareConcurrency" in body
+    assert "navigator.deviceMemory" in body
+    assert "network_type" in body
