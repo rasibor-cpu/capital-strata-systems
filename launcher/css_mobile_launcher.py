@@ -223,11 +223,18 @@ def _launcher_login_page(message: str = "", status: str = "info") -> str:
     <input id="user_id" name="user_id" inputmode="numeric" autocomplete="username" required>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <p id="login-password-clue" class="foot">Masked: •••••••••••• · stored/checked as a one-way hash</p>
     <button type="submit">Log on to CSS</button>
   </form>
   <a class="button" href="/forgot-password">Forgot password?</a>
   <p class="foot">Password recovery does not consume another sign-on attempt. Your broker and trading permissions are applied only after authentication and remain subject to CSS safety controls.</p>
-</section></main></body></html>""".replace("__NOTICE__", notice)
+</section></main>
+<script>
+document.getElementById('password')?.addEventListener('input',ev=>{
+ const n=Math.max(1,ev.target.value.length);document.getElementById('login-password-clue').textContent='Masked: '+'•'.repeat(n)+' · stored/checked as a one-way hash';
+});
+</script>
+</body></html>""".replace("__NOTICE__", notice)
 
 
 
@@ -293,16 +300,29 @@ def _launcher_recovery_challenge_page(question: str, message: str = "", status: 
 __NOTICE__
 <form method="post" action="/forgot-password/reset">
 <label for="recovery_answer">Recovery answer</label>
-<input id="recovery_answer" name="recovery_answer" autocomplete="off" required>
+<input id="recovery_answer" name="recovery_answer" type="password" autocomplete="off" required>
 <label for="recovery_new_password">New password</label>
 <input id="recovery_new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
+<p id="password-hash-clue" class="foot">Masked: •••••••••••• · stored as one-way hash</p>
 <label for="recovery_confirm_password">Confirm new password</label>
 <input id="recovery_confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" required>
+<button type="button" id="toggle-reset-secrets">Show / Hide Entries</button>
 <button type="submit">Reset Password</button>
 </form>
 <a class="button secondary" href="/login">Cancel and Return to Sign In</a>
 <p class="foot">A successful reset clears the failed sign-on counter. Recovery attempts are separate from sign-on attempts.</p>
-</section></main></body></html>""".replace("__QUESTION__", escape(question)).replace("__NOTICE__", notice)
+</section></main>
+<script>
+document.getElementById('toggle-reset-secrets')?.addEventListener('click',()=>{
+ ['recovery_answer','recovery_new_password','recovery_confirm_password'].forEach(id=>{
+  const el=document.getElementById(id); if(el) el.type=el.type==='password'?'text':'password';
+ });
+});
+document.getElementById('recovery_new_password')?.addEventListener('input',ev=>{
+ const n=Math.max(1,ev.target.value.length);document.getElementById('password-hash-clue').textContent='Masked: '+'•'.repeat(n)+' · stored as one-way hash';
+});
+</script>
+</body></html>""".replace("__QUESTION__", escape(question)).replace("__NOTICE__", notice)
 
 
 
@@ -313,10 +333,19 @@ def _launcher_recovery_enrollment_page(message: str = "", status: str = "info") 
     notice = ""
     if message:
         notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
-    options = "".join(
-        '<option value="' + escape(question, quote=True) + '">' + escape(question) + '</option>'
-        for question in RECOVERY_QUESTIONS
-    )
+
+    rows = []
+    for index, question in enumerate(RECOVERY_QUESTIONS, start=1):
+        field = f"recovery_answer_{index}"
+        rows.append(
+            '<div class="recovery-row">'
+            '<label for="' + field + '">' + str(index) + '. ' + escape(question) + '</label>'
+            '<div class="secret-wrap">'
+            '<input id="' + field + '" name="' + field + '" type="password" autocomplete="off" required>'
+            '<button class="eye" type="button" data-toggle-secret="' + field + '" aria-label="Show or hide answer">◉</button>'
+            '</div></div>'
+        )
+
     return """<!doctype html>
 <html lang="en">
 <head>
@@ -325,28 +354,35 @@ def _launcher_recovery_enrollment_page(message: str = "", status: str = "info") 
   <title>CSS Recovery Setup</title>
   <style>
     body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
-    main{max-width:480px;margin:0 auto;padding:38px 18px}.card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
-    h1{margin:0 0 8px;font-size:1.65rem}p{color:#a8b4c0}label{display:block;margin:14px 0 6px;font-weight:700}
-    input,select{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
-    button{width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800}
-    .notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}.foot{font-size:.9rem}
+    main{max-width:560px;margin:0 auto;padding:28px 18px}.card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
+    h1{margin:0 0 8px;font-size:1.65rem}p{color:#a8b4c0}.recovery-row{margin-top:16px}
+    label{display:block;margin:0 0 6px;font-weight:700}.secret-wrap{display:grid;grid-template-columns:1fr 48px;gap:8px}
+    input{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    button{min-height:48px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800}
+    button.eye{background:#25313c;font-size:1.1rem}.notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}
+    .foot{font-size:.9rem}.hash-clue{font-family:monospace;color:#8cc8ff}
   </style>
 </head>
 <body><main><section class="card">
 <h1>Set Up Password Recovery</h1>
-<p>This is required before first access to CSS. Choose a recovery question and answer that only you can provide.</p>
+<p>All five recovery answers are required before first access to CSS.</p>
 __NOTICE__
 <form method="post" action="/recovery-setup">
-<label for="setup_question">Recovery question</label>
-<select id="setup_question" name="recovery_question" required>__OPTIONS__</select>
-<label for="setup_answer">Recovery answer</label>
-<input id="setup_answer" name="recovery_answer" type="password" autocomplete="off" required>
-<label for="setup_confirm_answer">Confirm recovery answer</label>
-<input id="setup_confirm_answer" name="confirm_answer" type="password" autocomplete="off" required>
-<button type="submit">Save Recovery and Continue</button>
+__ROWS__
+<button type="submit" style="width:100%;margin-top:20px">Save All 5 Answers and Continue</button>
 </form>
-<p class="foot">Your answer is stored only as a hash. It cannot later be displayed or retrieved.</p>
-</section></main></body></html>""".replace("__OPTIONS__", options).replace("__NOTICE__", notice)
+<p class="foot">Answers are masked on screen and stored only as one-way hashes. <span class="hash-clue">•••••• → SHA-256 hash</span></p>
+</section></main>
+<script>
+document.querySelectorAll('[data-toggle-secret]').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const input=document.getElementById(btn.dataset.toggleSecret);
+    input.type=input.type==='password'?'text':'password';
+    btn.textContent=input.type==='password'?'◉':'◎';
+  });
+});
+</script>
+</body></html>""".replace("__ROWS__", rows.join("")).replace("__NOTICE__", notice)
 
 
 
@@ -405,13 +441,15 @@ async def launcher_forgot_password_lookup(request: Request):
             status_code=400,
         )
 
+    question = secrets.choice(tuple(__import__("dashboard.auth.css_sign_on", fromlist=["RECOVERY_QUESTIONS"]).RECOVERY_QUESTIONS))
     token = secrets.token_urlsafe(32)
     _LAUNCHER_RECOVERY_TOKENS[token] = {
         "user_id": user_id,
+        "question": question,
         "created_at": time.time(),
         "attempts": 0,
     }
-    response = HTMLResponse(_launcher_recovery_challenge_page(str(record.get("recovery_question") or "Recovery question")))
+    response = HTMLResponse(_launcher_recovery_challenge_page(question))
     response.set_cookie(
         "css_mobile_recovery",
         token,
@@ -454,6 +492,7 @@ async def launcher_forgot_password_reset(request: Request):
             str(form.get("recovery_answer") or ""),
             str(form.get("new_password") or ""),
             str(form.get("confirm_password") or ""),
+            recovery_question=str(recovery.get("question") or ""),
         )
         save_users(users)
     except AuthFailure as exc:
@@ -574,13 +613,12 @@ async def launcher_recovery_setup_submit(request: Request):
     form = await _read_mobile_trade_payload(request)
     users = load_users()
     try:
-        enroll_password_recovery(
-            users,
-            user_id,
-            str(form.get("recovery_question") or ""),
-            str(form.get("recovery_answer") or ""),
-            str(form.get("confirm_answer") or ""),
-        )
+        from dashboard.auth.css_sign_on import RECOVERY_QUESTIONS, enroll_all_password_recovery
+        recovery_answers = {
+            question: str(form.get(f"recovery_answer_{index}") or "")
+            for index, question in enumerate(RECOVERY_QUESTIONS, start=1)
+        }
+        enroll_all_password_recovery(users, user_id, recovery_answers)
         save_users(users)
     except PasswordValidationError as exc:
         return HTMLResponse(_launcher_recovery_enrollment_page(str(exc), "error"), status_code=400)
