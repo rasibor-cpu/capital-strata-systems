@@ -68,6 +68,34 @@ def test_local_reset_preserves_recovery_and_forces_change(tmp_path, monkeypatch)
     assert session_file.exists() is False
 
 
+def test_password_change_preserves_recovery_and_noncredential_state(tmp_path, monkeypatch):
+    users = _seed_user(tmp_path, monkeypatch)
+    _enroll_all(users)
+    record = users["00000"]
+    record["must_change_password"] = False
+    record["last_password_change"] = auth.datetime.now().isoformat(timespec="seconds")
+    record["ui_preferences"] = {"theme": "system", "landing": "home"}
+    record["feature_preferences"] = {"reports": True, "market_intelligence": True}
+
+    recovery_before = dict(record["recovery_answers"])
+    ui_before = dict(record["ui_preferences"])
+    features_before = dict(record["feature_preferences"])
+
+    auth.change_password(
+        users,
+        "00000",
+        "ChangedPassword!42",
+        "ChangedPassword!42",
+    )
+
+    updated = users["00000"]
+    assert auth.verify_password("ChangedPassword!42", updated["password_hash"]) is True
+    assert updated["recovery_answers"] == recovery_before
+    assert updated["ui_preferences"] == ui_before
+    assert updated["feature_preferences"] == features_before
+    assert updated["must_change_password"] is False
+
+
 def test_password_hashes_are_salted_pbkdf2_records():
     first = auth.hash_password("UniquePassword!42")
     second = auth.hash_password("UniquePassword!42")
