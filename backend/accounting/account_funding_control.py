@@ -165,6 +165,64 @@ def save_margin_setoff_control(
     return profile
 
 
+
+def accept_margin_setoff(
+    *,
+    user_id: str,
+    actor_user_id: str,
+    setoff_form_version: str,
+) -> dict[str, Any]:
+    uid = str(user_id or "").strip()
+    actor = str(actor_user_id or "").strip()
+    if not uid or actor != uid:
+        raise PermissionError("Only the account user may execute their own set-off instruction")
+    payload = _load(MARGIN_FILE, {"profiles": {}})
+    profiles = payload.get("profiles") if isinstance(payload, dict) and isinstance(payload.get("profiles"), dict) else {}
+    profile = profiles.get(uid)
+    if not isinstance(profile, dict):
+        raise ValueError("margin facility is not configured")
+    version = str(setoff_form_version or "").strip()
+    if not version or version != str(profile.get("setoff_form_version") or ""):
+        raise ValueError("set-off form version does not match the configured instruction")
+    profile["setoff_executed"] = True
+    profile["setoff_executed_at"] = _utc_now()
+    if str(profile.get("status") or "").upper() == "DISABLED":
+        profile["status"] = "PENDING"
+    profiles[uid] = profile
+    _write(MARGIN_FILE, {"schema_version": "css.margin.setoff.v1", "profiles": profiles})
+    return dict(profile)
+
+
+def verify_margin_facility(
+    *,
+    user_id: str,
+    verification_source: str,
+    verification_reference: str,
+    actor_user_id: str,
+) -> dict[str, Any]:
+    uid = str(user_id or "").strip()
+    source = str(verification_source or "").strip()
+    reference = str(verification_reference or "").strip()
+    if not uid or not source or not reference:
+        raise ValueError("margin verification requires user, source and reference")
+    payload = _load(MARGIN_FILE, {"profiles": {}})
+    profiles = payload.get("profiles") if isinstance(payload, dict) and isinstance(payload.get("profiles"), dict) else {}
+    profile = profiles.get(uid)
+    if not isinstance(profile, dict):
+        raise ValueError("margin facility is not configured")
+    if not profile.get("setoff_executed"):
+        raise ValueError("user set-off instruction must be executed before margin activation")
+    profile["status"] = "ACTIVE_VERIFIED"
+    profile["verification_source"] = source
+    profile["verification_reference"] = reference
+    profile["verified_at"] = _utc_now()
+    profile["verified_by"] = str(actor_user_id or "")
+    profiles[uid] = profile
+    _write(MARGIN_FILE, {"schema_version": "css.margin.setoff.v1", "profiles": profiles})
+    return dict(profile)
+
+
+
 def margin_control_for_user(user_id: str) -> dict[str, Any]:
     uid = str(user_id or "").strip()
     payload = _load(MARGIN_FILE, {"profiles": {}})
@@ -250,10 +308,12 @@ def assess_trade_funding(
 __all__ = [
     "FUNDING_STATUSES",
     "MARGIN_STATUSES",
+    "accept_margin_setoff",
     "assess_trade_funding",
     "funding_requests_for_user",
     "margin_control_for_user",
     "record_funding_verification",
     "save_margin_setoff_control",
     "submit_funding_request",
+    "verify_margin_facility",
 ]
