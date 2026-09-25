@@ -1,7 +1,8 @@
-import json
 """CSS forward-state auth/recovery acceptance: password policy and recovery."""
 
 from __future__ import annotations
+
+import json
 
 import inspect
 from pathlib import Path
