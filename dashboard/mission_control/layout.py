@@ -214,8 +214,9 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         if not broker or broker == "PAPER":
             continue
         available = broker_row_selectable(dict(row))
-        selectable_count += 1
-        disabled = ""
+        if available:
+            selectable_count += 1
+        disabled = "" if available else " disabled"
         selected_attr = " selected" if broker == selected else ""
         state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
         label = broker + (" — Service available" if available else " — Preference only; service currently " + state)
@@ -232,17 +233,19 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
     submit_disabled = " disabled" if selectable_count == 0 else ""
     return (
         '<details class="mc-broker-quick" data-mc-status="broker">'
-        '<summary class="mc-badge neutral"><span class="mc-badge-label">' + escape(broker_label) + '</span>'
+        '<summary class="mc-badge neutral"><span class="mc-badge-label">Broker Settings</span>'
         '<span class="mc-badge-sep">: </span><span class="mc-badge-value">' + escape(selected or "NONE") + '</span>'
         '<span class="mc-broker-caret" aria-hidden="true"> ▾</span></summary>'
         '<div class="mc-broker-quick-popover">'
+        '<p class="mc-muted">Preference only. This control does not connect a broker, change the runtime-active broker, or arm execution.</p>'
+        '<p class="mc-muted"><strong>Runtime active broker:</strong> ' + escape(active_selected or "UNAVAILABLE") + '</p>'
         '<form class="mc-broker-quick-form">'
         '<label>Preferred broker<select name="broker" required>' + ''.join(options) + '</select></label>'
         '<label>Mode<select name="broker_mode" required>'
         '<option value="PAPER"' + paper_selected + '>Paper</option>'
         '<option value="LIVE_READ_ONLY"' + read_selected + '>Live read-only</option></select></label>'
         '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> Confirm session broker preference</label>'
-        '<button type="submit"' + submit_disabled + '>Use This Broker</button>'
+        '<button type="submit"' + submit_disabled + '>Save Broker Preference</button>'
         '</form><p class="mc-broker-quick-result" aria-live="polite"></p>'
         '<a href="/mission-control/broker-management">Open Broker Management</a>'
         '</div></details>'
@@ -252,7 +255,7 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         'const body=new URLSearchParams(new FormData(form));try{'
         'const response=await fetch("/operator-config/broker-selection",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/x-www-form-urlencoded","X-Requested-With":"XMLHttpRequest"},body});'
         'const data=await response.json();if(!response.ok)throw new Error(data.detail||"Save failed");'
-        'out.textContent="Broker choice confirmed. Refreshing…";window.location.reload();'
+        'out.textContent="Broker preference saved. Runtime activation and execution authority are unchanged. Refreshing…";window.location.reload();'
         '}catch(err){out.textContent=String(err.message||err);}}));})();</script>'
     )
 
