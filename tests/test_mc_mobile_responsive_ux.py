@@ -1952,3 +1952,10 @@ def test_mobile_landing_exposes_post_logout_action() -> None:
     )
     assert '<form class="logout-form" method="post" action="/logout">' in body
     assert 'Log out / Exit' in body
+
+
+def test_mission_control_mobile_chrome_has_back_button() -> None:
+    html = _shell()
+    assert 'class="mc-back-btn"' in html
+    assert 'aria-label="Back to previous screen"' in html
+    assert "window.history.back()" in html
