@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from html import unescape
 from math import inf
 
 import pytest
@@ -182,7 +183,7 @@ def test_mc002_all_pages_render_from_runtime_state_without_mock_label(monkeypatc
     for section in MISSION_CONTROL_SECTIONS:
         response = client.get(section.route, headers=headers)
         assert response.status_code == 200
-        assert section.label in response.text
+        assert section.label in unescape(response.text)
         assert "MOCK DATA - NOT LIVE" not in response.text
         assert "No execution authority is granted" in response.text
 
