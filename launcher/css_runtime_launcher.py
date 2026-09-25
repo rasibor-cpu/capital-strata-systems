@@ -92,7 +92,10 @@ def _tokenize_command(command_line: str) -> list[str]:
 
 
 def _interpreter_basename(token: str) -> str:
-    return os.path.basename(token.rstrip("\\/"))
+    # Parse both Windows and POSIX separators regardless of host OS so
+    # discovery contracts remain deterministic under cross-platform tests.
+    normalized = str(token or "").rstrip("\\/").replace("\\", "/")
+    return normalized.rsplit("/", 1)[-1]
 
 
 def _is_python_interpreter_token(token: str) -> bool:
