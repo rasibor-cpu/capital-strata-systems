@@ -77,21 +77,23 @@ def render_mobile_landing(
         and str(item.get("label")) not in operations_labels
     )
 
+    primary_links = core_links
+    additional_links = operations_links + other_links
+
     links = (
         '<section class="launcher-group" aria-labelledby="css-core-destinations">'
         '<h2 id="css-core-destinations">Core</h2>'
-        f'<nav class="landing-primary" aria-label="CSS core mobile destinations">{core_links}</nav>'
-        '</section>'
-        '<section class="launcher-group" aria-labelledby="css-operations-destinations">'
-        '<h2 id="css-operations-destinations">Operations &amp; Governance</h2>'
-        f'<nav class="landing-primary" aria-label="CSS operations and governance destinations">{operations_links}</nav>'
+        f'<nav class="landing-primary" aria-label="CSS primary mobile destinations">{primary_links}</nav>'
         '</section>'
         + (
-            '<section class="launcher-group" aria-labelledby="css-additional-destinations">'
-            '<h2 id="css-additional-destinations">Additional</h2>'
-            f'<nav class="landing-primary" aria-label="CSS additional mobile destinations">{other_links}</nav>'
+            '<details class="landing-more">'
+            '<summary>More read-only destinations</summary>'
+            '<section class="launcher-group" aria-labelledby="css-operations-destinations">'
+            '<h2 id="css-operations-destinations">Operations &amp; Governance</h2>'
+            f'<nav aria-label="CSS additional mobile destinations">{additional_links}</nav>'
             '</section>'
-            if other_links
+            '</details>'
+            if additional_links
             else ""
         )
     )
