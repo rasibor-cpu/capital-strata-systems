@@ -10,6 +10,7 @@ $ExpectedPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
 $StartScript = Join-Path $RepoRoot "scripts\start_css_canonical.ps1"
 $StdOut = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.out.log"
 $StdErr = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.err.log"
+$BootstrapLog = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.bootstrap.log"
 $Failures = New-Object System.Collections.Generic.List[string]
 
 function Pass([string]$Message) { Write-Host "[PASS] $Message" }
@@ -126,6 +127,12 @@ try {
 }
 
 if ($Failures.Count -gt 0) {
+    if (Test-Path $BootstrapLog) {
+        Write-Host ""
+        Write-Host "--- Latest canonical PowerShell bootstrap failure ---"
+        Get-Content -Path $BootstrapLog -Tail 80 -ErrorAction SilentlyContinue
+    }
+
     try {
         $schedulerEvents = Get-WinEvent -FilterHashtable @{
             LogName = "Microsoft-Windows-TaskScheduler/Operational"
