@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import hmac
 import json
 import os
 import time
@@ -27,6 +28,9 @@ PASSWORD_MAX_AGE_DAYS = 30
 PASSWORD_HISTORY_LIMIT = 2
 LOCKOUT_START_ATTEMPT = 3
 LOCKOUT_SCHEDULE_SECONDS = (60, 300, 900, 1800, 3600)
+PASSWORD_KDF_ITERATIONS = 310_000
+RECOVERY_KDF_ITERATIONS = 310_000
+_KDF_PREFIX = "pbkdf2_sha256"
 FALLBACK_CSS_ROLES = (
     "ADMIN",
     "SUPER_USER",
@@ -376,8 +380,7 @@ def change_authenticated_password(
         raise AuthFailure("USER_NOT_FOUND", "User record not found.")
 
     expected_hash = str(user_record.get("password_hash", "")).strip()
-    current_hash = hash_password(current_password)
-    if current_hash != expected_hash:
+    if not verify_password(current_password, expected_hash):
         raise AuthFailure("INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
 
     if new_password != confirm_password:
@@ -452,9 +455,8 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
         )
 
     expected_hash = str(user_record.get("password_hash", "")).strip()
-    supplied_hash = hash_password(password)
 
-    if supplied_hash != expected_hash:
+    if not verify_password(password, expected_hash):
         failed_attempts = int(user_record.get("failed_attempts", 0) or 0) + 1
         user_record["failed_attempts"] = failed_attempts
         AuthMetrics.failed_interactive_logins += 1
@@ -499,6 +501,8 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
 
     user_record["failed_attempts"] = 0
     clear_lockout_state(user_record)
+    if expected_hash and not expected_hash.startswith(f"{_KDF_PREFIX}$"):
+        user_record["password_hash"] = hash_password(password)
 
     if password_expired(user_record):
         raise PasswordChangeRequired(normalized_user_id)
@@ -549,7 +553,14 @@ def hash_recovery_answer(answer: str) -> str:
     normalized = normalize_recovery_answer(answer)
     if not normalized:
         return ""
-    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+    return _pbkdf2_hash(normalized, iterations=RECOVERY_KDF_ITERATIONS)
+
+
+def verify_recovery_answer(answer: str, encoded: str) -> bool:
+    normalized = normalize_recovery_answer(answer)
+    if not normalized:
+        return False
+    return _verify_encoded_secret(normalized, encoded)
 
 
 def recovery_is_configured(user_record: Dict[str, Any]) -> bool:
@@ -674,7 +685,7 @@ def configure_password_recovery(
         raise AuthFailure("USER_NOT_FOUND", "User ID not recognized.")
 
     expected_hash = str(user_record.get("password_hash", "")).strip()
-    if hash_password(current_password) != expected_hash:
+    if not verify_password(current_password, expected_hash):
         raise AuthFailure(
             "INVALID_CURRENT_PASSWORD",
             "Current password is incorrect.",
@@ -712,10 +723,9 @@ def reset_password_with_recovery(
         raise AuthFailure("RECOVERY_FAILED", "Password recovery challenge is invalid.")
 
     answers = recovery_question_hashes(user_record)
-    supplied_hash = hash_recovery_answer(recovery_answer)
     expected_hash = str(answers.get(question, "") or "").strip()
 
-    if not supplied_hash or supplied_hash != expected_hash:
+    if not verify_recovery_answer(recovery_answer, expected_hash):
         record_auth_audit_event(
             "password_recovery_failure",
             normalized_user_id,
@@ -799,14 +809,13 @@ def validate_new_password(
     if new_password != confirm_password:
         raise PasswordValidationError("Passwords do not match.")
 
-    new_hash = hash_password(new_password)
     current_hash = str(user_record.get("password_hash", "")).strip()
     history = user_record.get("password_history")
     if not isinstance(history, list):
         history = []
 
     recent_hashes = [current_hash] + [str(value) for value in history[-PASSWORD_HISTORY_LIMIT:]]
-    if new_hash in recent_hashes:
+    if any(verify_password(new_password, stored_hash) for stored_hash in recent_hashes if stored_hash):
         raise PasswordValidationError(
             "New password must differ from the current password and the last two passwords."
         )
@@ -2403,8 +2412,57 @@ def normalize_role(value: Any) -> str:
     return str(value or "").strip().upper().replace(" ", "_").replace("-", "_")
 
 
+def _legacy_sha256(value: str) -> str:
+    return hashlib.sha256(str(value).encode("utf-8")).hexdigest()
+
+
+def _pbkdf2_hash(value: str, *, iterations: int) -> str:
+    salt = os.urandom(16)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        str(value).encode("utf-8"),
+        salt,
+        iterations,
+    )
+    return f"{_KDF_PREFIX}${iterations}${salt.hex()}${digest.hex()}"
+
+
+def _verify_encoded_secret(value: str, encoded: str) -> bool:
+    candidate = str(value)
+    stored = str(encoded or "").strip()
+    if not stored:
+        return False
+    if stored.startswith(f"{_KDF_PREFIX}$"):
+        try:
+            _, iterations_text, salt_hex, digest_hex = stored.split("$", 3)
+            iterations = int(iterations_text)
+            salt = bytes.fromhex(salt_hex)
+            expected = bytes.fromhex(digest_hex)
+        except (TypeError, ValueError):
+            return False
+        actual = hashlib.pbkdf2_hmac(
+            "sha256",
+            candidate.encode("utf-8"),
+            salt,
+            iterations,
+        )
+        return hmac.compare_digest(actual, expected)
+    # Backward compatibility for legacy unsalted SHA-256 records.
+    if len(stored) == 64:
+        try:
+            int(stored, 16)
+        except ValueError:
+            return False
+        return hmac.compare_digest(_legacy_sha256(candidate), stored)
+    return False
+
+
 def hash_password(password: str) -> str:
-    return hashlib.sha256(str(password).encode("utf-8")).hexdigest()
+    return _pbkdf2_hash(str(password), iterations=PASSWORD_KDF_ITERATIONS)
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    return _verify_encoded_secret(str(password), encoded)
 
 
 def _default_admin_record(bootstrap_password: str) -> Dict[str, Any]:
