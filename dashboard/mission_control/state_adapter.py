@@ -125,7 +125,7 @@ def _broker_evidence_overlays(active_broker: Mapping[str, Any]) -> dict[str, dic
     questrade = active_broker.get("questrade_read_only_status")
     if isinstance(questrade, Mapping):
         status = str(questrade.get("status") or "").strip().upper()
-        secure_store = bool(questrade.get("secure_token_store_present"))
+        secure_store = bool(questrade.get("secure_store_configured") or questrade.get("secure_token_store_present") is True)
         if status == "READY":
             overlays["QUESTRADE"] = {
                 "operational_state": "READ_ONLY_READY",
@@ -146,7 +146,7 @@ def _broker_evidence_overlays(active_broker: Mapping[str, Any]) -> dict[str, dic
                 "readiness": "CONFIGURED_REACTIVATION_REQUIRED",
                 "certification": "NOT_CERTIFIED",
                 "authentication": "REACTIVATION_REQUIRED",
-                "evidence_source": "SECURE_TOKEN_STORE_PRESENT",
+                "evidence_source": "SECURE_STORE_CONFIGURED",
                 "execution": "DISABLED",
                 "execution_authority": "BLOCKED",
                 "execution_blocked": True,
