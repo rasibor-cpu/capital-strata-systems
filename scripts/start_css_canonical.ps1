@@ -22,7 +22,8 @@ trap {
         "script=$($_.InvocationInfo.ScriptName)",
         "line=$($_.InvocationInfo.ScriptLineNumber)"
     ) -join [Environment]::NewLine
-    Set-Content -Path $BootstrapLog -Value $message -Encoding UTF8
+    $utf8Trap = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($BootstrapLog, [string]$message, $utf8Trap)
     Write-Error $message -ErrorAction Continue
     exit 1
 }
@@ -137,8 +138,9 @@ if ($Foreground) {
     $stdout = $stdoutTask.Result
     $stderr = $stderrTask.Result
 
-    Set-Content -Path $StdOut -Value $stdout -Encoding UTF8
-    Set-Content -Path $StdErr -Value $stderr -Encoding UTF8
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::WriteAllText($StdOut, [string]$stdout, $utf8)
+    [System.IO.File]::WriteAllText($StdErr, [string]$stderr, $utf8)
     if ($stdout) { Write-Host $stdout }
     if ($stderr) { Write-Error $stderr -ErrorAction Continue }
     Write-Host "CSS canonical runtime exited with code $($proc.ExitCode)."
