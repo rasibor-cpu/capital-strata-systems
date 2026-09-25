@@ -122,7 +122,7 @@ def render_mission_control_shell(
   <div class="mc-shell" data-mission-control-schema="{escape(state_dict.get('schema_version'))}" data-mc-nav="native-anchor-176h1">
     <input type="checkbox" id="mc-nav-toggle" class="mc-nav-toggle" aria-controls="mc-sidebar" aria-label="Open Mission Control navigation">
     <div class="mc-mobile-chrome">
-      <button class="mc-back-btn" type="button" onclick="if (window.history.length > 1) { window.history.back(); } else { window.location.href='{escape(home_href)}'; }" aria-label="Back to previous screen">Back</button>
+      <button class="mc-back-btn" type="button" onclick="window.history.length > 1 ? window.history.back() : (window.location.href='{escape(home_href)}')" aria-label="Back to previous screen">Back</button>
       <label class="mc-nav-toggle-btn" for="mc-nav-toggle">
         <span class="mc-nav-toggle-icon" aria-hidden="true"></span>
         <span class="mc-nav-toggle-text">Menu</span>
