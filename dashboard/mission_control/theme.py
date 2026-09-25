@@ -541,7 +541,7 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
 }
 .mc-evidence-disclosure summary {
   min-height: 44px;
-  display: flex;
+  display: grid;
   align-items: center;
   padding: 10px 12px;
   cursor: pointer;
