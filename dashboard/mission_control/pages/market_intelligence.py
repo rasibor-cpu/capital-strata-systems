@@ -108,7 +108,12 @@ def render(state: dict) -> str:
             "market_data_freshness": market.get("market_data_freshness"),
         }))
         + _anchor_panel("mc-market-opportunities", detail_table("Top Opportunity Snapshot", _top_opportunity_snapshot(opportunities)))
-        + _anchor_panel("mc-market-opportunity-ranking", detail_table("Opportunity Ranking", opportunities))
+        + _anchor_panel("mc-market-opportunity-ranking", detail_table("Opportunity Ranking", {
+            "opportunities": _safe_opportunity_rows(opportunities.get("opportunities")),
+            "status": opportunities.get("status"),
+            "source": opportunities.get("source"),
+            "freshness": opportunities.get("freshness"),
+        }))
         + _evidence_panel("mc-market-opportunity-evidence", "Show full opportunity evidence", detail_table("Opportunity Evidence (Full)", _safe_opportunity_rows(opportunities.get("opportunities"))))
         + _evidence_panel("mc-market-signal-evidence", "Show full signal-surface evidence", detail_table("Signal Surface Evidence (Full)", {
             "pressure": market.get("pressure"),
