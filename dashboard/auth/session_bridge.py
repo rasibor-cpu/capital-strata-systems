@@ -131,6 +131,44 @@ def load_bridged_session_context(
     )
 
 
+
+def invalidate_bridged_session() -> dict[str, bool]:
+    """Invalidate persisted CSS web/MC identity without touching trading state.
+
+    Removes the canonical persisted auth session and only the recovery
+    `session_user_ctx` identity block. Other recovery/runtime state is
+    preserved. This is suitable for an explicit operator logout.
+    """
+    from dashboard.auth.css_sign_on import invalidate_login_session
+
+    auth_session_invalidated = False
+    recovery_identity_removed = False
+
+    try:
+        invalidate_login_session()
+        auth_session_invalidated = True
+    except Exception:
+        auth_session_invalidated = False
+
+    path = Path(os.getenv("CSS_SESSION_RECOVERY_FILE", str(RECOVERY_SESSION_FILE)))
+    if path.is_file():
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+            if isinstance(raw, dict) and "session_user_ctx" in raw:
+                raw.pop("session_user_ctx", None)
+                temp = path.with_name(path.name + ".tmp")
+                temp.write_text(json.dumps(raw, indent=2), encoding="utf-8")
+                os.replace(str(temp), str(path))
+                recovery_identity_removed = True
+        except Exception:
+            recovery_identity_removed = False
+
+    return {
+        "auth_session_invalidated": auth_session_invalidated,
+        "recovery_identity_removed": recovery_identity_removed,
+    }
+
+
 def recovery_context(
     user_ctx: Mapping[str, Any],
     *,
