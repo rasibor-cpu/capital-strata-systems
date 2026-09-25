@@ -96,7 +96,7 @@ def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
 
     )
 
-    assert result["ok"] is False
+    assert result["ok"] is True
     assert result["status"] != "GLOBAL_LIVE_ORDER_KILL_SWITCH_ENGAGED"
 
 
