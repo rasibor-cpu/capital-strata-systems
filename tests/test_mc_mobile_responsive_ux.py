@@ -30,6 +30,7 @@ from dashboard.mission_control.pages.learning_performance_mobile import render a
 from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 from dashboard.mission_control.state_adapter import build_broker_registry
+from dashboard.runtime.frontend_contract import build_frontend_payload
 
 
 STATUS_KEYS = (
@@ -1894,3 +1895,39 @@ def test_broker_registry_distinguishes_questrade_reactivation_from_unconfigured(
     assert questrade["certification"] == "NOT_CERTIFIED"
     assert questrade["evidence_source"] == "SECURE_TOKEN_STORE_PRESENT"
     assert questrade["execution"] == "DISABLED"
+
+
+def test_frontend_contract_carries_multi_broker_read_only_evidence() -> None:
+    payload = build_frontend_payload({
+        "broker_summary": {
+            "selected_broker": "COINBASE",
+            "broker_mode": "live",
+            "coinbase_live_validation": {
+                "validation_status": "PASS",
+                "authentication": True,
+                "account_loaded": True,
+                "market_data_loaded": True,
+                "validation_timestamp": "2026-09-24T20:00:00Z",
+                "broker_operational_status": {"operational_state": "READ_ONLY_READY"},
+            },
+            "oanda_live_validation": {
+                "validation_status": "PASS",
+                "authentication": True,
+                "account_loaded": True,
+                "market_data_loaded": True,
+                "validation_timestamp": "2026-09-24T20:01:00Z",
+                "broker_operational_status": {"operational_state": "READ_ONLY_READY"},
+            },
+            "questrade_read_only_status": {
+                "status": "DISABLED",
+                "reason": "NOT_ACTIVATED",
+                "secure_token_store_present": True,
+                "execution_allowed": False,
+            },
+        }
+    })
+    broker = payload["sections"]["broker"]
+    assert broker["coinbase_live_validation"]["validation_status"] == "PASS"
+    assert broker["oanda_live_validation"]["validation_status"] == "PASS"
+    assert broker["questrade_read_only_status"]["secure_token_store_present"] is True
+    assert broker["questrade_read_only_status"].get("execution_allowed") is False
