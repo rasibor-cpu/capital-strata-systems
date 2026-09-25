@@ -1422,12 +1422,53 @@ def await_console_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any
             save_users(active_users)
             user_ctx = force_console_password_change(active_users, required.user_id)
             save_users(active_users)
+            if not recovery_is_configured(active_users[required.user_id]):
+                user_ctx = force_console_recovery_setup(active_users, required.user_id)
+            persist_login_session(user_ctx)
+            render_console_auth_status("AUTH SUCCESS", f"{user_ctx['display_name']} | role={user_ctx['role']}")
+            return user_ctx
+        except RecoverySetupRequired as required:
+            save_users(active_users)
+            user_ctx = force_console_recovery_setup(active_users, required.user_id)
             persist_login_session(user_ctx)
             render_console_auth_status("AUTH SUCCESS", f"{user_ctx['display_name']} | role={user_ctx['role']}")
             return user_ctx
         except AuthFailure as exc:
             save_users(active_users)
             render_console_auth_status(exc.code, exc.message)
+
+
+def force_console_recovery_setup(users: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    render_console_auth_status(
+        "RECOVERY SETUP REQUIRED",
+        "Configure password recovery before CSS access can continue.",
+    )
+    for index, question in enumerate(RECOVERY_QUESTIONS, start=1):
+        print(f"{index}. {question}")
+
+    while True:
+        raw = input("CSS AUTH | recovery question number: ").strip()
+        try:
+            index = int(raw)
+        except ValueError:
+            index = 0
+        if 1 <= index <= len(RECOVERY_QUESTIONS):
+            question = RECOVERY_QUESTIONS[index - 1]
+            break
+        render_console_auth_status("RECOVERY ERROR", "Select a valid recovery question number.")
+
+    while True:
+        answer = masked_password_input("CSS AUTH | recovery answer: ")
+        confirm = masked_password_input("CSS AUTH | confirm recovery answer: ")
+        try:
+            enroll_password_recovery(users, user_id, question, answer, confirm)
+        except PasswordValidationError as exc:
+            render_console_auth_status("RECOVERY ERROR", str(exc))
+            continue
+        save_users(users)
+        render_console_auth_status("RECOVERY CONFIGURED", "Password recovery configured successfully.")
+        return build_user_context(users[user_id], user_id)
+
 
 
 def force_console_password_change(users: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -1680,6 +1721,9 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                 return
 
             set_status("Password updated.", "success")
+            if not recovery_is_configured(active_users[user_id]):
+                show_required_recovery_setup(user_id)
+                return
             finish(user_ctx)
 
         primary_button(button_row, "Update Password", submit_change).pack(side="left")
@@ -1689,6 +1733,89 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         set_status("Password change required.", "info")
         new_entry.focus_set()
         root.bind("<Return>", lambda _event: submit_change())
+
+
+
+    def show_required_recovery_setup(user_id: str) -> None:
+        clear_content()
+
+        tk.Label(
+            content,
+            text="Set Up Password Recovery",
+            bg=colors["panel"],
+            fg=colors["ink"],
+            font=title_font,
+        ).grid(row=0, column=0, sticky="w")
+        tk.Label(
+            content,
+            text="Recovery setup is required before CSS access can continue.",
+            bg=colors["panel"],
+            fg=colors["muted"],
+            font=subtitle_font,
+        ).grid(row=1, column=0, sticky="w", pady=(8, 22))
+
+        question_var = tk.StringVar(value=RECOVERY_QUESTIONS[0])
+        answer_var = tk.StringVar()
+        confirm_var = tk.StringVar()
+
+        tk.Label(content, text="Recovery Question", bg=colors["panel"], fg=colors["ink"], font=label_font).grid(
+            row=2, column=0, sticky="w"
+        )
+        question_menu = tk.OptionMenu(content, question_var, *RECOVERY_QUESTIONS)
+        question_menu.configure(
+            bg=colors["panel"],
+            fg=colors["ink"],
+            activebackground=colors["panel"],
+            activeforeground=colors["ink"],
+            highlightthickness=1,
+            highlightbackground=colors["line"],
+            font=small_font,
+        )
+        question_menu.grid(row=3, column=0, sticky="ew", pady=(6, 14))
+
+        tk.Label(content, text="Recovery Answer", bg=colors["panel"], fg=colors["ink"], font=label_font).grid(
+            row=4, column=0, sticky="w"
+        )
+        answer_entry = make_entry(content, answer_var, show="*")
+        answer_entry.grid(row=5, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        tk.Label(content, text="Confirm Recovery Answer", bg=colors["panel"], fg=colors["ink"], font=label_font).grid(
+            row=6, column=0, sticky="w"
+        )
+        confirm_entry = make_entry(content, confirm_var, show="*")
+        confirm_entry.grid(row=7, column=0, sticky="ew", ipady=10, pady=(6, 14))
+
+        def submit_required_recovery() -> None:
+            try:
+                enroll_password_recovery(
+                    active_users,
+                    user_id,
+                    question_var.get(),
+                    answer_var.get(),
+                    confirm_var.get(),
+                )
+                save_users(active_users)
+            except PasswordValidationError as exc:
+                set_status(str(exc), "error")
+                answer_var.set("")
+                confirm_var.set("")
+                answer_entry.focus_set()
+                return
+
+            user_ctx = build_user_context(active_users[user_id], user_id)
+            set_status("Password recovery configured.", "success")
+            finish(user_ctx)
+
+        button_row = tk.Frame(content, bg=colors["panel"])
+        button_row.grid(row=8, column=0, sticky="ew", pady=(18, 18))
+        primary_button(button_row, "Save Recovery and Continue", submit_required_recovery).pack(side="left")
+        secondary_button(button_row, "Cancel", root.destroy).pack(side="left", padx=(12, 0))
+
+        attach_status(9)
+        set_status("Recovery setup is mandatory for this account.", "info")
+        answer_entry.focus_set()
+        root.bind("<Return>", lambda _event: submit_required_recovery())
+
 
 
     def show_post_auth_options(user_ctx: Dict[str, Any]) -> None:
@@ -2078,6 +2205,11 @@ def await_gui_login(users: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
                 save_users(active_users)
                 password_var.set("")
                 show_password_change(required.user_id)
+                return
+            except RecoverySetupRequired as required:
+                save_users(active_users)
+                password_var.set("")
+                show_required_recovery_setup(required.user_id)
                 return
             except AuthFailure as exc:
                 save_users(active_users)
