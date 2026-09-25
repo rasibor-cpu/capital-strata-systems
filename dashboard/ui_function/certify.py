@@ -37,20 +37,37 @@ def mobile_client() -> TestClient:
 
 
 def certify_mc_nav() -> dict[str, Any]:
+    import os
+
     client = mission_control_client()
     failures: list[str] = []
-    for control in all_controls():
-        if not control.control_id.startswith("mc.nav."):
-            continue
-        route = control.desktop_route
-        res = client.get(route)
-        if res.status_code != 200:
-            failures.append(f"{control.control_id}: status={res.status_code}")
-            continue
-        if "Mission Control" not in res.text and "mc-shell" not in res.text:
-            failures.append(f"{control.control_id}: missing MC shell")
-        if 'aria-current="page"' not in res.text:
-            failures.append(f"{control.control_id}: missing aria-current")
+    previous_trust = os.environ.get("CSS_TRUST_INTERNAL_AUTH_HEADERS")
+    previous_bridge = os.environ.get("CSS_AUTH_BRIDGE_MODE")
+    os.environ["CSS_TRUST_INTERNAL_AUTH_HEADERS"] = "1"
+    os.environ["CSS_AUTH_BRIDGE_MODE"] = "off"
+    headers = {"X-CSS-Role": "ADMIN", "X-CSS-User-Id": "phase176c-cert"}
+    try:
+        for control in all_controls():
+            if not control.control_id.startswith("mc.nav."):
+                continue
+            route = control.desktop_route
+            res = client.get(route, headers=headers)
+            if res.status_code != 200:
+                failures.append(f"{control.control_id}: status={res.status_code}")
+                continue
+            if "Mission Control" not in res.text and "mc-shell" not in res.text:
+                failures.append(f"{control.control_id}: missing MC shell")
+            if 'aria-current="page"' not in res.text:
+                failures.append(f"{control.control_id}: missing aria-current")
+    finally:
+        if previous_trust is None:
+            os.environ.pop("CSS_TRUST_INTERNAL_AUTH_HEADERS", None)
+        else:
+            os.environ["CSS_TRUST_INTERNAL_AUTH_HEADERS"] = previous_trust
+        if previous_bridge is None:
+            os.environ.pop("CSS_AUTH_BRIDGE_MODE", None)
+        else:
+            os.environ["CSS_AUTH_BRIDGE_MODE"] = previous_bridge
     return {"ok": not failures, "failures": failures, "checked": "mc.nav.*"}
 
 
