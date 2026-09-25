@@ -32,9 +32,73 @@ foreach ($proc in @($existing)) {
     }
 }
 
-$portInUse = Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue
-if ($portInUse) {
-    throw "Port 8765 is already in use. Refusing to start a second or ambiguous CSS mobile owner."
+$portListeners = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
+if ($portListeners.Count -gt 0) {
+    $ownerPids = @($portListeners | Select-Object -ExpandProperty OwningProcess -Unique)
+    $safeStandaloneOwners = @()
+
+    foreach ($ownerPid in $ownerPids) {
+        $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+        if ($null -eq $owner -or -not $owner.CommandLine) {
+            continue
+        }
+
+        $isPython = [string]$owner.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe
+if ($Foreground) {
+    & $Python $Launcher
+    exit $LASTEXITCODE
+}
+
+$process = Start-Process -FilePath $Python -ArgumentList @($Launcher) -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr -PassThru
+
+Write-Host "CSS canonical runtime started (PID $($process.Id))."
+Write-Host "stdout: $StdOut"
+Write-Host "stderr: $StdErr"
+
+        $isStandaloneMobile = (
+            [string]$owner.CommandLine -match 'launcher[\\/]css_mobile_launcher\.py' -or
+            [string]$owner.CommandLine -match '-m\s+launcher\.css_mobile_launcher'
+        )
+        $isCanonicalRuntime = (
+            [string]$owner.CommandLine -match 'launcher[\\/]css_runtime_launcher\.py' -or
+            [string]$owner.CommandLine -match '-m\s+launcher\.css_runtime_launcher'
+        )
+
+        if ($isPython -and $isStandaloneMobile -and -not $isCanonicalRuntime) {
+            $safeStandaloneOwners += $owner
+        }
+    }
+
+    $endpointIdentifiedAsCss = $false
+    try {
+        $probe = Invoke-WebRequest "http://127.0.0.1:8765/mobile-launcher" -UseBasicParsing -TimeoutSec 3
+        $endpointIdentifiedAsCss = (
+            $probe.StatusCode -eq 200 -and
+            [string]$probe.Content -match 'CSS Mobile Launcher'
+        )
+    } catch {
+        $endpointIdentifiedAsCss = $false
+    }
+
+    if (
+        $endpointIdentifiedAsCss -and
+        $safeStandaloneOwners.Count -eq $ownerPids.Count -and
+        $safeStandaloneOwners.Count -gt 0
+    ) {
+        foreach ($owner in $safeStandaloneOwners) {
+            Write-Host "Retiring legacy standalone CSS mobile launcher (PID $($owner.ProcessId))..."
+            Stop-Process -Id ([int]$owner.ProcessId) -Force -ErrorAction Stop
+        }
+        Start-Sleep -Seconds 2
+
+        $remaining = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
+        if ($remaining.Count -gt 0) {
+            throw "Port 8765 remained occupied after retiring the recognized standalone CSS mobile launcher."
+        }
+        Write-Host "Legacy standalone CSS mobile launcher retired; canonical runtime may take ownership."
+    } else {
+        throw "Port 8765 is already in use by an unknown or ambiguous owner. Refusing unsafe takeover."
+    }
 }
 
 Set-Location $RepoRoot
