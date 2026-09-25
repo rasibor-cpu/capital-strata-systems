@@ -43,3 +43,24 @@ def test_live_certification_audit_fails_contradictory_certified_state_closed():
     assert "certified_with_incomplete_evidence" in text
     assert "certified_without_deployment_authorization" in text
     assert "exit 2" in text
+
+
+def test_live_certification_audit_surfaces_runtime_root_cause_fields():
+    text = (ROOT / "scripts" / "audit_css_live_certification.ps1").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "source_status",
+        "source_freshness",
+        "source_confidence",
+        "runtime_health",
+        "supervisor_state",
+        "broker_health",
+        "broker_failure_reason",
+        "rc1_certification",
+        "rc1_operational",
+        "runtime_readiness",
+        "broker_readiness",
+        "runtime blockers",
+    ):
+        assert token in text
