@@ -81,7 +81,8 @@ def test_mc001_shell_renders_navigation_topbar_safety_and_responsive_structure()
     assert 'aria-label="Mission Control navigation"' in html
     assert 'aria-current="page"' in html
     assert "Broker Management" in html
-    assert 'data-mc-status="execution"' in html\n    assert "BLOCKED" in html
+    assert 'data-mc-status="execution"' in html
+    assert "BLOCKED" in html
     assert "No execution authority is granted" in html
     assert "data-mission-control-schema" in html
     assert "@media (max-width: 680px)" in MISSION_CONTROL_CSS
