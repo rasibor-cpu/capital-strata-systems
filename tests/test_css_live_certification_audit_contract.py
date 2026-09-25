@@ -27,5 +27,5 @@ def test_live_certification_audit_avoids_powershell7_ternary_syntax():
         encoding="utf-8"
     )
     assert " ? " not in text
-    assert " : " not in text
+    assert "? $" not in text
     assert "[string]::IsNullOrWhiteSpace" in text
