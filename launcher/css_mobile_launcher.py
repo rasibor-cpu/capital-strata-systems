@@ -5722,7 +5722,7 @@ async def operator_trade_request(request: Request):
 
     actor = _operator_config_auth(request, require_admin=False)
     payload = await _read_mobile_trade_payload(request)
-    selection = load_broker_selection()
+    selection = load_broker_selection(actor["user_id"])
     selected_broker = str(selection.get("selected_broker") or "").strip().upper()
     if not selection.get("confirmed") or not selected_broker:
         raise HTTPException(status_code=409, detail="CONFIRMED_BROKER_REQUIRED")
@@ -5869,7 +5869,7 @@ async def account_margin_verify(request: Request):
 async def operator_config_broker_selection(request: Request):
     from dashboard.enterprise_shell.operator_configuration import broker_row_selectable, save_broker_selection
 
-    actor = _operator_config_auth(request)
+    actor = _operator_config_auth(request, require_admin=False)
     payload = await _read_mobile_trade_payload(request)
     requested_broker = str(payload.get("broker") or "").strip().upper()
     current_state = build_mission_control_state(_mission_control_registry_source(), allow_mock=False)
@@ -5990,11 +5990,13 @@ def _mission_control_registry_source() -> Dict[str, Any]:
     # authority classification inside build_canonical_runtime_snapshot()
     # still fails closed on the resulting payload regardless of this flag.
     payload = build_launcher_frontend_state()
+    identity = _launcher_auth_identity(payload.get("session") if isinstance(payload.get("session"), dict) else {})
+    user_id = str(identity.get("user_id") or "")
     try:
         from dashboard.enterprise_shell.operator_configuration import (
             load_broker_selection,
         )
-        payload["operator_broker_selection"] = load_broker_selection()
+        payload["operator_broker_selection"] = load_broker_selection(user_id) if user_id else {}
     except Exception:
         payload["operator_broker_selection"] = {}
     try:
@@ -6002,8 +6004,6 @@ def _mission_control_registry_source() -> Dict[str, Any]:
             funding_requests_for_user,
             margin_control_for_user,
         )
-        identity = _launcher_auth_identity(payload.get("session") if isinstance(payload.get("session"), dict) else {})
-        user_id = str(identity.get("user_id") or "")
         payload["account_controls"] = {
             "user_id": user_id,
             "funding_requests": funding_requests_for_user(user_id) if user_id else [],
