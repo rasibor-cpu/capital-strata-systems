@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from backend.security.authorization_context import apply_auth_to_mission_control_state
 from backend.security.auth_diagnostics import log_authorization_denial
@@ -659,6 +659,121 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
         return JSONResponse(
             safe_serialize(_read_only_payload(ReportsCenterService().audit_history(report_id, role=role)))
         )
+
+    @router.get("/mission-control/transaction-history", response_class=HTMLResponse)
+    async def transaction_history_page(
+        request: Request,
+        period: str = "all",
+        entry_type: str = "ALL",
+        date_basis: str = "transaction",
+        date_from: str = "",
+        date_to: str = "",
+    ) -> HTMLResponse:
+        from backend.accounting.account_statement_service import AccountStatementService, StatementQuery
+
+        auth = resolve_authorization_context(channel="mission_control_transaction_history", request=request)
+        if not auth.authenticated or not auth.active:
+            return HTMLResponse("Authentication required.", status_code=401)
+        user_id = str(auth.user_id or "").strip()
+        try:
+            statement = AccountStatementService().statement(
+                StatementQuery(
+                    user_id=user_id,
+                    period=period,
+                    entry_type=entry_type,
+                    date_basis=date_basis,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+            )
+        except ValueError as exc:
+            return HTMLResponse(f"Invalid statement filter: {safe_serialize(str(exc))}", status_code=400)
+
+        current = state(request)
+        current["transaction_history"] = statement
+        return HTMLResponse(
+            render_mission_control_shell(current, active_section="transaction_history"),
+            headers={"Cache-Control": "no-store"},
+        )
+
+    @router.get("/mission-control/transaction-history.csv")
+    async def transaction_history_csv(
+        request: Request,
+        period: str = "all",
+        entry_type: str = "ALL",
+        date_basis: str = "transaction",
+        date_from: str = "",
+        date_to: str = "",
+    ) -> Response:
+        from backend.accounting.account_statement_service import AccountStatementService, StatementQuery
+
+        auth = resolve_authorization_context(channel="mission_control_transaction_history_export", request=request)
+        if not auth.authenticated or not auth.active:
+            return Response("Authentication required.", status_code=401, media_type="text/plain")
+        svc = AccountStatementService()
+        try:
+            statement = svc.statement(
+                StatementQuery(
+                    user_id=str(auth.user_id or ""),
+                    period=period,
+                    entry_type=entry_type,
+                    date_basis=date_basis,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+            )
+        except ValueError as exc:
+            return Response(str(exc), status_code=400, media_type="text/plain")
+        return Response(
+            svc.to_csv(statement),
+            media_type="text/csv",
+            headers={"Content-Disposition": 'attachment; filename="css-account-statement.csv"'},
+        )
+
+    @router.get("/mission-control/transaction-receipt/{ledger_id}", response_class=HTMLResponse)
+    async def transaction_receipt(ledger_id: str, request: Request) -> HTMLResponse:
+        from html import escape
+        from backend.accounting.account_statement_service import AccountStatementService
+
+        auth = resolve_authorization_context(channel="mission_control_transaction_receipt", request=request)
+        if not auth.authenticated or not auth.active:
+            return HTMLResponse("Authentication required.", status_code=401)
+        row = AccountStatementService().entry_by_id(ledger_id, user_id=str(auth.user_id or ""))
+        if row is None:
+            return HTMLResponse("Transaction receipt not found.", status_code=404)
+        fields = (
+            ("Transaction date", row.get("transaction_date")),
+            ("Value date", row.get("value_date")),
+            ("Settlement date", row.get("settlement_date")),
+            ("Debit / Credit", row.get("entry_type")),
+            ("Amount", row.get("amount")),
+            ("Currency", row.get("currency")),
+            ("Description", row.get("description")),
+            ("Reference", row.get("reference")),
+            ("Source", row.get("source_type")),
+            ("Broker", row.get("broker")),
+            ("Asset class", row.get("asset_class")),
+            ("Symbol", row.get("symbol")),
+        )
+        body = "".join(
+            f"<tr><th>{escape(str(label))}</th><td>{escape(str(value if value not in (None, '') else '—'))}</td></tr>"
+            for label, value in fields
+        )
+        html = (
+            "<!doctype html><html><head><meta charset='utf-8'>"
+            "<meta name='viewport' content='width=device-width, initial-scale=1'>"
+            "<title>CSS Transaction Receipt</title>"
+            "<style>body{font-family:system-ui,sans-serif;margin:24px;color:#111}"
+            "main{max-width:780px;margin:auto}table{border-collapse:collapse;width:100%}"
+            "th,td{border:1px solid #ccc;padding:10px;text-align:left}th{width:35%}"
+            ".actions{margin:18px 0}@media print{.actions{display:none}}</style></head>"
+            "<body><main><h1>CSS Transaction Receipt</h1>"
+            "<p>Read-only transaction record. Printing does not repeat or modify the transaction.</p>"
+            "<div class='actions'><button onclick='history.back()'>Back</button> "
+            "<button onclick='window.print()'>Print Receipt</button></div>"
+            f"<table>{body}</table></main></body></html>"
+        )
+        return HTMLResponse(html, headers={"Cache-Control": "no-store"})
 
     @router.get("/mission-control/{section_slug}", response_class=HTMLResponse)
     async def mission_control_page(section_slug: str, request: Request) -> HTMLResponse:
