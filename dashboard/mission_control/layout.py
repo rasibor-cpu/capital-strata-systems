@@ -145,6 +145,7 @@ def render_mission_control_shell(
       </form>
     </aside>
     <main class="mc-main">
+      {_global_balance_bar(state_dict)}
       <header class="mc-topbar">
         <div>
           <strong>{escape(platform.get('product', 'CSS Mission Control'))}</strong>
@@ -174,6 +175,63 @@ def render_mission_control_shell(
   {debug_script}
 </body>
 </html>"""
+
+
+
+def _global_balance_bar(state_dict: Mapping[str, Any]) -> str:
+    balances = _mapping(state_dict.get("broker_balance_summary"))
+    summary = _mapping(balances.get("account_summary"))
+    available = _mapping(summary.get("effective_available_balance")) or _mapping(summary.get("available_to_trade"))
+    total = _mapping(summary.get("total_account_value"))
+    pending_debits = _mapping(summary.get("pending_debits"))
+    pending_credits = _mapping(summary.get("pending_credits"))
+    context = _mapping(balances.get("account_context"))
+    assets = balances.get("asset_breakdown") if isinstance(balances.get("asset_breakdown"), list) else []
+
+    def amount(row: Mapping[str, Any]) -> str:
+        if row.get("availability_state") != "AVAILABLE":
+            return "UNAVAILABLE"
+        value = row.get("value")
+        currency = str(row.get("currency") or "").strip().upper()
+        return f"{value} {currency}".strip()
+
+    currency_parts = []
+    for row in assets[:8]:
+        if not isinstance(row, Mapping):
+            continue
+        currency = str(row.get("asset_currency") or row.get("currency") or "").strip().upper()
+        value = row.get("available")
+        if currency and value not in (None, ""):
+            currency_parts.append(f"{escape(currency)} {escape(value)}")
+    currency_text = " · ".join(currency_parts) if currency_parts else escape(context.get("base_currency") or available.get("currency") or "UNAVAILABLE")
+
+    verification = available.get("verification_state") or "UNVERIFIED"
+    return (
+        '<section class="mc-global-balance" aria-label="Available account balances">'
+        '<div class="mc-balance-main">'
+        '<span class="mc-balance-label">Available Balance</span>'
+        '<strong class="mc-sensitive-balance" data-balance-value="' + escape(amount(available)) + '">' + escape(amount(available)) + '</strong>'
+        '<button class="mc-balance-eye" type="button" aria-pressed="false" aria-label="Mask balance" title="Mask / unmask balance">'
+        '<span class="mc-eye-open" aria-hidden="true">◉</span><span class="mc-eye-closed" aria-hidden="true">◌</span></button>'
+        '</div>'
+        '<div class="mc-balance-meta">'
+        '<span>Account value <b class="mc-sensitive-balance" data-balance-value="' + escape(amount(total)) + '">' + escape(amount(total)) + '</b></span>'
+        '<span>Pending debits <b class="mc-sensitive-balance" data-balance-value="' + escape(amount(pending_debits)) + '">' + escape(amount(pending_debits)) + '</b></span>'
+        '<span>Pending credits <b class="mc-sensitive-balance" data-balance-value="' + escape(amount(pending_credits)) + '">' + escape(amount(pending_credits)) + '</b></span>'
+        '<span>Verification <b>' + escape(verification) + '</b></span>'
+        '<span>Currencies <b class="mc-sensitive-balance" data-balance-value="' + escape(currency_text) + '">' + escape(currency_text) + '</b></span>'
+        '</div>'
+        '</section>'
+        '<script>(function(){'
+        "const key='css_balance_masked'; const btn=document.querySelector('.mc-balance-eye');"
+        "const values=[...document.querySelectorAll('.mc-sensitive-balance')];"
+        "if(!btn)return; function apply(masked){values.forEach(el=>{el.textContent=masked?'••••••':(el.dataset.balanceValue||'UNAVAILABLE');});"
+        "btn.setAttribute('aria-pressed',masked?'true':'false');btn.setAttribute('aria-label',masked?'Unmask balance':'Mask balance');"
+        "document.body.classList.toggle('mc-balance-masked',masked);try{localStorage.setItem(key,masked?'1':'0');}catch(e){}}"
+        "let masked=false;try{masked=localStorage.getItem(key)==='1';}catch(e){} apply(masked);"
+        "btn.addEventListener('click',()=>apply(!document.body.classList.contains('mc-balance-masked')));})();</script>"
+    )
+
 
 
 def _render_nav(active_key: str) -> str:
