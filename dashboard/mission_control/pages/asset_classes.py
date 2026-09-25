@@ -55,7 +55,7 @@ def _asset_status_rows(state: dict, canonical_name: str) -> dict[str, object]:
     }
 
 
-def _asset_panel(anchor: str, label: str, canonical_name: str) -> str:
+def _asset_panel(state: dict, anchor: str, label: str, canonical_name: str) -> str:
     options_link = (
         '<a href="/mission-control/options-income">Open Options Income workbench</a>'
         if canonical_name == "OPTIONS"
@@ -67,7 +67,7 @@ def _asset_panel(anchor: str, label: str, canonical_name: str) -> str:
         f"<h2>{label}</h2>"
         '<p class="mc-muted">Dedicated read-only asset-class destination. '
         'Portfolio, market, risk, and learning evidence is shown only when canonical data is available.</p>'
-        f'{detail_table(f"{label} Snapshot", _asset_status_rows(_CURRENT_STATE, canonical_name))}'
+        f'{detail_table(f"{label} Snapshot", _asset_status_rows(state, canonical_name))}'
         '<p class="mc-muted">'
         '<a href="/mission-control/trade-operations">Trade Operations</a> · '
         '<a href="/mission-control/portfolio">Portfolio</a> · '
@@ -78,39 +78,31 @@ def _asset_panel(anchor: str, label: str, canonical_name: str) -> str:
     )
 
 
-_CURRENT_STATE: dict = {}
-
-
 def render(state: dict) -> str:
-    global _CURRENT_STATE
-    _CURRENT_STATE = state
-    try:
-        jump_links = "".join(
+    jump_links = "".join(
             f'<a href="#mc-asset-{anchor}">{label}</a>'
             for anchor, label, _ in _ASSET_CLASSES
         )
-        panels = "".join(
-            _asset_panel(f"mc-asset-{anchor}", label, canonical)
-            for anchor, label, canonical in _ASSET_CLASSES
+    panels = "".join(
+        _asset_panel(state, f"mc-asset-{anchor}", label, canonical)
+        for anchor, label, canonical in _ASSET_CLASSES
+    )
+    return (
+        page_header(
+            "Asset Classes",
+            "Multi-asset read-only operator hub for equities/ETFs, crypto, FX, futures, options, and other derivatives.",
         )
-        return (
-            page_header(
-                "Asset Classes",
-                "Multi-asset read-only operator hub for equities/ETFs, crypto, FX, futures, options, and other derivatives.",
-            )
-            + warning_banner(
-                "Asset-class pages are advisory/read-only. No destination can place, modify, or cancel orders.",
-                status="warn",
-            )
-            + '<nav class="mc-page-jump" aria-label="Asset Classes">'
-            + jump_links
-            + "</nav>"
-            + '<div class="mc-operator-stack">'
-            + panels
-            + "</div>"
+        + warning_banner(
+            "Asset-class pages are advisory/read-only. No destination can place, modify, or cancel orders.",
+            status="warn",
         )
-    finally:
-        _CURRENT_STATE = {}
+        + '<nav class="mc-page-jump" aria-label="Asset Classes">'
+        + jump_links
+        + "</nav>"
+        + '<div class="mc-operator-stack">'
+        + panels
+        + "</div>"
+    )
 
 
 __all__ = ["render"]
