@@ -6141,6 +6141,7 @@ async def account_margin_verify(request: Request):
 @launcher_router.post("/operator-config/broker-selection")
 async def operator_config_broker_selection(request: Request):
     from dashboard.enterprise_shell.operator_configuration import broker_row_selectable, save_broker_selection
+    from dashboard.auth.css_sign_on import update_persisted_session_broker
 
     actor = _operator_config_auth(request, require_admin=False)
     payload = await _read_mobile_trade_payload(request)
@@ -6158,8 +6159,7 @@ async def operator_config_broker_selection(request: Request):
         ),
         None,
     )
-    if broker_row is None or not broker_row_selectable(broker_row):
-        raise HTTPException(status_code=409, detail="BROKER_NOT_CURRENTLY_AVAILABLE")
+    service_available = bool(broker_row is not None and broker_row_selectable(broker_row))
     try:
         result = save_broker_selection(
             broker=requested_broker,
@@ -6169,7 +6169,20 @@ async def operator_config_broker_selection(request: Request):
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    return JSONResponse({"status": "SAVED", "selection": result, "execution_allowed": False})
+    update_persisted_session_broker(
+        selected_broker=result.get("selected_broker"),
+        broker_mode=result.get("broker_mode"),
+        user_id=actor["user_id"],
+    )
+    return JSONResponse({
+        "status": "SAVED",
+        "selection": result,
+        "service_available": service_available,
+        "service_status": "AVAILABLE" if service_available else "PREFERENCE_SAVED_SERVICE_UNAVAILABLE",
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+    })
 
 
 @launcher_router.post("/operator-config/user-account")
