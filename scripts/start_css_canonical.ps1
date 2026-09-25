@@ -45,8 +45,35 @@ if ($portListeners.Count -gt 0) {
 
         $isPython = [string]$owner.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe
 if ($Foreground) {
-    & $Python $Launcher
-    exit $LASTEXITCODE
+    Write-Host "Starting CSS canonical runtime in foreground mode..."
+    Write-Host "stdout: $StdOut"
+    Write-Host "stderr: $StdErr"
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $Python
+    $psi.Arguments = '"' + $Launcher + '"'
+    $psi.WorkingDirectory = $RepoRoot
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    $null = $proc.Start()
+
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
+    $proc.WaitForExit()
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+
+    Set-Content -Path $StdOut -Value $stdout -Encoding UTF8
+    Set-Content -Path $StdErr -Value $stderr -Encoding UTF8
+    if ($stdout) { Write-Host $stdout }
+    if ($stderr) { Write-Error $stderr -ErrorAction Continue }
+    Write-Host "CSS canonical runtime exited with code $($proc.ExitCode)."
+    exit $proc.ExitCode
 }
 
 $process = Start-Process -FilePath $Python -ArgumentList @($Launcher) -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr -PassThru
