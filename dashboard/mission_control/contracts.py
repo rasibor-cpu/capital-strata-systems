@@ -1380,12 +1380,12 @@ def _brokers(broker: Mapping[str, Any], runtime_snapshot: Mapping[str, Any]) -> 
             "credential_status",
             "PRESENT" if credential_diagnostics.get("credentials_present") is True else "MISSING",
         ),
-        "credential_failure_reason": credential_diagnostics.get(
+        "setup_failure_reason": credential_diagnostics.get(
             "canonical_failure_reason",
             credential_diagnostics.get("failure_reason", DATA_UNAVAILABLE),
         ),
         "missing_credential_fields": [str(item) for item in missing_credential_fields],
-        "credential_recommended_action": credential_diagnostics.get(
+        "setup_recommended_action": credential_diagnostics.get(
             "remediation_hint",
             credential_diagnostics.get("recommended_action", DATA_UNAVAILABLE),
         ),
