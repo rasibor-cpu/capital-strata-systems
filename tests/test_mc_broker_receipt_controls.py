@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.pages.transaction_history import render as render_transaction_history
-from launcher.css_mobile_launcher import _launcher_login_page, _launcher_password_change_page, validate_mobile_paper_trade_request
+from launcher.css_mobile_launcher import _launcher_forgot_password_page, _launcher_login_page, _launcher_password_change_page, _launcher_recovery_challenge_page, validate_mobile_paper_trade_request
 
 
 def test_broker_picker_greys_unavailable_brokers_and_requires_confirmation() -> None:
@@ -127,3 +127,25 @@ def test_full_trade_ticket_validation_preserves_transaction_fields() -> None:
     assert record["settlement_date"] == "2026-09-25"
     assert record["execution_allowed"] is False
     assert record["live_trading_blocked"] is True
+
+
+def test_launcher_exposes_mobile_forgot_password_recovery() -> None:
+    login = _launcher_login_page()
+    assert 'href="/forgot-password"' in login
+    assert "Forgot password?" in login
+    assert "does not consume another sign-on attempt" in login
+
+    forgot = _launcher_forgot_password_page()
+    assert "<title>CSS Password Recovery</title>" in forgot
+    assert 'form method="post" action="/forgot-password/lookup"' in forgot
+    assert 'name="user_id"' in forgot
+    assert "existing password cannot be retrieved" in forgot
+
+    challenge = _launcher_recovery_challenge_page("What city were you born in?")
+    assert "<title>CSS Reset Password</title>" in challenge
+    assert "What city were you born in?" in challenge
+    assert 'form method="post" action="/forgot-password/reset"' in challenge
+    assert 'name="recovery_answer"' in challenge
+    assert 'name="new_password"' in challenge
+    assert 'name="confirm_password"' in challenge
+    assert "clears the failed sign-on counter" in challenge
