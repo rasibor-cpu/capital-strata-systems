@@ -36,20 +36,69 @@ def build_executive_kpi_board(state: Mapping[str, Any]) -> dict[str, Any]:
 
 def build_system_metrics(state: Mapping[str, Any]) -> dict[str, Any]:
     runtime = _mapping(state.get("runtime"))
+    snapshot = _mapping(state.get("runtime_snapshot"))
+    brokers = _mapping(state.get("brokers"))
+    active_broker = _mapping(brokers.get("active_broker"))
     source_diagnostics = _mapping(runtime.get("source_diagnostics"))
+    runtime_metrics = _mapping(runtime.get("metrics"))
+    snapshot_metrics = _mapping(snapshot.get("metrics"))
+
+    def first(*values: Any) -> Any:
+        for value in values:
+            if value not in (None, "", DATA_UNAVAILABLE, "UNAVAILABLE"):
+                return value
+        return DATA_UNAVAILABLE
+
     return {
-        "cpu": DATA_UNAVAILABLE,
-        "memory": DATA_UNAVAILABLE,
-        "runtime_latency": DATA_UNAVAILABLE,
-        "api_latency": DATA_UNAVAILABLE,
-        "refresh_interval_seconds": 5,
-        "event_queue": DATA_UNAVAILABLE,
-        "cycle_duration": DATA_UNAVAILABLE,
-        "runtime_age": runtime.get("uptime", DATA_UNAVAILABLE),
-        "heartbeat_age": runtime.get("heartbeat_age_seconds", DATA_UNAVAILABLE),
-        "source_selected": source_diagnostics.get("selected_source", runtime.get("source", DATA_UNAVAILABLE)),
+        "cpu": first(
+            runtime_metrics.get("cpu"),
+            runtime_metrics.get("cpu_percent"),
+            snapshot_metrics.get("cpu"),
+            snapshot.get("cpu"),
+            snapshot.get("cpu_percent"),
+        ),
+        "memory": first(
+            runtime_metrics.get("memory"),
+            runtime_metrics.get("memory_percent"),
+            snapshot_metrics.get("memory"),
+            snapshot.get("memory"),
+            snapshot.get("memory_percent"),
+        ),
+        "runtime_latency": first(
+            runtime_metrics.get("runtime_latency"),
+            runtime_metrics.get("latency_ms"),
+            snapshot_metrics.get("runtime_latency"),
+            snapshot.get("runtime_latency"),
+        ),
+        "api_latency": first(
+            runtime_metrics.get("api_latency"),
+            snapshot_metrics.get("api_latency"),
+            snapshot.get("api_latency"),
+        ),
+        "refresh_interval_seconds": first(
+            runtime_metrics.get("refresh_interval_seconds"),
+            snapshot_metrics.get("refresh_interval_seconds"),
+            5,
+        ),
+        "event_queue": first(
+            runtime_metrics.get("event_queue"),
+            runtime_metrics.get("queue_depth"),
+            snapshot_metrics.get("event_queue"),
+            snapshot.get("event_queue"),
+        ),
+        "cycle_duration": first(
+            runtime_metrics.get("cycle_duration"),
+            runtime_metrics.get("cycle_duration_seconds"),
+            snapshot_metrics.get("cycle_duration"),
+            snapshot.get("cycle_duration"),
+        ),
+        "runtime_age": first(runtime.get("uptime"), snapshot.get("uptime")),
+        "heartbeat_age": first(runtime.get("heartbeat_age_seconds"), snapshot.get("heartbeat_age_seconds")),
+        "source_selected": source_diagnostics.get("selected_source", runtime.get("source", snapshot.get("source", DATA_UNAVAILABLE))),
         "source_candidate_count": source_diagnostics.get("candidate_count", DATA_UNAVAILABLE),
-        "metrics_controls": "DISABLED_READ_ONLY",
+        "active_broker": active_broker.get("selected_broker", DATA_UNAVAILABLE),
+        "broker_mode": active_broker.get("broker_mode", DATA_UNAVAILABLE),
+        "metrics_controls": "AUTO_SOURCE_READ_ONLY",
         "read_only": True,
         "execution_allowed": False,
         "live_trading_blocked": True,
