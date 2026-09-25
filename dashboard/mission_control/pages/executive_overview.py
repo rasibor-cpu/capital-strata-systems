@@ -287,6 +287,52 @@ def _financial_reporting_card(state: dict) -> str:
         )
 
 
+def _evidence_panel(anchor: str, title: str, content: str) -> str:
+    return (
+        f'<div class="mc-section-anchor mc-evidence-disclosure" id="{anchor}">'
+        f'<details><summary>{title}</summary>{content}</details>'
+        '</div>'
+    )
+
+
+def _balance_metric(balance_summary: dict, key: str) -> object:
+    account = balance_summary.get("account_summary") if isinstance(balance_summary.get("account_summary"), dict) else {}
+    metric = account.get(key) if isinstance(account.get(key), dict) else {}
+    return metric.get("value", "UNAVAILABLE")
+
+
+def _sanitize_timeline(events: object) -> list[dict[str, object]]:
+    if not isinstance(events, list):
+        return []
+    clean: list[dict[str, object]] = []
+    for raw in events[:8]:
+        if not isinstance(raw, dict):
+            continue
+        clean.append({
+            "event_type": raw.get("event_type"),
+            "category": raw.get("category"),
+            "timestamp": raw.get("timestamp"),
+            "status": raw.get("status"),
+            "message": raw.get("message"),
+            "source": raw.get("source"),
+        })
+    return clean
+
+
+def _sanitize_reports(rows: object) -> list[dict[str, object]]:
+    if not isinstance(rows, list):
+        return []
+    clean: list[dict[str, object]] = []
+    for raw in rows:
+        if not isinstance(raw, dict):
+            continue
+        clean.append({
+            "title": raw.get("title"),
+            "authority": raw.get("authority"),
+        })
+    return clean
+
+
 def _cockpit_status(value: object) -> str:
     text = str(value or "").strip().upper()
     if text in {"UNAVAILABLE", "DATA UNAVAILABLE", "SOURCE_UNAVAILABLE", "NOT_AVAILABLE"}:
@@ -592,53 +638,48 @@ def render(state: dict) -> str:
                 ("Last Runtime Heartbeat", freshness.get("last_runtime_heartbeat"), "neutral"),
             )
         )
-        + split_panels(
-            detail_table("Canonical Account Balance", balance_summary),
-            detail_table("Executive KPI Board", {
-                "uptime": kpis.get("uptime"),
-                "runtime_health": kpis.get("runtime_health"),
-                "broker_health": kpis.get("broker_health"),
-                "portfolio_health": kpis.get("portfolio_health"),
-                "risk_health": kpis.get("risk_health"),
-                "market_health": kpis.get("market_health"),
-                "alert_count": kpis.get("alert_count"),
-                "trade_quality": kpis.get("trade_quality"),
-                "system_readiness": kpis.get("system_readiness"),
-                "rc1_readiness": kpis.get("rc1_readiness"),
-                "source": kpis.get("source"),
-                "state_hash": kpis.get("state_hash"),
-            }),
-            detail_table("Institutional Dashboard", {
-                "platform_health": institutional.get("platform_health"),
-                "investment_health": institutional.get("investment_health"),
-                "risk_health": institutional.get("risk_health"),
-                "broker_health": institutional.get("broker_health"),
-                "runtime_health": institutional.get("runtime_health"),
-                "portfolio_health": institutional.get("portfolio_health"),
-                "capital_health": institutional.get("capital_health"),
-                "links": institutional.get("links"),
-                "state_hash": institutional.get("state_hash"),
-            }),
-            detail_table("Institutional Reports", reporting.get("summaries", [])),
-            detail_table("Operations Timeline", timeline.get("events", [])[:8]),
-            detail_table("Capital And PnL", {
-                "cash": portfolio.get("cash"),
-                "buying_power": portfolio.get("buying_power"),
-                "realized_pnl": section(state, "portfolio").get("realized_pnl", "UNAVAILABLE"),
-                "unrealized_pnl": section(state, "portfolio").get("unrealized_pnl", "UNAVAILABLE"),
-                "net_pnl": section(state, "portfolio").get("net_pnl", "UNAVAILABLE"),
-                "open_positions": len(portfolio.get("positions", []) or []),
-                "open_position_count": portfolio.get("open_positions"),
-                "capital_utilization": portfolio.get("capital_deployed"),
-                "drawdown": portfolio.get("drawdown"),
-            }),
-            detail_table("Readiness", {
-                "ready_for_controlled_rc1_runtime": certification.get("ready_for_controlled_rc1_runtime"),
-                "ready_for_live_trading": certification.get("ready_for_live_trading"),
-                "data_freshness": freshness.get("generated_at"),
-                "overall_freshness": freshness.get("overall_freshness"),
-                "last_runtime_heartbeat": freshness.get("last_runtime_heartbeat"),
-                "live_trading_blocked": state.get("safety", {}).get("live_trading_blocked"),
-            }),
-        )
+        + '<div class="mc-operator-stack">'
+        + detail_table("Executive Runtime Snapshot", {
+            "platform_status": platform.get("platform_status"),
+            "runtime_health": platform.get("runtime_health"),
+            "broker_health": platform.get("broker_health"),
+            "risk_status": risk.get("overall_risk_state"),
+            "system_readiness": kpis.get("system_readiness"),
+            "rc1_readiness": kpis.get("rc1_readiness"),
+        })
+        + detail_table("Capital & Readiness Snapshot", {
+            "account_value": _balance_metric(balance_summary, "total_account_value"),
+            "cash": _balance_metric(balance_summary, "cash"),
+            "buying_power": _balance_metric(balance_summary, "buying_power"),
+            "realized_pnl": _balance_metric(balance_summary, "realized_pnl"),
+            "unrealized_pnl": _balance_metric(balance_summary, "unrealized_pnl"),
+            "ready_for_live_trading": certification.get("ready_for_live_trading"),
+            "overall_freshness": freshness.get("overall_freshness"),
+            "live_trading_blocked": state.get("safety", {}).get("live_trading_blocked"),
+        })
+        + _evidence_panel("mc-exec-kpis", "Show executive KPI evidence", detail_table("Executive KPI Board", {
+            "uptime": kpis.get("uptime"),
+            "runtime_health": kpis.get("runtime_health"),
+            "broker_health": kpis.get("broker_health"),
+            "portfolio_health": kpis.get("portfolio_health"),
+            "risk_health": kpis.get("risk_health"),
+            "market_health": kpis.get("market_health"),
+            "alert_count": kpis.get("alert_count"),
+            "trade_quality": kpis.get("trade_quality"),
+            "system_readiness": kpis.get("system_readiness"),
+            "rc1_readiness": kpis.get("rc1_readiness"),
+            "source": kpis.get("source"),
+        }))
+        + _evidence_panel("mc-exec-institutional", "Show institutional dashboard evidence", detail_table("Institutional Dashboard", {
+            "platform_health": institutional.get("platform_health"),
+            "investment_health": institutional.get("investment_health"),
+            "risk_health": institutional.get("risk_health"),
+            "broker_health": institutional.get("broker_health"),
+            "runtime_health": institutional.get("runtime_health"),
+            "portfolio_health": institutional.get("portfolio_health"),
+            "capital_health": institutional.get("capital_health"),
+        }))
+        + _evidence_panel("mc-exec-reports", "Show institutional report index", detail_table("Institutional Reports", _sanitize_reports(reporting.get("summaries", []))))
+        + _evidence_panel("mc-exec-timeline", "Show recent operations timeline", detail_table("Operations Timeline", _sanitize_timeline(timeline.get("events", []))))
+        + '</div>'
     )
