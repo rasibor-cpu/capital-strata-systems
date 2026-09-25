@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dashboard.mission_control.contracts import _reported_cycle
 from dashboard.mission_control.layout import _broker_quick_control, _global_balance_bar
+from dashboard.mission_control.pages.executive_overview import render as render_executive_overview
 
 
 def test_reported_cycle_rejects_legacy_zero_and_status_tokens():
@@ -96,3 +97,48 @@ def test_stale_runtime_without_saved_preference_does_not_claim_active_broker():
     assert "Preferred Broker" in html
     assert "UNAVAILABLE" in html
     assert "COINBASE" not in html
+
+
+def test_stale_executive_metrics_are_explicitly_reference_only():
+    html = render_executive_overview(
+        {
+            "platform": {
+                "runtime_mode": "DISABLED",
+                "runtime_offline": False,
+                "platform_status": "RED",
+                "runtime_health": "RED",
+                "broker_health": "RED",
+            },
+            "runtime": {"heartbeat_status": "STALE"},
+            "portfolio": {
+                "execution_status": "BLOCKED",
+                "cash": 596.7317,
+                "portfolio_value": 601.0005,
+                "session_pnl": 393.3379,
+                "open_positions": 10,
+                "available_free": 601.0005,
+                "realized_pnl": 393.0395,
+                "unrealized_pnl": 0.2984,
+                "operating_context": {
+                    "runtime_mode": "DISABLED",
+                    "execution_allowed": False,
+                    "live_trading_blocked": True,
+                    "broker_execution_armed": False,
+                    "source": "LAUNCHER_ACCOUNT_ARTIFACT",
+                },
+                "liquidity_margin": {"source": "LAUNCHER_ACCOUNT_ARTIFACT"},
+            },
+            "data_freshness": {"overall_freshness": "STALE"},
+            "safety": {
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "safety_status": "PASS",
+            },
+        }
+    )
+    assert "STALE / SIMULATED SNAPSHOT" in html
+    assert "not current broker-authoritative balances" in html
+    assert "596.7317" in html
+    assert "601.0005" in html
+    assert "BLOCKED" in html
