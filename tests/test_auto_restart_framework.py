@@ -59,6 +59,7 @@ def alert_mock():
 def supervisor(temp_dir, alert_mock):
     sup = CSSRuntimeSupervisor(
         state_dir=temp_dir,
+        trusted_root=temp_dir,
         max_restart_limit=3,
         alert_service=alert_mock,
     )
@@ -284,6 +285,7 @@ def test_try_restart_launches_stdout_drain_thread_on_success():
 def _mock_supervisor(temp_dir, alert_mock, max_restart_limit=3):
     sup = CSSRuntimeSupervisor(
         state_dir=temp_dir,
+        trusted_root=temp_dir,
         max_restart_limit=max_restart_limit,
         alert_service=alert_mock,
     )
