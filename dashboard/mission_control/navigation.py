@@ -32,6 +32,7 @@ MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
     MissionControlSection("audit_explainability", "Audit and Explainability", "/mission-control/audit-explainability", "Decision explanations, evidence, correlation IDs, audit events, warnings, failures, and readiness.", "badge"),
     MissionControlSection("learning_performance", "Learning and Performance", "/mission-control/learning-performance", "Strategy rankings, attribution, reliability, expectancy, profit factor, and recommendations.", "chart"),
     MissionControlSection("users_governance", "Users and Governance", "/mission-control/users-governance", "Current user, role, unit, session, permissions, RBAC, and governance state.", "users"),
+    MissionControlSection("user_account_configuration", "User Accounts & Terms", "/mission-control/user-account-configuration", "User privileges, user mode, system access charges, trade commissions, and acceptance records.", "users"),
     MissionControlSection("system_configuration", "System Configuration", "/mission-control/system-configuration", "Safe non-secret runtime configuration, limits, flags, endpoints, and refresh settings.", "sliders"),
     MissionControlSection("documentation_runbooks", "Documentation / Runbooks", "/mission-control/documentation-runbooks", "Safe index of architecture, governance, release, certification, and operator runbook documents.", "book"),
 )
