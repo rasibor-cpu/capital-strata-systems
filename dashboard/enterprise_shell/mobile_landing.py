@@ -37,6 +37,7 @@ def render_mobile_landing(
         "Home",
         "Mission Control",
         "Trade / Transaction",
+        "Balances & Funding",
         "Reports",
         "Portfolio",
         "Market Intelligence",
