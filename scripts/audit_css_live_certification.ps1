@@ -38,7 +38,40 @@ Write-Host ("Safety live blocked : {0}" -f $state.safety.live_trading_blocked)
 Write-Host ("Broker armed        : {0}" -f $state.safety.broker_execution_armed)
 Write-Host ("Advisory only       : {0}" -f $state.safety.advisory_only)
 
-if ($blockers.Count -eq 0 -and $overall -eq "CERTIFIED") {
+$prod = $state.production_readiness
+$contradictions = @()
+if ($overall -eq "CERTIFIED") {
+    if ($runtimeStatusDisplay -in @("RED", "FAILED", "DEGRADED", "STOPPED", "NOT_READY", "UNAVAILABLE")) {
+        $contradictions += "certified_with_runtime_$($runtimeStatusDisplay.ToLower())"
+    }
+    if ($null -eq $prod) {
+        $contradictions += "certified_without_production_readiness"
+    } else {
+        if ([string]$prod.status -ne "CERTIFIED") {
+            $contradictions += "certified_with_production_readiness_$([string]$prod.status)"
+        }
+        if ([string]$prod.broker_readiness -in @("", "EVIDENCE_MISSING", "UNAVAILABLE", "UNKNOWN", "NOT_READY")) {
+            $contradictions += "certified_with_broker_evidence_missing"
+        }
+        if ([string]$prod.runtime_readiness -in @("", "EVIDENCE_MISSING", "UNAVAILABLE", "UNKNOWN", "NOT_READY")) {
+            $contradictions += "certified_with_runtime_evidence_missing"
+        }
+        if ([double]$prod.evidence_completeness -lt 100) {
+            $contradictions += "certified_with_incomplete_evidence"
+        }
+        if ($prod.deployment_authorized -ne $true) {
+            $contradictions += "certified_without_deployment_authorization"
+        }
+    }
+}
+
+if ($contradictions.Count -gt 0) {
+    Write-Host ""
+    Write-Host "[FAIL] Certification response is internally inconsistent and is treated as FAIL_CLOSED by this audit."
+    foreach ($reason in $contradictions) {
+        Write-Host ("  - {0}" -f $reason)
+    }
+} elseif ($blockers.Count -eq 0 -and $overall -eq "CERTIFIED") {
     Write-Host ""
     Write-Host "[PASS] Mission Control final certification reports CERTIFIED."
 } else {
@@ -54,7 +87,6 @@ if ($blockers.Count -eq 0 -and $overall -eq "CERTIFIED") {
     }
 }
 
-$prod = $state.production_readiness
 if ($null -ne $prod) {
     Write-Host ""
     Write-Host "Production readiness:"
@@ -72,3 +104,7 @@ if ($null -ne $prod) {
 Write-Host ""
 Write-Host "This audit is read-only. It does not authorize deployment, trading, or execution."
 Write-Host "===================================="
+
+if ($contradictions.Count -gt 0) {
+    exit 2
+}
