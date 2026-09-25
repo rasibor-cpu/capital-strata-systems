@@ -544,16 +544,22 @@ def check_environment() -> bool:
             f"error_type={owner_discovery.get('error_type')})."
         )
         checks_ok = False
-    elif owner_discovery.get("owners"):
-        print("Canonical Runtime Owner FAIL")
-        for owner in owner_discovery["owners"]:
-            print(
-                "ERROR: Existing canonical launcher detected "
-                f"(pid={owner.get('pid')})."
-            )
-        checks_ok = False
     else:
-        print("Canonical Runtime Owner PASS")
+        other_owners = [
+            owner
+            for owner in owner_discovery.get("owners") or []
+            if int(owner.get("pid") or -1) != int(os.getpid())
+        ]
+        if other_owners:
+            print("Canonical Runtime Owner FAIL")
+            for owner in other_owners:
+                print(
+                    "ERROR: Existing canonical launcher detected "
+                    f"(pid={owner.get('pid')})."
+                )
+            checks_ok = False
+        else:
+            print("Canonical Runtime Owner PASS")
 
     if checks_ok:
         print("ENVIRONMENT READY")
