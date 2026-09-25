@@ -78,3 +78,13 @@ def test_live_certification_audit_surfaces_broker_stage_diagnostics_and_blocker_
         "$deploymentBlockers",
     ):
         assert token in text
+
+
+def test_live_certification_audit_reports_missing_credential_field_names_only():
+    text = (ROOT / "scripts" / "audit_css_live_certification.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "credential_status" in text
+    assert "credential_reason" in text
+    assert "missing credential fields" in text
+    assert "credential_action" in text
