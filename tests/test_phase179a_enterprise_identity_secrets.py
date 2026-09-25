@@ -332,7 +332,7 @@ def test_mission_control_identity_governance_is_read_only() -> None:
     assert metadata.secret_uuid in html
     assert "synthetic-phase179a-material" not in html
     assert resolve_section_slug("enterprise-identity").key == "enterprise_identity"
-    assert len(MISSION_CONTROL_SECTIONS) == 16
+    assert len(MISSION_CONTROL_SECTIONS) == 20
     denied = render_mission_control_shell({}, active_section="enterprise_identity")
     assert metadata.secret_uuid not in denied
     assert "Administrator authentication is required" in denied
