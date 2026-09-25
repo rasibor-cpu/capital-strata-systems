@@ -27,9 +27,12 @@ def test_mc001_repository_shell_registers_all_required_pages() -> None:
         "reports_center",
         "runtime_operations",
         "trade_operations",
+        "transaction_history",
+        "account_funding",
         "portfolio",
         "market_intelligence",
         "risk_command",
+        "asset_classes",
         "options_income",
         "broker_management",
         "alerts_incidents",
@@ -37,6 +40,7 @@ def test_mc001_repository_shell_registers_all_required_pages() -> None:
         "audit_explainability",
         "learning_performance",
         "users_governance",
+        "user_account_configuration",
         "system_configuration",
         "documentation_runbooks",
     ]
@@ -77,7 +81,7 @@ def test_mc001_shell_renders_navigation_topbar_safety_and_responsive_structure()
     assert 'aria-label="Mission Control navigation"' in html
     assert 'aria-current="page"' in html
     assert "Broker Management" in html
-    assert "Execution: BLOCKED" in html
+    assert 'data-mc-status="execution"' in html\n    assert "BLOCKED" in html
     assert "No execution authority is granted" in html
     assert "data-mission-control-schema" in html
     assert "@media (max-width: 680px)" in MISSION_CONTROL_CSS
@@ -187,7 +191,7 @@ def test_mc001_fastapi_app_serves_shell_state_navigation_and_health() -> None:
     assert nav_response.status_code == 200
     assert health_response.status_code == 200
     assert state_response.json()["schema_version"] == MISSION_CONTROL_SCHEMA_VERSION
-    assert len(nav_response.json()) == 16
+    assert len(nav_response.json()) == 20
     assert "Broker Management" in page_response.text
     assert health_response.json()["execution_allowed"] is False
     assert health_response.json()["live_trading_blocked"] is True
