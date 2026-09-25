@@ -5303,6 +5303,104 @@ async def questrade_mission_control_refresh(request: Request):
     return JSONResponse(_QUESTRADE_MISSION_CONTROL_ACTIVATION.refresh())
 
 
+
+def _operator_config_auth(request: Request, *, require_admin: bool = True) -> Dict[str, str]:
+    from backend.security.mutation_guard import require_mutation_auth
+    from dashboard.auth.session_bridge import resolve_authorization_context
+
+    require_mutation_auth(request)
+    auth = resolve_authorization_context(channel="operator_configuration", request=request)
+    role = str(auth.role or "").upper()
+    if not auth.authenticated or not auth.active:
+        raise HTTPException(status_code=401, detail="AUTH_REQUIRED")
+    if require_admin and role not in {"SUPER_USER", "ADMIN"}:
+        raise HTTPException(status_code=403, detail="ADMIN_REQUIRED")
+    return {"user_id": str(auth.user_id or ""), "role": role}
+
+
+@launcher_router.post("/operator-config/broker-selection")
+async def operator_config_broker_selection(request: Request):
+    from dashboard.enterprise_shell.operator_configuration import save_broker_selection
+
+    actor = _operator_config_auth(request)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        result = save_broker_selection(
+            broker=str(payload.get("broker") or ""),
+            broker_mode=str(payload.get("broker_mode") or ""),
+            actor_user_id=actor["user_id"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": "SAVED", "selection": result, "execution_allowed": False})
+
+
+@launcher_router.post("/operator-config/user-account")
+async def operator_config_user_account(request: Request):
+    from dashboard.auth.css_sign_on import available_roles, load_users, save_users
+    from dashboard.enterprise_shell.operator_configuration import save_user_account_profile
+
+    actor = _operator_config_auth(request)
+    payload = await _read_mobile_trade_payload(request)
+    user_id = str(payload.get("user_id") or "").strip()
+    role = str(payload.get("role") or "").strip().upper()
+    users = load_users()
+    record = users.get(user_id)
+    if not isinstance(record, dict):
+        raise HTTPException(status_code=404, detail="USER_NOT_FOUND")
+    if role not in available_roles():
+        raise HTTPException(status_code=400, detail="INVALID_ROLE")
+
+    record["role"] = role
+    users[user_id] = record
+    save_users(users)
+
+    try:
+        profile = save_user_account_profile(
+            user_id=user_id,
+            role=role,
+            user_mode=str(payload.get("user_mode") or ""),
+            system_access_charge_type=str(payload.get("system_access_charge_type") or "NONE"),
+            system_access_charge_amount=payload.get("system_access_charge_amount", "0"),
+            system_access_currency=str(payload.get("system_access_currency") or "USD"),
+            trade_commission_basis=str(payload.get("trade_commission_basis") or "NONE"),
+            trade_commission_rate=payload.get("trade_commission_rate", "0"),
+            independent_trade_fee_basis=str(payload.get("independent_trade_fee_basis") or "NONE"),
+            independent_trade_fee_rate=payload.get("independent_trade_fee_rate", "0"),
+            broker_charges_pass_through=str(payload.get("broker_charges_pass_through") or "").lower() in {"1", "true", "yes", "on"},
+            agreement_version=str(payload.get("agreement_version") or ""),
+            actor_user_id=actor["user_id"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return JSONResponse({
+        "status": "SAVED",
+        "profile": profile,
+        "role_updated": True,
+        "execution_allowed": False,
+    })
+
+
+@launcher_router.post("/operator-config/user-account/accept")
+async def operator_config_user_account_accept(request: Request):
+    from dashboard.enterprise_shell.operator_configuration import accept_user_account_terms
+
+    actor = _operator_config_auth(request, require_admin=False)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        profile = accept_user_account_terms(
+            user_id=str(payload.get("user_id") or ""),
+            actor_user_id=actor["user_id"],
+            agreement_version=str(payload.get("agreement_version") or ""),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": "ACCEPTED", "profile": profile, "execution_allowed": False})
+
+
 def _mission_control_registry_source() -> Dict[str, Any]:
     # Phase 172A: build_launcher_frontend_state() reads the canonical
     # supervisor artifact and other runtime artifacts fresh from disk on
@@ -5315,6 +5413,13 @@ def _mission_control_registry_source() -> Dict[str, Any]:
     # authority classification inside build_canonical_runtime_snapshot()
     # still fails closed on the resulting payload regardless of this flag.
     payload = build_launcher_frontend_state()
+    try:
+        from dashboard.enterprise_shell.operator_configuration import (
+            load_broker_selection,
+        )
+        payload["operator_broker_selection"] = load_broker_selection()
+    except Exception:
+        payload["operator_broker_selection"] = {}
     payload["mission_control_runtime_registry_cross_process_safe"] = True
     return payload
 
