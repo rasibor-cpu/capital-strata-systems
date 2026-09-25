@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, section, warning_banner
 
 
@@ -117,6 +119,66 @@ def _lifecycle_summary_rows(lifecycle: dict) -> list[dict]:
     return rows
 
 
+
+def _trade_ticket(state: dict) -> str:
+    brokers = section(state, "brokers")
+    selection = brokers.get("operator_selection") if isinstance(brokers.get("operator_selection"), dict) else {}
+    active = brokers.get("active_broker") if isinstance(brokers.get("active_broker"), dict) else {}
+    broker = str(selection.get("selected_broker") or active.get("selected_broker") or "").strip().upper()
+    confirmed = bool(selection.get("confirmed"))
+    broker_label = escape(broker or "NO CONFIRMED BROKER")
+    disabled = "" if broker and confirmed else " disabled"
+    broker_warning = (
+        ""
+        if broker and confirmed
+        else '<p class="mc-warning bad">Select and confirm an available broker in Broker Management before submitting a trade request.</p>'
+    )
+    return (
+        '<section class="mc-panel mc-section-anchor" id="mc-trade-ticket">'
+        '<h2>Transaction / Trade Ticket</h2>'
+        '<p class="mc-muted">Complete the transaction fields below. Until CSS production execution is separately certified, this submits a controlled paper/preview trade request only.</p>'
+        + broker_warning
+        + '<form id="mc-trade-ticket-form" class="mc-filter-form">'
+        '<label>Broker<input name="broker" value="' + broker_label + '" readonly></label>'
+        '<label>Asset class<select name="asset_class" required>'
+        '<option value="">Select</option><option value="EQUITIES">Equities / ETFs</option>'
+        '<option value="CRYPTO">Crypto</option><option value="FX">FX</option>'
+        '<option value="FUTURES">Futures</option><option value="OPTIONS">Options</option>'
+        '<option value="DERIVATIVES">Other derivatives</option></select></label>'
+        '<label>Instrument<input name="instrument" placeholder="e.g. AAPL, EURUSD, BTC-USD" required></label>'
+        '<label>Side<select name="side" required><option value="">Select</option><option value="BUY">Buy</option><option value="SELL">Sell</option></select></label>'
+        '<label>Amount<input name="amount" inputmode="decimal" placeholder="Transaction amount"></label>'
+        '<label>Quantity<input name="quantity" inputmode="decimal" value="1" required></label>'
+        '<label>Currency<input name="currency" value="USD" maxlength="8"></label>'
+        '<label>Tenor<input name="tenor" placeholder="e.g. Spot, 1M, Dec-26"></label>'
+        '<label>Rate / Price<input name="rate" inputmode="decimal" placeholder="Optional for market order"></label>'
+        '<label>Order type<select name="order_type"><option value="MARKET">Market</option><option value="LIMIT">Limit</option><option value="STOP">Stop</option></select></label>'
+        '<label>Value date<input name="value_date" type="date"></label>'
+        '<label>Settlement date<input name="settlement_date" type="date"></label>'
+        '<label>Time in force<select name="time_in_force"><option value="DAY">Day</option><option value="GTC">Good till cancelled</option><option value="IOC">Immediate or cancel</option></select></label>'
+        '<label>Notes<input name="notes" maxlength="500" placeholder="Optional transaction notes"></label>'
+        '<input type="hidden" name="paper_only" value="true">'
+        '<input type="hidden" name="broker_execution_allowed" value="false">'
+        '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_trade" value="YES" required> '
+        'I confirm the broker and transaction details shown above.</label>'
+        '<button type="submit"' + disabled + '>Submit Trade Request</button>'
+        '</form>'
+        '<p id="mc-trade-ticket-result" class="mc-muted" aria-live="polite"></p>'
+        '<p class="mc-muted"><a href="/mission-control/broker-management">Change / confirm broker</a> · '
+        '<a href="/mission-control/transaction-history">Transaction history &amp; receipts</a></p>'
+        '<script>'
+        "document.getElementById('mc-trade-ticket-form')?.addEventListener('submit', async (ev) => {"
+        "ev.preventDefault(); const out=document.getElementById('mc-trade-ticket-result');"
+        "const body=new URLSearchParams(new FormData(ev.currentTarget));"
+        "try { const response=await fetch('/operator-trade/request',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body});"
+        "const data=await response.json(); if(!response.ok) throw new Error(data.detail||data.error||'Trade request failed');"
+        "out.textContent='Trade request recorded. Current CSS execution remains paper/preview only.';"
+        "} catch(err){out.textContent=String(err.message||err);} });"
+        '</script></section>'
+    )
+
+
+
 def render(state: dict) -> str:
     trading = section(state, "trading")
     lifecycle = section(state, "trade_lifecycle")
@@ -127,14 +189,16 @@ def render(state: dict) -> str:
     account_values = balances.get("account_summary") if isinstance(balances.get("account_summary"), dict) else {}
     account_context = balances.get("account_context") if isinstance(balances.get("account_context"), dict) else {}
     return (
-        page_header("Trade Operations", "Read-only trade decision, gate, paper position, order, fill, rejection, slippage, and fee visibility.")
-        + warning_banner("MC-001 exposes no executable trade tickets and cannot submit or cancel orders.", status="bad")
+        page_header("Trade / Transaction", "Transaction entry plus trade decision, gate, position, order, fill, rejection, slippage, and fee visibility.")
+        + warning_banner("Trade ticket entry is enabled for controlled paper/preview requests. Live broker execution remains blocked until separately certified.", status="warn")
         + '<nav class="mc-page-jump" aria-label="Trade Operations sections">'
+          '<a href="#mc-trade-ticket">Trade Ticket</a>'
           '<a href="#mc-trade-account">Account</a>'
           '<a href="#mc-trade-decisions">Decisions</a>'
           '<a href="#mc-trade-execution">Execution</a>'
           '<a href="#mc-trade-lifecycle">Lifecycle</a>'
           '</nav>'
+        + _trade_ticket(state)
         + metric_grid(
             (
                 ("Execution Status", trading.get("execution_status"), trading.get("execution_status")),
