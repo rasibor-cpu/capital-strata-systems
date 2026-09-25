@@ -1727,3 +1727,79 @@ def test_broker_management_tier1_snapshot_is_mobile_compact() -> None:
     assert "certification NOT_INITIALIZED" in snapshot
     assert "execution DISABLED" in snapshot
     assert "<thead>" not in snapshot
+
+
+def test_executive_overview_mobile_hides_forensic_payloads() -> None:
+    body = render_executive_overview({
+        "platform": {
+            "platform_status": "RED",
+            "runtime_health": "RED",
+            "broker_health": "FAIL_CLOSED",
+            "runtime_mode": "DISABLED",
+        },
+        "runtime": {"heartbeat_status": "STALE"},
+        "portfolio": {
+            "execution_status": "BLOCKED",
+            "cash": 10,
+            "portfolio_value": 10,
+            "session_pnl": 0,
+            "open_positions": 0,
+            "available_free": 10,
+            "realized_pnl": 0,
+            "unrealized_pnl": 0,
+        },
+        "risk": {"overall_risk_state": "RED"},
+        "safety": {
+            "execution_allowed": False,
+            "live_trading_blocked": True,
+            "broker_execution_armed": False,
+            "safety_status": "PASS",
+        },
+        "executive_kpis": {
+            "runtime_health": "RED",
+            "broker_health": "FAIL",
+            "system_readiness": "RED",
+            "rc1_readiness": "RED",
+            "state_hash": "must-not-render",
+        },
+        "institutional_executive_dashboard": {
+            "platform_health": "RED",
+            "state_hash": "must-not-render",
+            "links": [{"route": "/must-not-render"}],
+        },
+        "operations_timeline": {
+            "events": [{
+                "event_type": "heartbeat",
+                "status": "STALE",
+                "message": "Runtime heartbeat observed",
+                "state_hash": "must-not-render",
+                "provenance": {"secret": "must-not-render"},
+            }]
+        },
+        "institutional_reporting": {
+            "summaries": [{
+                "title": "Daily CIO Summary",
+                "authority": "ADVISORY_ONLY",
+                "evidence": {"secret": "must-not-render"},
+            }]
+        },
+        "broker_balance_summary": {
+            "account_summary": {
+                "total_account_value": {"value": 10, "state_hash": "must-not-render"},
+                "cash": {"value": 10},
+                "buying_power": {"value": 10},
+                "realized_pnl": {"value": 0},
+                "unrealized_pnl": {"value": 0},
+            },
+            "account_context": {"secret": "must-not-render"},
+        },
+    })
+    assert "Executive Runtime Snapshot" in body
+    assert "Capital &amp; Readiness Snapshot" in body
+    assert "<summary>Show executive KPI evidence</summary>" in body
+    assert "<summary>Show recent operations timeline</summary>" in body
+    assert "must-not-render" not in body
+    assert "state_hash" not in body
+    assert "provenance" not in body
+    assert "account_context" not in body
+    assert "<details open" not in body
