@@ -5305,10 +5305,10 @@ async def questrade_mission_control_refresh(request: Request):
 
 
 def _operator_config_auth(request: Request, *, require_admin: bool = True) -> Dict[str, str]:
-    from backend.security.mutation_guard import require_mutation_auth
+    from backend.security.mutation_guard import validate_csrf
     from dashboard.auth.session_bridge import resolve_authorization_context
 
-    require_mutation_auth(request)
+    validate_csrf(request)
     auth = resolve_authorization_context(channel="operator_configuration", request=request)
     role = str(auth.role or "").upper()
     if not auth.authenticated or not auth.active:
