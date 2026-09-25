@@ -26,6 +26,7 @@ from dashboard.mission_control.pages import (
     trade_operations,
     transaction_history,
     users_governance,
+    user_account_configuration,
 )
 
 
@@ -46,6 +47,7 @@ PAGE_MODULES = {
     "audit_explainability": audit_explainability,
     "learning_performance": learning_performance_mobile,
     "users_governance": users_governance,
+    "user_account_configuration": user_account_configuration,
     "system_configuration": system_configuration,
     "documentation_runbooks": documentation_runbooks,
 }
