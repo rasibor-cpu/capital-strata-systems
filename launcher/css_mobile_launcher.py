@@ -1450,6 +1450,46 @@ def _launcher_opportunities_for_frontend(
     return result
 
 
+def _resolve_runtime_broker_identity(
+    session: Dict[str, Any],
+    broker_startup: Dict[str, Any],
+    runtime_mode_resolution: Dict[str, Any],
+) -> tuple[str, str, bool]:
+    """Resolve runtime-active broker identity without consuming operator preference.
+
+    Broker preferences are configuration intent only. Runtime identity must come
+    from broker startup/runtime evidence, with legacy session fields used only
+    when they are not explicitly marked preference-only.
+    """
+    startup_broker = str(broker_startup.get("selected_broker") or "").strip().upper()
+    session_preference_only = bool(session.get("broker_preference_only"))
+    session_broker = (
+        ""
+        if session_preference_only
+        else str(session.get("broker") or session.get("selected_broker") or "").strip().upper()
+    )
+    broker = startup_broker or session_broker or "NONE"
+
+    startup_mode = str(broker_startup.get("broker_mode") or "").strip().lower()
+    session_mode = (
+        ""
+        if session_preference_only
+        else str(session.get("broker_mode") or "").strip().lower()
+    )
+    resolved_mode = str(runtime_mode_resolution.get("broker_mode") or "").strip().lower()
+    if startup_mode in {"live", "paper"}:
+        broker_mode = startup_mode
+    elif session_mode in {"live", "paper"}:
+        broker_mode = session_mode
+    elif resolved_mode in {"live", "paper"}:
+        broker_mode = resolved_mode
+    else:
+        broker_mode = "unresolved"
+
+    startup_matches_runtime = bool(startup_broker and startup_broker == broker)
+    return broker, broker_mode, startup_matches_runtime
+
+
 def build_launcher_frontend_state(
     opportunity_feed: Optional[Dict[str, Any]] = None,
     runtime_health_feed: Optional[Dict[str, Any]] = None,
@@ -1481,34 +1521,12 @@ def build_launcher_frontend_state(
     )
     runtime_mode = str(runtime_mode_resolution.get("runtime_mode") or RuntimeMode.DISABLED.value).lower()
 
-    startup_broker = str(broker_startup.get("selected_broker") or "").strip().upper()
     preferred_broker = str(operator_selection.get("selected_broker") or "").strip().upper()
-    broker = preferred_broker or str(
-        session.get("broker")
-        or session.get("selected_broker")
-        or startup_broker
-        or "NONE"
-    ).strip().upper()
-
     preferred_mode = str(operator_selection.get("broker_mode") or "").strip().upper()
-    if preferred_mode == "LIVE_READ_ONLY":
-        broker_mode = "live"
-    elif preferred_mode == "PAPER":
-        broker_mode = "paper"
-    else:
-        broker_mode = str(
-            session.get("broker_mode")
-            or broker_startup.get("broker_mode")
-            or ""
-        ).lower()
-        if broker_mode not in {"live", "paper"}:
-            # Phase 177A: do not invent paper; leave empty and let resolver reason surface
-            broker_mode = str(runtime_mode_resolution.get("broker_mode") or "").lower()
-            if broker_mode not in {"live", "paper"}:
-                broker_mode = "unresolved"
-
-    startup_matches_preference = bool(
-        startup_broker and startup_broker == str(broker).strip().upper()
+    broker, broker_mode, startup_matches_runtime = _resolve_runtime_broker_identity(
+        session,
+        broker_startup if isinstance(broker_startup, dict) else {},
+        runtime_mode_resolution,
     )
     credential_diagnostics = (
         broker_startup.get("credential_diagnostics")
@@ -1586,7 +1604,10 @@ def build_launcher_frontend_state(
             "live_or_paper": "live" if live_family else ("paper" if canonical_mode == RuntimeMode.PAPER.value else "disabled"),
             "resolved_mode": canonical_mode,
             "selected_broker": broker,
-            "broker_mode": preferred_mode or broker_mode.upper(),
+            "broker_mode": broker_mode.upper(),
+            "preferred_broker": preferred_broker or None,
+            "preferred_broker_mode": preferred_mode or None,
+            "broker_preference_only": bool(preferred_broker or preferred_mode),
             # Phase 176D: never invent TRADER; use authenticated identity when present.
             "role": str(auth_identity.get("role") or session.get("role") or "UNAUTHENTICATED"),
             "user_id": str(auth_identity.get("user_id") or session.get("user_id") or "UNAUTHENTICATED"),
@@ -1664,18 +1685,18 @@ def build_launcher_frontend_state(
             "selected_broker": broker,
             "broker_type": str(broker_startup.get("broker_type", broker_readiness.get("broker_type", "UNKNOWN"))),
             "broker_mode": broker_mode,
-            "connected": bool(broker_startup.get("broker_connected", False)) if startup_matches_preference else False,
-            "broker_connected": bool(broker_startup.get("broker_connected", False)) if startup_matches_preference else False,
-            "broker_authenticated": bool(broker_startup.get("broker_authenticated", False)) if startup_matches_preference else False,
-            "broker_health": str(broker_startup.get("broker_health", "UNKNOWN")) if startup_matches_preference else "UNAVAILABLE",
+            "connected": bool(broker_startup.get("broker_connected", False)) if startup_matches_runtime else False,
+            "broker_connected": bool(broker_startup.get("broker_connected", False)) if startup_matches_runtime else False,
+            "broker_authenticated": bool(broker_startup.get("broker_authenticated", False)) if startup_matches_runtime else False,
+            "broker_health": str(broker_startup.get("broker_health", "UNKNOWN")) if startup_matches_runtime else "UNAVAILABLE",
             "broker_infrastructure_health": (
                 str(broker_startup.get("broker_infrastructure_health", broker_startup.get("broker_health", "UNKNOWN")))
-                if startup_matches_preference
+                if startup_matches_runtime
                 else "UNAVAILABLE"
             ),
             "broker_ready": (
                 bool(broker_startup.get("broker_ready", broker_readiness.get("broker_ready", False)))
-                if startup_matches_preference
+                if startup_matches_runtime
                 else False
             ),
             "broker_readiness": dict(broker_readiness),
@@ -1727,13 +1748,13 @@ def build_launcher_frontend_state(
                 "coinbase": dict(coinbase_validation.get("broker_operational_status", {})),
                 "oanda": dict(oanda_validation.get("broker_operational_status", {})),
             },
-            "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))) if startup_matches_preference else False,
+            "credentials_present": bool(broker_startup.get("credentials_present", broker_readiness.get("credentials_present", False))) if startup_matches_runtime else False,
             "authenticated": bool(
                 broker_startup.get("authenticated", broker_startup.get("broker_authenticated", broker_readiness.get("authenticated", False)))
             ),
-            "account_loaded": bool(broker_startup.get("account_loaded", broker_readiness.get("account_loaded", False))) if startup_matches_preference else False,
-            "market_data_ready": bool(broker_startup.get("market_data_ready", broker_readiness.get("market_data_ready", False))) if startup_matches_preference else False,
-            "execution_supported": bool(broker_startup.get("execution_supported", broker_readiness.get("execution_supported", False))) if startup_matches_preference else False,
+            "account_loaded": bool(broker_startup.get("account_loaded", broker_readiness.get("account_loaded", False))) if startup_matches_runtime else False,
+            "market_data_ready": bool(broker_startup.get("market_data_ready", broker_readiness.get("market_data_ready", False))) if startup_matches_runtime else False,
+            "execution_supported": bool(broker_startup.get("execution_supported", broker_readiness.get("execution_supported", False))) if startup_matches_runtime else False,
             "infrastructure_health": str(broker_startup.get("infrastructure_health", broker_readiness.get("infrastructure_health", "UNKNOWN"))),
             "credentials_health": str(broker_startup.get("credentials_health", broker_readiness.get("credentials_health", "UNKNOWN"))),
             "authentication_health": str(broker_startup.get("authentication_health", broker_readiness.get("authentication_health", "UNKNOWN"))),
