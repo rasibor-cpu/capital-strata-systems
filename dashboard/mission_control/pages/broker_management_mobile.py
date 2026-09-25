@@ -103,7 +103,7 @@ def _broker_picker(
         '<button type="submit"' + button_disabled + '>Confirm Broker Choice</button>'
         '</form>'
         '<p class="mc-muted">Unavailable brokers are greyed out and cannot be selected. '
-        'Confirmation records preference only; execution remains subject to all CSS safety and certification gates.</p>'
+        'Confirmation records preference only. Execution remains subject to all CSS safety and certification gates.</p>'
         '<p id="mc-broker-selection-result" class="mc-muted" aria-live="polite"></p>'
         '<script>'
         "document.getElementById('mc-broker-selection-form')?.addEventListener('submit', async (ev) => {"
