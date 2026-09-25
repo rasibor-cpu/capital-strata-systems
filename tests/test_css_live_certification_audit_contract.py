@@ -88,3 +88,12 @@ def test_live_certification_audit_reports_missing_credential_field_names_only():
     assert "credential_reason" in text
     assert "missing credential fields" in text
     assert "credential_action" in text
+
+
+def test_live_certification_audit_reports_contract_validation_reasons():
+    text = (ROOT / "scripts" / "audit_css_live_certification.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "Safety status" in text
+    assert "Contract valid" in text
+    assert "Contract validation reasons" in text
