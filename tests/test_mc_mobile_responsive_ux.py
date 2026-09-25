@@ -10,6 +10,8 @@ from dashboard.mission_control.pages.executive_overview import render as render_
 from dashboard.mission_control.pages.alerts_incidents import render as render_alerts_incidents
 from dashboard.mission_control.pages.risk_command import render as render_risk_command
 from dashboard.mission_control.pages.trade_operations import render as render_trade_operations
+from dashboard.mission_control.pages.transaction_history import render as render_transaction_history
+from dashboard.mission_control.pages.user_account_configuration import render as render_user_account_configuration
 from dashboard.mission_control.pages.runtime_operations import render as render_runtime_operations
 from dashboard.mission_control.pages.portfolio import render as render_portfolio
 from dashboard.mission_control.pages.market_intelligence import render as render_market_intelligence
@@ -31,6 +33,7 @@ from dashboard.mission_control.pages.broker_management_mobile import render as r
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 from dashboard.mission_control.state_adapter import build_broker_registry
 from dashboard.runtime.frontend_contract import build_frontend_payload
+from backend.accounting.account_statement_service import AccountStatementService, StatementQuery
 
 
 STATUS_KEYS = (
@@ -1695,7 +1698,7 @@ def test_broker_management_mobile_hides_sensitive_runtime_fields() -> None:
     assert "Broker Status Snapshot" in body
     assert "Tier-1 Broker Snapshot" in body
     assert "Broker Safety Snapshot" in body
-    assert "<th>selection_editing</th><td>DISABLED</td>" in body
+    assert "<th>selection_editing</th><td>CONTROLLED_CONFIG_ONLY</td>" in body
     assert "<th>execution</th><td>BLOCKED</td>" in body
     assert "must-not-render" not in body
     assert "oauth_handle" not in body
@@ -1959,3 +1962,119 @@ def test_mission_control_mobile_chrome_has_back_button() -> None:
     assert 'class="mc-back-btn"' in html
     assert 'aria-label="Back to previous screen"' in html
     assert "window.history.back()" in html
+
+
+def test_transaction_history_supports_period_and_accounting_date_filters() -> None:
+    body = render_transaction_history({
+        "transaction_history": {
+            "period": "monthly",
+            "entry_type": "DEBIT",
+            "date_basis": "settlement",
+            "date_from": "2026-09-01",
+            "date_to": "2026-09-25",
+            "transaction_count": 1,
+            "debit_total": "12.50",
+            "credit_total": "0",
+            "net_movement": "-12.50",
+            "transactions": [{
+                "ledger_id": "L-1",
+                "transaction_date": "2026-09-20T12:00:00+00:00",
+                "value_date": "2026-09-20",
+                "settlement_date": "2026-09-22",
+                "entry_type": "DEBIT",
+                "amount": "12.50",
+                "currency": "USD",
+                "description": "System access charge",
+                "reference": "INV-1",
+            }],
+        }
+    })
+    assert "Daily" in body and "Weekly" in body and "Monthly" in body and "Annual" in body
+    assert "Defined period" in body
+    assert "Debits" in body and "Credits" in body
+    assert "Value date" in body and "Settlement date" in body
+    assert "Print Statement" in body
+    assert "Download CSV" in body
+    assert "View / Print" in body
+
+
+def test_account_statement_service_filters_debits_and_settlement_dates(tmp_path) -> None:
+    svc = AccountStatementService(tmp_path / "ledger.jsonl")
+    svc.record_entry(
+        user_id="12345",
+        entry_type="DEBIT",
+        amount="10.00",
+        currency="USD",
+        description="Access charge",
+        transaction_date="2026-09-01T10:00:00+00:00",
+        value_date="2026-09-02",
+        settlement_date="2026-09-03",
+    )
+    svc.record_entry(
+        user_id="12345",
+        entry_type="CREDIT",
+        amount="25.00",
+        currency="USD",
+        description="Trade proceeds",
+        transaction_date="2026-09-04T10:00:00+00:00",
+        value_date="2026-09-04",
+        settlement_date="2026-09-05",
+    )
+    svc.record_entry(
+        user_id="99999",
+        entry_type="DEBIT",
+        amount="99.00",
+        currency="USD",
+        description="Other user",
+        settlement_date="2026-09-03",
+    )
+    statement = svc.statement(
+        StatementQuery(
+            user_id="12345",
+            period="custom",
+            entry_type="DEBIT",
+            date_basis="settlement",
+            date_from="2026-09-03",
+            date_to="2026-09-03",
+        )
+    )
+    assert statement["transaction_count"] == 1
+    assert statement["debit_total"] == "10.00"
+    assert statement["credit_total"] == "0"
+    assert statement["transactions"][0]["description"] == "Access charge"
+    assert "transaction_date,value_date,settlement_date" in svc.to_csv(statement)
+
+
+def test_user_account_configuration_separates_access_and_trade_charges() -> None:
+    body = render_user_account_configuration({
+        "authorization_context": {"authenticated": True, "active": True, "user_id": "12345", "role": "ADMIN"},
+        "user_account_configuration": {
+            "users": [{"user_id": "12345", "display_name": "Test User", "role": "ADMIN"}],
+            "roles": ["ADMIN", "VIEWER"],
+            "profiles": {
+                "12345": {
+                    "role": "ADMIN",
+                    "user_mode": "CSS_ADVISORY_CONFIRM",
+                    "system_access_charge": {"type": "FIXED_MONTHLY", "amount": "25", "currency": "USD"},
+                    "trade_commission": {"basis": "PERCENT_PROFIT", "rate": "20"},
+                    "independent_trade_platform_fee": {"basis": "PERCENT_NOTIONAL", "rate": "0.5"},
+                    "acceptance_status": "PENDING",
+                    "agreement_version": "CSS-TERMS-2026-09",
+                }
+            },
+        },
+    })
+    assert "System access charge" in body
+    assert "CSS trade commission" in body
+    assert "Independent trade platform fee" in body
+    assert "SELF_DIRECTED" in body
+    assert "CSS_ADVISORY_CONFIRM" in body
+    assert "Accept Account Terms" in body
+    assert "/operator-config/user-account" in body
+    assert "/operator-config/user-account/accept" in body
+
+
+def test_navigation_registers_transaction_history_and_user_terms() -> None:
+    entries = {section.key: section for section in MISSION_CONTROL_SECTIONS}
+    assert entries["transaction_history"].route == "/mission-control/transaction-history"
+    assert entries["user_account_configuration"].route == "/mission-control/user-account-configuration"
