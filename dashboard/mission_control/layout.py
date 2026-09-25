@@ -193,7 +193,7 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         or "NONE"
     ).strip().upper()
     selected_mode = str(selection.get("broker_mode") or active.get("broker_mode") or "PAPER").strip().upper()
-    can_select = bool(auth.get("authenticated", True)) and bool(auth.get("active", True))
+    can_select = bool(auth.get("authenticated")) and bool(auth.get("active"))
 
     options = []
     selectable_count = 0
