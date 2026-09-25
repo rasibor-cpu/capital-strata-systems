@@ -1516,3 +1516,31 @@ def test_enterprise_identity_mobile_compacts_redacted_metadata() -> None:
     assert "<summary>Show risk and audit metadata</summary>" in body
     assert "<summary>Show authority and migration metadata</summary>" in body
     assert "<details open" not in body
+
+
+def test_enterprise_identity_high_risk_zero_uses_explicit_status() -> None:
+    body = render_enterprise_identity({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "identity_governance": {
+            "risk": {"high_risk_count": 0},
+        },
+    })
+    start = body.find("<span>High Risk</span>")
+    end = body.find("</article>", start)
+    card = body[start:end]
+    assert "<strong>0</strong>" in card
+    assert ">PASS</em>" in card
+    assert 'class="mc-status good"' in card
+
+
+def test_enterprise_identity_missing_high_risk_fails_closed() -> None:
+    body = render_enterprise_identity({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "identity_governance": {},
+    })
+    start = body.find("<span>High Risk</span>")
+    end = body.find("</article>", start)
+    card = body[start:end]
+    assert "<strong>EVIDENCE_MISSING</strong>" in card
+    assert ">EVIDENCE_MISSING</em>" in card
+    assert 'class="mc-status bad"' in card
