@@ -72,19 +72,43 @@ def _rate(value: Any, field: str, basis: str) -> str:
     return result
 
 
+
+def broker_row_selectable(row: dict[str, Any]) -> bool:
+    state = str(row.get("operational_state") or row.get("status") or "").strip().upper()
+    readiness = str(row.get("readiness") or "").strip().upper()
+    certification = str(row.get("certification") or "").strip().upper()
+    unavailable_tokens = (
+        "CONFIGURATION_REQUIRED",
+        "CREDENTIALS_REQUIRED",
+        "NOT_INITIALIZED",
+        "DISABLED",
+        "UNAVAILABLE",
+        "EVIDENCE_MISSING",
+        "FAIL_CLOSED",
+        "REACTIVATION_REQUIRED",
+    )
+    combined = " ".join((state, readiness, certification))
+    return not any(token in combined for token in unavailable_tokens)
+
+
+
 def load_broker_selection() -> dict[str, Any]:
     raw = _load_json(BROKER_SELECTION_FILE, {})
     return dict(raw) if isinstance(raw, dict) else {}
 
 
-def save_broker_selection(*, broker: str, broker_mode: str, actor_user_id: str) -> dict[str, Any]:
+def save_broker_selection(*, broker: str, broker_mode: str, actor_user_id: str, confirmed: bool = False) -> dict[str, Any]:
     selected = _choice(broker, VALID_BROKERS, "broker")
     mode = _choice(broker_mode, VALID_BROKER_MODES, "broker_mode")
+    if not confirmed:
+        raise ValueError("broker selection must be explicitly confirmed")
     payload = {
         "selected_broker": selected,
         "broker_mode": mode,
         "configured_by": str(actor_user_id or ""),
         "configured_at": _utc_now(),
+        "confirmed": True,
+        "confirmed_at": _utc_now(),
         "execution_allowed": False,
         "live_trading_blocked": True,
         "broker_execution_armed": False,
@@ -228,6 +252,7 @@ __all__ = [
     "VALID_TRADE_COMMISSION_BASES",
     "VALID_INDEPENDENT_TRADE_FEE_BASES",
     "accept_user_account_terms",
+    "broker_row_selectable",
     "load_broker_selection",
     "load_user_account_profiles",
     "public_user_account_configuration",
