@@ -169,6 +169,26 @@ def build_mission_control_state(
         frontend,
         runtime_snapshot,
     )
+    runtime_certification_evidence = (
+        runtime_snapshot.get("certification")
+        if isinstance(runtime_snapshot.get("certification"), Mapping)
+        else {}
+    )
+    derived_production_blockers = (
+        list(runtime_certification_evidence.get("blockers", []))
+        if isinstance(runtime_certification_evidence.get("blockers"), list)
+        else []
+    )
+    runtime_broker_evidence = (
+        runtime_snapshot.get("broker")
+        if isinstance(runtime_snapshot.get("broker"), Mapping)
+        else {}
+    )
+    if (
+        str(runtime_broker_evidence.get("transport") or "").upper() == "FAIL"
+        and "broker_connection_failed" not in derived_production_blockers
+    ):
+        derived_production_blockers.append("broker_connection_failed")
 
     state = {
         **asdict(envelope),
@@ -344,9 +364,13 @@ def build_mission_control_state(
                 "status": "NOT_CERTIFIED",
                 "certification_score": 0,
                 "governance_score": 0,
-                "broker_readiness": "EVIDENCE_MISSING",
-                "runtime_readiness": "EVIDENCE_MISSING",
-                "deployment_blockers": [],
+                "broker_readiness": runtime_certification_evidence.get(
+                    "broker_readiness", "EVIDENCE_MISSING"
+                ),
+                "runtime_readiness": runtime_certification_evidence.get(
+                    "runtime_readiness", "EVIDENCE_MISSING"
+                ),
+                "deployment_blockers": derived_production_blockers,
                 "outstanding_risks": {},
                 "evidence_completeness": 0,
                 "platform_certification": {},
