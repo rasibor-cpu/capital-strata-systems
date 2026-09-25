@@ -1599,7 +1599,7 @@ def _reported_cycle(*values: Any) -> Any:
                 continue
             return numeric
         return value
-    return DATA_UNAVAILABLE
+    return "UNAVAILABLE"
 
 
 def _first_status(*values: Any) -> str:
