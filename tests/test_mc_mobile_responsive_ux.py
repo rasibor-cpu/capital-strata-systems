@@ -26,6 +26,7 @@ from dashboard.mission_control.pages.credential_governance import render as rend
 from dashboard.mission_control.pages.enterprise_identity import render as render_enterprise_identity
 from dashboard.mission_control.pages.enterprise_oauth import render as render_enterprise_oauth
 from dashboard.mission_control.pages.learning_performance_mobile import render as render_learning_performance_mobile
+from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1648,4 +1649,55 @@ def test_learning_performance_mobile_hides_runtime_forensic_fields() -> None:
     assert "runtime_id" not in body
     assert "state_hash" not in body
     assert "provenance" not in body
+    assert "<details open" not in body
+
+
+def test_broker_management_mobile_hides_sensitive_runtime_fields() -> None:
+    body = render_broker_management_mobile({
+        "brokers": {
+            "active_broker": {
+                "selected_broker": "COINBASE",
+                "broker_mode": "LIVE_READ_ONLY",
+                "connection_status": "FAIL_CLOSED",
+                "authentication_status": "UNAVAILABLE",
+                "account_status": "UNAVAILABLE",
+                "market_data_status": "UNAVAILABLE",
+                "execution_scope": "BLOCKED",
+            },
+            "broker_list": [{
+                "broker": "QUESTRADE",
+                "role": "CANADIAN_EQUITIES",
+                "operational_state": "CONFIGURATION_REQUIRED",
+                "readiness": "EVIDENCE_MISSING",
+                "certification": "NOT_CERTIFIED",
+                "oauth_handle": "must-not-render",
+            }],
+            "safety": {"status": "FAIL_CLOSED"},
+        },
+        "broker_telemetry": {
+            "broker": "COINBASE",
+            "connection": "FAIL_CLOSED",
+            "state_hash": "must-not-render",
+        },
+        "enterprise_broker_runtime": {
+            "advisory_readiness": "DATA_DEPENDENCY_BLOCKED",
+            "holdings_readiness": {"status": "UNAVAILABLE", "account_id_sanitized": "must-not-render"},
+            "provider_health": {"status": "UNAVAILABLE"},
+            "certification": {"outcome": "NOT_CERTIFIED"},
+            "oauth_status": [{"token": "must-not-render"}],
+            "lease_health": [{"secret": "must-not-render"}],
+        },
+    })
+    assert 'aria-label="Broker Management priority"' in body
+    assert "Broker Status Snapshot" in body
+    assert "Tier-1 Broker Snapshot" in body
+    assert "Broker Safety Snapshot" in body
+    assert "<th>selection_editing</th><td>DISABLED</td>" in body
+    assert "<th>execution</th><td>BLOCKED</td>" in body
+    assert "must-not-render" not in body
+    assert "oauth_handle" not in body
+    assert "oauth_status" not in body
+    assert "lease_health" not in body
+    assert "state_hash" not in body
+    assert "account_id_sanitized" not in body
     assert "<details open" not in body
