@@ -210,6 +210,7 @@ def render(state: dict) -> str:
             "selection_editing": "CONTROLLED_CONFIG_ONLY",
             "onboarding_changes": "DISABLED",
             "execution": "BLOCKED",
+            "execution_state": "EXECUTION_BLOCKED",
             "safety_status": safety.get("status") or safety.get("execution") or "FAIL_CLOSED",
             "primary_crypto": roles.get("PRIMARY_CRYPTO_BROKER", "COINBASE"),
             "primary_fx": roles.get("PRIMARY_FX_BROKER", "OANDA"),
