@@ -30,6 +30,10 @@ if _existing_auth_module is not None and (
 from backend.security.audit_ledger import AuditLedger
 from dashboard.auth import css_sign_on as auth
 
+
+def _configured_recovery_answers():
+    return {question: auth.hash_recovery_answer("test answer") for question in auth.RECOVERY_QUESTIONS}
+
 pytestmark = pytest.mark.live_session
 
 # Avoid importing scripts.css_live_dashboard at collection time — it runs a full
@@ -108,6 +112,8 @@ def mock_registry():
             "password_hash": auth.hash_password("123456"),
             "locked": False,
             "lockout_until": None,
+            "recovery_answers": _configured_recovery_answers(),
+            "recovery_required": False,
             "must_change_password": False,
             "last_password_change": datetime.now().isoformat()
         },
@@ -120,6 +126,8 @@ def mock_registry():
             "password_hash": auth.hash_password("123456"),
             "locked": True,
             "lockout_until": None,
+            "recovery_answers": _configured_recovery_answers(),
+            "recovery_required": False,
             "must_change_password": False,
             "last_password_change": datetime.now().isoformat()
         }
