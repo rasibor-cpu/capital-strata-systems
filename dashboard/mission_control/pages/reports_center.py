@@ -70,6 +70,7 @@ def render(state: dict) -> str:
             status="warn",
         )
         + _metrics(home, auth)
+        + _report_selection_toggle(generatable, can_generate)
         + _subnav()
         + _categories_panel(categories, can_generate)
         + _frequently_used(generatable, can_generate)
@@ -129,6 +130,29 @@ def _metrics(home: dict, auth: dict) -> str:
         + cards(secondary)
         + '</section>'
     )
+
+
+
+def _report_selection_toggle(generatable: list[dict], can_generate: bool) -> str:
+    options = "".join(
+        '<option value="' + _esc(item.get("report_code")) + '">'
+        + _esc(item.get("title")) + ' (' + _esc(item.get("status")) + ')</option>'
+        for item in generatable
+    )
+    disabled = "" if can_generate and generatable else " disabled"
+    return (
+        '<section class="mc-panel rc-report-selector" aria-label="Report selection toggle">'
+        '<h2>Report Selection</h2>'
+        '<div class="rc-report-toggle-row">'
+        '<label for="rc-report-toggle">Choose report</label>'
+        '<select id="rc-report-toggle"' + disabled + '>'
+        '<option value="">Select report…</option>' + options + '</select>'
+        '<button type="button" class="rc-btn rc-btn-primary" id="rc-report-toggle-open"' + disabled + '>'
+        'Open Selection</button></div>'
+        '<p class="rc-muted">Choose the report here, then CSS opens the Create Report panel with that report selected.</p>'
+        '</section>'
+    )
+
 
 
 def _subnav() -> str:
@@ -399,6 +423,7 @@ def _scripts() -> str:
   (catalog.categories || []).forEach((c) => (c.reports || []).forEach((r) => { byCode[r.report_code] = r; }));
 
   const selectEl = document.getElementById('rc-report-code');
+  const toggleEl = document.getElementById('rc-report-toggle');
   const filtersEl = document.getElementById('rc-dynamic-filters');
   const readinessEl = document.getElementById('rc-readiness');
   const resultEl = document.getElementById('rc-generate-result');
@@ -570,6 +595,13 @@ def _scripts() -> str:
   selectEl?.addEventListener('change', () => {
     renderFilters(selectEl.value);
     if (selectEl.value) loadReadiness(selectEl.value);
+  });
+
+  document.getElementById('rc-report-toggle-open')?.addEventListener('click', () => {
+    if (toggleEl?.value) selectReport(toggleEl.value);
+  });
+  toggleEl?.addEventListener('change', () => {
+    if (toggleEl.value) selectReport(toggleEl.value);
   });
 
   document.getElementById('rc-check-readiness')?.addEventListener('click', () => {
