@@ -549,7 +549,12 @@ def _cached_diagnostic_source_from_canonical_loader(
     try:
         from backend.app.brokers.credential_loader import load_credentials
 
-        credentials = load_credentials(broker_name, mode="paper") or {}
+        # Read-only broker validation should first honor the canonical
+        # LIVE_READ_ONLY profile. Fall back to paper only for legacy/practice
+        # configurations. This never grants execution authority.
+        credentials = load_credentials(broker_name, mode="live_read_only") or {}
+        if not credentials:
+            credentials = load_credentials(broker_name, mode="paper") or {}
     except Exception:
         return tuple(source.items())
     for key, value in credentials.items():
