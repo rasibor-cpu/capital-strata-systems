@@ -64,3 +64,17 @@ def test_live_certification_audit_surfaces_runtime_root_cause_fields():
         "runtime blockers",
     ):
         assert token in text
+
+
+def test_live_certification_audit_surfaces_broker_stage_diagnostics_and_blocker_names():
+    text = (ROOT / "scripts" / "audit_css_live_certification.ps1").read_text(
+        encoding="utf-8"
+    )
+    for token in (
+        "broker_authentication",
+        "broker_account",
+        "broker_market_data",
+        "broker warnings",
+        "$deploymentBlockers",
+    ):
+        assert token in text
