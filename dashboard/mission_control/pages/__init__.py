@@ -24,6 +24,7 @@ from dashboard.mission_control.pages import (
     runtime_operations,
     system_configuration,
     trade_operations,
+    transaction_history,
     users_governance,
 )
 
@@ -33,6 +34,7 @@ PAGE_MODULES = {
     "reports_center": reports_center,
     "runtime_operations": runtime_operations,
     "trade_operations": trade_operations,
+    "transaction_history": transaction_history,
     "portfolio": portfolio,
     "market_intelligence": market_intelligence,
     "risk_command": risk_command,
