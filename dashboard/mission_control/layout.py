@@ -190,7 +190,8 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
     selected = str(
         selection.get("selected_broker")
         or active.get("selected_broker")
-        or "NONE"
+        or _mapping(state_dict.get("platform")).get("selected_broker")
+        or "UNAVAILABLE"
     ).strip().upper()
     selected_mode = str(selection.get("broker_mode") or active.get("broker_mode") or "PAPER").strip().upper()
     can_select = bool(auth.get("authenticated")) and bool(auth.get("active"))
