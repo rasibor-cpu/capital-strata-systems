@@ -14,24 +14,34 @@ if (-not (Test-Path $Python)) { throw "CSS virtual environment Python not found:
 if (-not (Test-Path $Launcher)) { throw "Canonical CSS runtime launcher not found: $Launcher" }
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+Set-Location $RepoRoot
 
-$existing = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
+# If the canonical runtime is already running under the repo venv, do nothing.
+$existingCanonical = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {
     $_.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe$' -and
     $_.CommandLine -and
     (
         $_.CommandLine -match 'launcher[\\/]css_runtime_launcher\.py' -or
         $_.CommandLine -match '-m\s+launcher\.css_runtime_launcher'
     )
-}
+})
 
-foreach ($proc in @($existing)) {
-    try { $exePath = [IO.Path]::GetFullPath($proc.ExecutablePath).ToLowerInvariant() } catch { $exePath = "" }
-    if ($exePath -eq [IO.Path]::GetFullPath($Python).ToLowerInvariant()) {
+foreach ($proc in $existingCanonical) {
+    try {
+        $exePath = [IO.Path]::GetFullPath([string]$proc.ExecutablePath).ToLowerInvariant()
+        $expectedPath = [IO.Path]::GetFullPath($Python).ToLowerInvariant()
+    } catch {
+        $exePath = ""
+        $expectedPath = "__invalid__"
+    }
+    if ($exePath -eq $expectedPath) {
         Write-Host "CSS canonical runtime already running (PID $($proc.ProcessId))."
         exit 0
     }
 }
 
+# Port 8765 may still be held by an old standalone CSS mobile launcher.
+# Retire it only when both process identity and HTTP identity prove it is ours.
 $portListeners = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
 if ($portListeners.Count -gt 0) {
     $ownerPids = @($portListeners | Select-Object -ExpandProperty OwningProcess -Unique)
@@ -39,49 +49,9 @@ if ($portListeners.Count -gt 0) {
 
     foreach ($ownerPid in $ownerPids) {
         $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
-        if ($null -eq $owner -or -not $owner.CommandLine) {
-            continue
-        }
+        if ($null -eq $owner -or -not $owner.CommandLine) { continue }
 
-        $isPython = [string]$owner.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe
-if ($Foreground) {
-    Write-Host "Starting CSS canonical runtime in foreground mode..."
-    Write-Host "stdout: $StdOut"
-    Write-Host "stderr: $StdErr"
-
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = $Python
-    $psi.Arguments = '"' + $Launcher + '"'
-    $psi.WorkingDirectory = $RepoRoot
-    $psi.UseShellExecute = $false
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-    $psi.CreateNoWindow = $true
-
-    $proc = New-Object System.Diagnostics.Process
-    $proc.StartInfo = $psi
-    $null = $proc.Start()
-
-    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-    $stderrTask = $proc.StandardError.ReadToEndAsync()
-    $proc.WaitForExit()
-    $stdout = $stdoutTask.Result
-    $stderr = $stderrTask.Result
-
-    Set-Content -Path $StdOut -Value $stdout -Encoding UTF8
-    Set-Content -Path $StdErr -Value $stderr -Encoding UTF8
-    if ($stdout) { Write-Host $stdout }
-    if ($stderr) { Write-Error $stderr -ErrorAction Continue }
-    Write-Host "CSS canonical runtime exited with code $($proc.ExitCode)."
-    exit $proc.ExitCode
-}
-
-$process = Start-Process -FilePath $Python -ArgumentList @($Launcher) -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr -PassThru
-
-Write-Host "CSS canonical runtime started (PID $($process.Id))."
-Write-Host "stdout: $StdOut"
-Write-Host "stderr: $StdErr"
-
+        $isPython = [string]$owner.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe$'
         $isStandaloneMobile = (
             [string]$owner.CommandLine -match 'launcher[\\/]css_mobile_launcher\.py' -or
             [string]$owner.CommandLine -match '-m\s+launcher\.css_mobile_launcher'
@@ -117,7 +87,6 @@ Write-Host "stderr: $StdErr"
             Stop-Process -Id ([int]$owner.ProcessId) -Force -ErrorAction Stop
         }
         Start-Sleep -Seconds 2
-
         $remaining = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
         if ($remaining.Count -gt 0) {
             throw "Port 8765 remained occupied after retiring the recognized standalone CSS mobile launcher."
@@ -128,14 +97,46 @@ Write-Host "stderr: $StdErr"
     }
 }
 
-Set-Location $RepoRoot
-
 if ($Foreground) {
-    & $Python $Launcher
-    exit $LASTEXITCODE
+    Write-Host "Starting CSS canonical runtime in foreground mode..."
+    Write-Host "stdout: $StdOut"
+    Write-Host "stderr: $StdErr"
+
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = $Python
+    $psi.Arguments = '"' + $Launcher + '"'
+    $psi.WorkingDirectory = $RepoRoot
+    $psi.UseShellExecute = $false
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.CreateNoWindow = $true
+
+    $proc = New-Object System.Diagnostics.Process
+    $proc.StartInfo = $psi
+    $null = $proc.Start()
+
+    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrTask = $proc.StandardError.ReadToEndAsync()
+    $proc.WaitForExit()
+    $stdout = $stdoutTask.Result
+    $stderr = $stderrTask.Result
+
+    Set-Content -Path $StdOut -Value $stdout -Encoding UTF8
+    Set-Content -Path $StdErr -Value $stderr -Encoding UTF8
+    if ($stdout) { Write-Host $stdout }
+    if ($stderr) { Write-Error $stderr -ErrorAction Continue }
+    Write-Host "CSS canonical runtime exited with code $($proc.ExitCode)."
+    exit $proc.ExitCode
 }
 
-$process = Start-Process -FilePath $Python -ArgumentList @($Launcher) -WorkingDirectory $RepoRoot -WindowStyle Hidden -RedirectStandardOutput $StdOut -RedirectStandardError $StdErr -PassThru
+$process = Start-Process `
+    -FilePath $Python `
+    -ArgumentList @($Launcher) `
+    -WorkingDirectory $RepoRoot `
+    -WindowStyle Hidden `
+    -RedirectStandardOutput $StdOut `
+    -RedirectStandardError $StdErr `
+    -PassThru
 
 Write-Host "CSS canonical runtime started (PID $($process.Id))."
 Write-Host "stdout: $StdOut"
