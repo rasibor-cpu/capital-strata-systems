@@ -18,6 +18,17 @@ def _seed_user(tmp_path: Path, monkeypatch, password: str = "StrongBootstrap!9")
     return users
 
 
+def _enroll_all(users: dict, overrides: dict[str, str] | None = None) -> dict[str, str]:
+    answers = {
+        question: f"answer-{index}"
+        for index, question in enumerate(auth.RECOVERY_QUESTIONS, start=1)
+    }
+    if overrides:
+        answers.update(overrides)
+    auth.enroll_all_password_recovery(users, "00000", answers)
+    return answers
+
+
 def test_min_password_length_is_twelve():
     assert auth.MIN_PASSWORD_LENGTH == 12
 
@@ -71,13 +82,7 @@ def test_bootstrap_rejects_short_secret(tmp_path, monkeypatch):
 
 def test_recovery_configured_and_reset_success(tmp_path, monkeypatch):
     users = _seed_user(tmp_path, monkeypatch)
-    auth.configure_password_recovery(
-        users,
-        "00000",
-        "StrongBootstrap!9",
-        auth.RECOVERY_QUESTIONS[0],
-        "Toronto",
-    )
+    _enroll_all(users, {auth.RECOVERY_QUESTIONS[0]: "Toronto"})
     record = users["00000"]
     assert auth.recovery_is_configured(record)
     assert record["recovery_question"] == auth.RECOVERY_QUESTIONS[0]
@@ -90,6 +95,7 @@ def test_recovery_configured_and_reset_success(tmp_path, monkeypatch):
         "toronto",
         "RecoveredPass12!",
         "RecoveredPass12!",
+        recovery_question=auth.RECOVERY_QUESTIONS[0],
     )
     assert ctx["user_id"] == "00000"
     assert users["00000"]["password_hash"] == auth.hash_password("RecoveredPass12!")
@@ -110,13 +116,7 @@ def test_recovery_not_configured_fails_closed(tmp_path, monkeypatch):
 
 def test_incorrect_recovery_fails_closed(tmp_path, monkeypatch):
     users = _seed_user(tmp_path, monkeypatch)
-    auth.configure_password_recovery(
-        users,
-        "00000",
-        "StrongBootstrap!9",
-        auth.RECOVERY_QUESTIONS[1],
-        "Central High",
-    )
+    _enroll_all(users, {auth.RECOVERY_QUESTIONS[1]: "Central High"})
     with pytest.raises(auth.AuthFailure) as excinfo:
         auth.reset_password_with_recovery(
             users,
@@ -124,6 +124,7 @@ def test_incorrect_recovery_fails_closed(tmp_path, monkeypatch):
             "wrong answer",
             "RecoveredPass12!",
             "RecoveredPass12!",
+            recovery_question=auth.RECOVERY_QUESTIONS[1],
         )
     assert excinfo.value.code == "RECOVERY_FAILED"
     assert users["00000"]["password_hash"] == auth.hash_password("StrongBootstrap!9")
@@ -131,13 +132,7 @@ def test_incorrect_recovery_fails_closed(tmp_path, monkeypatch):
 
 def test_recovery_reset_obeys_password_history(tmp_path, monkeypatch):
     users = _seed_user(tmp_path, monkeypatch)
-    auth.configure_password_recovery(
-        users,
-        "00000",
-        "StrongBootstrap!9",
-        auth.RECOVERY_QUESTIONS[2],
-        "Honda Civic",
-    )
+    _enroll_all(users, {auth.RECOVERY_QUESTIONS[2]: "Honda Civic"})
     with pytest.raises(auth.PasswordValidationError, match="differ from the current"):
         auth.reset_password_with_recovery(
             users,
@@ -145,18 +140,13 @@ def test_recovery_reset_obeys_password_history(tmp_path, monkeypatch):
             "Honda Civic",
             "StrongBootstrap!9",
             "StrongBootstrap!9",
+            recovery_question=auth.RECOVERY_QUESTIONS[2],
         )
 
 
 def test_recovery_reset_rejects_short_password(tmp_path, monkeypatch):
     users = _seed_user(tmp_path, monkeypatch)
-    auth.configure_password_recovery(
-        users,
-        "00000",
-        "StrongBootstrap!9",
-        auth.RECOVERY_QUESTIONS[0],
-        "Montreal",
-    )
+    _enroll_all(users, {auth.RECOVERY_QUESTIONS[0]: "Montreal"})
     with pytest.raises(auth.PasswordValidationError, match="at least 12 characters"):
         auth.reset_password_with_recovery(
             users,
@@ -164,6 +154,7 @@ def test_recovery_reset_rejects_short_password(tmp_path, monkeypatch):
             "Montreal",
             "short",
             "short",
+            recovery_question=auth.RECOVERY_QUESTIONS[0],
         )
 
 
@@ -184,7 +175,7 @@ def test_recovery_gui_back_cancel_does_not_shutdown_runtime():
 
 
 def test_recovery_questions_are_fixed_set():
-    assert len(auth.RECOVERY_QUESTIONS) >= 3
+    assert len(auth.RECOVERY_QUESTIONS) == 5
     assert "What city were you born in?" in auth.RECOVERY_QUESTIONS
 
 
