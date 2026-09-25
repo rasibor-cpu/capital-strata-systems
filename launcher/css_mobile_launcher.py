@@ -3,6 +3,7 @@ import json
 import datetime
 import time
 import copy
+import sys
 from urllib.parse import parse_qs
 from typing import Dict, Any, List, Optional
 
@@ -15,6 +16,9 @@ _LAUNCHER_RECOVERY_QUESTIONS = (
 )
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from backend.runtime.live_environment_loader import load_css_runtime_environment
 
 CSS_ENVIRONMENT_LOAD_TRACE = load_css_runtime_environment(PROJECT_ROOT)
