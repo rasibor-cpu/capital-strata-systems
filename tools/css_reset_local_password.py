@@ -16,7 +16,7 @@ def reset_local_password(user_id: str, temporary_password: str) -> None:
     if not normalized:
         raise SystemExit("Invalid user ID.")
 
-    users = auth.load_users()
+    users = auth.load_users(auth.USERS_FILE)
     record = users.get(normalized)
     if not isinstance(record, dict):
         raise SystemExit(f"User {normalized} not found.")
@@ -38,7 +38,7 @@ def reset_local_password(user_id: str, temporary_password: str) -> None:
 
     # Deliberately preserve recovery_answers, recovery_required,
     # broker/application preferences, role, and profile metadata.
-    auth.save_users(users)
+    auth.save_users(users, auth.USERS_FILE)
 
     session_file = Path(auth.SESSION_AUTH_FILE)
     try:
