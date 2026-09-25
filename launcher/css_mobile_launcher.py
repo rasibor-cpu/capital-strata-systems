@@ -167,6 +167,7 @@ launcher_router = APIRouter()
 templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "templates"))
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 _LAUNCHER_PASSWORD_CHANGES: Dict[str, str] = {}
+_LAUNCHER_RECOVERY_TOKENS: Dict[str, Dict[str, Any]] = {}
 
 _QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
 _QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(_QUESTRADE_MISSION_CONTROL_CACHE)
@@ -223,8 +224,85 @@ def _launcher_login_page(message: str = "", status: str = "info") -> str:
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <button type="submit">Log on to CSS</button>
   </form>
-  <p class="foot">Your broker and trading permissions are applied only after authentication and remain subject to CSS safety controls.</p>
+  <a class="button" href="/forgot-password">Forgot password?</a>
+  <p class="foot">Password recovery does not consume another sign-on attempt. Your broker and trading permissions are applied only after authentication and remain subject to CSS safety controls.</p>
 </section></main></body></html>""".replace("__NOTICE__", notice)
+
+
+
+def _launcher_forgot_password_page(message: str = "", status: str = "info") -> str:
+    from html import escape
+
+    notice = ""
+    if message:
+        notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Password Recovery</title>
+  <style>
+    body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:480px;margin:0 auto;padding:38px 18px}.card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
+    h1{margin:0 0 8px;font-size:1.65rem}p{color:#a8b4c0}label{display:block;margin:14px 0 6px;font-weight:700}
+    input{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    button,a.button{box-sizing:border-box;width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800;display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}
+    a.secondary{background:#25313c}.notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}.foot{font-size:.9rem}
+  </style>
+</head>
+<body><main><section class="card">
+<h1>Forgot Password</h1>
+<p>Reset your CSS password without making another sign-on attempt.</p>
+__NOTICE__
+<form method="post" action="/forgot-password/lookup">
+<label for="recovery_user_id">User ID</label>
+<input id="recovery_user_id" name="user_id" inputmode="numeric" autocomplete="username" required>
+<button type="submit">Continue to Password Recovery</button>
+</form>
+<a class="button secondary" href="/login">Back to Sign In</a>
+<p class="foot">CSS passwords are stored as hashes, so the existing password cannot be retrieved or displayed. Recovery creates a new password after identity verification.</p>
+</section></main></body></html>""".replace("__NOTICE__", notice)
+
+
+def _launcher_recovery_challenge_page(question: str, message: str = "", status: str = "info") -> str:
+    from html import escape
+
+    notice = ""
+    if message:
+        notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Reset Password</title>
+  <style>
+    body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:480px;margin:0 auto;padding:38px 18px}.card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
+    h1{margin:0 0 8px;font-size:1.65rem}p{color:#a8b4c0}.question{color:#fff;font-weight:800}
+    label{display:block;margin:14px 0 6px;font-weight:700}input{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    button,a.button{box-sizing:border-box;width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800;display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}
+    a.secondary{background:#25313c}.notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}.foot{font-size:.9rem}
+  </style>
+</head>
+<body><main><section class="card">
+<h1>Reset Password</h1>
+<p class="question">__QUESTION__</p>
+__NOTICE__
+<form method="post" action="/forgot-password/reset">
+<label for="recovery_answer">Recovery answer</label>
+<input id="recovery_answer" name="recovery_answer" autocomplete="off" required>
+<label for="recovery_new_password">New password</label>
+<input id="recovery_new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
+<label for="recovery_confirm_password">Confirm new password</label>
+<input id="recovery_confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" required>
+<button type="submit">Reset Password</button>
+</form>
+<a class="button secondary" href="/login">Cancel and Return to Sign In</a>
+<p class="foot">A successful reset clears the failed sign-on counter. Recovery attempts are separate from sign-on attempts.</p>
+</section></main></body></html>""".replace("__QUESTION__", escape(question)).replace("__NOTICE__", notice)
+
 
 
 def _launcher_password_change_page(message: str = "") -> str:
@@ -255,9 +333,118 @@ def _launcher_password_change_page(message: str = "") -> str:
 </form></section></main></body></html>""".replace("__NOTICE__", notice)
 
 
+@launcher_router.get("/forgot-password", response_class=HTMLResponse)
+async def launcher_forgot_password_screen():
+    return HTMLResponse(_launcher_forgot_password_page())
+
+
+@launcher_router.post("/forgot-password/lookup", response_class=HTMLResponse)
+async def launcher_forgot_password_lookup(request: Request):
+    import secrets
+    import time
+    from dashboard.auth.css_sign_on import load_users, normalize_user_id, recovery_is_configured
+    from backend.security.mutation_guard import secure_cookie_kwargs
+
+    form = await _read_mobile_trade_payload(request)
+    user_id = normalize_user_id(form.get("user_id"))
+    users = load_users()
+    record = users.get(user_id) if user_id else None
+
+    # Keep failure wording generic; do not consume authentication attempts.
+    if not isinstance(record, dict) or not recovery_is_configured(record):
+        return HTMLResponse(
+            _launcher_forgot_password_page(
+                "Self-service recovery is not available for this account. Use an authorized CSS administrator recovery reset.",
+                "error",
+            ),
+            status_code=400,
+        )
+
+    token = secrets.token_urlsafe(32)
+    _LAUNCHER_RECOVERY_TOKENS[token] = {
+        "user_id": user_id,
+        "created_at": time.time(),
+        "attempts": 0,
+    }
+    response = HTMLResponse(_launcher_recovery_challenge_page(str(record.get("recovery_question") or "Recovery question")))
+    response.set_cookie(
+        "css_mobile_recovery",
+        token,
+        max_age=600,
+        **secure_cookie_kwargs(request.url.scheme),
+    )
+    return response
+
+
+@launcher_router.post("/forgot-password/reset", response_class=HTMLResponse)
+async def launcher_forgot_password_reset(request: Request):
+    import time
+    from dashboard.auth.css_sign_on import (
+        AuthFailure,
+        PasswordValidationError,
+        load_users,
+        reset_password_with_recovery,
+        save_users,
+    )
+
+    token = str(request.cookies.get("css_mobile_recovery") or "")
+    recovery = _LAUNCHER_RECOVERY_TOKENS.get(token)
+    if not isinstance(recovery, dict):
+        return HTMLResponse(_launcher_forgot_password_page("Recovery session expired. Start again.", "error"), status_code=400)
+    if time.time() - float(recovery.get("created_at") or 0) > 600:
+        _LAUNCHER_RECOVERY_TOKENS.pop(token, None)
+        response = HTMLResponse(_launcher_forgot_password_page("Recovery session expired. Start again.", "error"), status_code=400)
+        response.delete_cookie("css_mobile_recovery")
+        return response
+
+    users = load_users()
+    user_id = str(recovery.get("user_id") or "")
+    record = users.get(user_id)
+    question = str(record.get("recovery_question") or "Recovery question") if isinstance(record, dict) else "Recovery question"
+    form = await _read_mobile_trade_payload(request)
+    try:
+        reset_password_with_recovery(
+            users,
+            user_id,
+            str(form.get("recovery_answer") or ""),
+            str(form.get("new_password") or ""),
+            str(form.get("confirm_password") or ""),
+        )
+        save_users(users)
+    except AuthFailure as exc:
+        recovery["attempts"] = int(recovery.get("attempts") or 0) + 1
+        if recovery["attempts"] >= 3:
+            _LAUNCHER_RECOVERY_TOKENS.pop(token, None)
+            response = HTMLResponse(
+                _launcher_forgot_password_page(
+                    "Recovery verification was unsuccessful. Start a new recovery session or use an authorized administrator reset.",
+                    "error",
+                ),
+                status_code=400,
+            )
+            response.delete_cookie("css_mobile_recovery")
+            return response
+        return HTMLResponse(
+            _launcher_recovery_challenge_page(
+                question,
+                f"{exc.message} {3 - recovery['attempts']} recovery attempt(s) remaining.",
+                "error",
+            ),
+            status_code=400,
+        )
+    except PasswordValidationError as exc:
+        return HTMLResponse(_launcher_recovery_challenge_page(question, str(exc), "error"), status_code=400)
+
+    _LAUNCHER_RECOVERY_TOKENS.pop(token, None)
+    response = RedirectResponse("/login?reset=1", status_code=303)
+    response.delete_cookie("css_mobile_recovery")
+    return response
+
+
 @launcher_router.get("/login", response_class=HTMLResponse)
-async def launcher_login_screen():
-    return HTMLResponse(_launcher_login_page())
+async def launcher_login_screen(request: Request):
+    reset = str(request.query_params.get("reset") or "") == "1"
+    return HTMLResponse(_launcher_login_page("Password reset successful. Sign in with your new password.", "info") if reset else _launcher_login_page())
 
 
 @launcher_router.post("/login", response_class=HTMLResponse)
@@ -367,6 +554,7 @@ async def launcher_logout():
     response = RedirectResponse("/logged-out", status_code=303)
     response.delete_cookie("css_mobile_session")
     response.delete_cookie("css_mobile_pw_change")
+    response.delete_cookie("css_mobile_recovery")
     return response
 
 
