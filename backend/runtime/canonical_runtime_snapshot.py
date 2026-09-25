@@ -407,9 +407,27 @@ def _runtime_id(frontend: Mapping[str, Any], session: Mapping[str, Any], source_
 
 
 def _runtime_status(frontend: Mapping[str, Any], certification: Mapping[str, Any], heartbeat_status: str) -> str:
-    explicit = _first_text(certification.get("operational_state"), frontend.get("runtime_status"), default="")
-    if explicit:
-        return explicit
+    """Return canonical runtime availability, not broker/certification health.
+
+    Broker/certification operational state is intentionally exposed through
+    runtime_health and certification fields. It must not make an otherwise
+    healthy canonical supervisor appear offline/red.
+    """
+    explicit = _first_text(frontend.get("runtime_status"), default="")
+    explicit_upper = explicit.upper()
+    if explicit_upper in {
+        "ONLINE",
+        "RUNNING",
+        "STOPPED",
+        "OFFLINE",
+        "STALE",
+        "DEGRADED",
+        "FAILED",
+        "ORPHANED_RUNTIME",
+        "MISSING",
+        "MALFORMED",
+    }:
+        return explicit_upper
     if heartbeat_status in {"FRESH", "AGING"}:
         return "ONLINE"
     if heartbeat_status == "STALE":
