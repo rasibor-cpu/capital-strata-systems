@@ -168,6 +168,7 @@ templates = Jinja2Templates(directory=os.path.join(os.path.dirname(__file__), "t
 _LAUNCHER_RUNTIME_CERTIFICATION_SNAPSHOT_CACHE: Dict[str, Dict[str, Any]] = {}
 _LAUNCHER_PASSWORD_CHANGES: Dict[str, str] = {}
 _LAUNCHER_RECOVERY_TOKENS: Dict[str, Dict[str, Any]] = {}
+_LAUNCHER_RECOVERY_ENROLLMENTS: Dict[str, str] = {}
 
 _QUESTRADE_MISSION_CONTROL_CACHE = QuestradeMissionControlCache()
 _QUESTRADE_MISSION_CONTROL_ACTIVATION = QuestradeMissionControlActivationCoordinator(_QUESTRADE_MISSION_CONTROL_CACHE)
@@ -302,6 +303,50 @@ __NOTICE__
 <a class="button secondary" href="/login">Cancel and Return to Sign In</a>
 <p class="foot">A successful reset clears the failed sign-on counter. Recovery attempts are separate from sign-on attempts.</p>
 </section></main></body></html>""".replace("__QUESTION__", escape(question)).replace("__NOTICE__", notice)
+
+
+
+def _launcher_recovery_enrollment_page(message: str = "", status: str = "info") -> str:
+    from html import escape
+    from dashboard.auth.css_sign_on import RECOVERY_QUESTIONS
+
+    notice = ""
+    if message:
+        notice = '<p class="notice ' + escape(status, quote=True) + '">' + escape(message) + '</p>'
+    options = "".join(
+        '<option value="' + escape(question, quote=True) + '">' + escape(question) + '</option>'
+        for question in RECOVERY_QUESTIONS
+    )
+    return """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>CSS Recovery Setup</title>
+  <style>
+    body{margin:0;background:#0f1419;color:#e9eef4;font:16px/1.5 system-ui,sans-serif}
+    main{max-width:480px;margin:0 auto;padding:38px 18px}.card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
+    h1{margin:0 0 8px;font-size:1.65rem}p{color:#a8b4c0}label{display:block;margin:14px 0 6px;font-weight:700}
+    input,select{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    button{width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800}
+    .notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}.foot{font-size:.9rem}
+  </style>
+</head>
+<body><main><section class="card">
+<h1>Set Up Password Recovery</h1>
+<p>This is required before first access to CSS. Choose a recovery question and answer that only you can provide.</p>
+__NOTICE__
+<form method="post" action="/recovery-setup">
+<label for="setup_question">Recovery question</label>
+<select id="setup_question" name="recovery_question" required>__OPTIONS__</select>
+<label for="setup_answer">Recovery answer</label>
+<input id="setup_answer" name="recovery_answer" type="password" autocomplete="off" required>
+<label for="setup_confirm_answer">Confirm recovery answer</label>
+<input id="setup_confirm_answer" name="confirm_answer" type="password" autocomplete="off" required>
+<button type="submit">Save Recovery and Continue</button>
+</form>
+<p class="foot">Your answer is stored only as a hash. It cannot later be displayed or retrieved.</p>
+</section></main></body></html>""".replace("__OPTIONS__", options).replace("__NOTICE__", notice)
 
 
 
@@ -453,6 +498,7 @@ async def launcher_login_submit(request: Request):
     from dashboard.auth.css_sign_on import (
         AuthFailure,
         PasswordChangeRequired,
+        RecoverySetupRequired,
         authenticate_credentials,
         load_users,
         persist_login_session,
@@ -481,12 +527,69 @@ async def launcher_login_submit(request: Request):
             **secure_cookie_kwargs(request.url.scheme),
         )
         return response
+    except RecoverySetupRequired as required:
+        save_users(users)
+        token = secrets.token_urlsafe(32)
+        _LAUNCHER_RECOVERY_ENROLLMENTS[token] = str(required.user_id)
+        response = HTMLResponse(_launcher_recovery_enrollment_page())
+        response.set_cookie(
+            "css_mobile_recovery_setup",
+            token,
+            max_age=600,
+            **secure_cookie_kwargs(request.url.scheme),
+        )
+        return response
     except AuthFailure as exc:
         save_users(users)
         return HTMLResponse(_launcher_login_page(exc.message, "error"), status_code=401)
 
     persist_login_session(user_ctx)
     response = RedirectResponse("/mobile-launcher", status_code=303)
+    response.set_cookie(
+        "css_mobile_session",
+        secrets.token_urlsafe(32),
+        **secure_cookie_kwargs(request.url.scheme),
+    )
+    return response
+
+
+@launcher_router.post("/recovery-setup", response_class=HTMLResponse)
+async def launcher_recovery_setup_submit(request: Request):
+    import secrets
+    from dashboard.auth.css_sign_on import (
+        PasswordValidationError,
+        build_user_context,
+        enroll_password_recovery,
+        load_users,
+        persist_login_session,
+        save_users,
+    )
+    from backend.security.mutation_guard import secure_cookie_kwargs
+
+    token = str(request.cookies.get("css_mobile_recovery_setup") or "")
+    user_id = _LAUNCHER_RECOVERY_ENROLLMENTS.get(token)
+    if not user_id:
+        return RedirectResponse("/login", status_code=303)
+
+    form = await _read_mobile_trade_payload(request)
+    users = load_users()
+    try:
+        enroll_password_recovery(
+            users,
+            user_id,
+            str(form.get("recovery_question") or ""),
+            str(form.get("recovery_answer") or ""),
+            str(form.get("confirm_answer") or ""),
+        )
+        save_users(users)
+    except PasswordValidationError as exc:
+        return HTMLResponse(_launcher_recovery_enrollment_page(str(exc), "error"), status_code=400)
+
+    user_ctx = build_user_context(users[user_id], user_id)
+    persist_login_session(user_ctx)
+    _LAUNCHER_RECOVERY_ENROLLMENTS.pop(token, None)
+    response = RedirectResponse("/mobile-launcher", status_code=303)
+    response.delete_cookie("css_mobile_recovery_setup")
     response.set_cookie(
         "css_mobile_session",
         secrets.token_urlsafe(32),
@@ -532,8 +635,23 @@ async def launcher_password_change_submit(request: Request):
     except PasswordValidationError as exc:
         return HTMLResponse(_launcher_password_change_page(str(exc)), status_code=400)
 
-    persist_login_session(user_ctx)
+    from dashboard.auth.css_sign_on import recovery_is_configured
+
     _LAUNCHER_PASSWORD_CHANGES.pop(token, None)
+    if not recovery_is_configured(users[user_id]):
+        enrollment_token = secrets.token_urlsafe(32)
+        _LAUNCHER_RECOVERY_ENROLLMENTS[enrollment_token] = str(user_id)
+        response = HTMLResponse(_launcher_recovery_enrollment_page())
+        response.delete_cookie("css_mobile_pw_change")
+        response.set_cookie(
+            "css_mobile_recovery_setup",
+            enrollment_token,
+            max_age=600,
+            **secure_cookie_kwargs(request.url.scheme),
+        )
+        return response
+
+    persist_login_session(user_ctx)
     response = RedirectResponse("/mobile-launcher", status_code=303)
     response.delete_cookie("css_mobile_pw_change")
     response.set_cookie(
