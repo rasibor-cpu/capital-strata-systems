@@ -409,9 +409,20 @@ def _launcher_password_change_page(message: str = "") -> str:
 <h1>Change Password</h1><p>CSS requires a password change before this account can continue.</p>__NOTICE__
 <form method="post" action="/password-change">
 <label for="new_password">New password</label><input id="new_password" name="new_password" type="password" autocomplete="new-password" required>
+<p id="change-password-clue">Masked: •••••••••••• · stored as one-way hash</p>
 <label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required>
+<button type="button" id="toggle-change-password">Show / Hide Password</button>
 <button type="submit">Change password and continue</button>
-</form></section></main></body></html>""".replace("__NOTICE__", notice)
+</form></section></main>
+<script>
+document.getElementById('toggle-change-password')?.addEventListener('click',()=>{
+ ['new_password','confirm_password'].forEach(id=>{const el=document.getElementById(id);if(el)el.type=el.type==='password'?'text':'password';});
+});
+document.getElementById('new_password')?.addEventListener('input',ev=>{
+ const n=Math.max(1,ev.target.value.length);document.getElementById('change-password-clue').textContent='Masked: '+'•'.repeat(n)+' · stored as one-way hash';
+});
+</script>
+</body></html>""".replace("__NOTICE__", notice)
 
 
 @launcher_router.get("/forgot-password", response_class=HTMLResponse)
@@ -423,7 +434,7 @@ async def launcher_forgot_password_screen():
 async def launcher_forgot_password_lookup(request: Request):
     import secrets
     import time
-    from dashboard.auth.css_sign_on import load_users, normalize_user_id, recovery_is_configured
+    from dashboard.auth.css_sign_on import RECOVERY_QUESTIONS, load_users, normalize_user_id, recovery_is_configured
     from backend.security.mutation_guard import secure_cookie_kwargs
 
     form = await _read_mobile_trade_payload(request)
@@ -441,7 +452,7 @@ async def launcher_forgot_password_lookup(request: Request):
             status_code=400,
         )
 
-    question = secrets.choice(tuple(__import__("dashboard.auth.css_sign_on", fromlist=["RECOVERY_QUESTIONS"]).RECOVERY_QUESTIONS))
+    question = secrets.choice(RECOVERY_QUESTIONS)
     token = secrets.token_urlsafe(32)
     _LAUNCHER_RECOVERY_TOKENS[token] = {
         "user_id": user_id,
@@ -482,8 +493,7 @@ async def launcher_forgot_password_reset(request: Request):
 
     users = load_users()
     user_id = str(recovery.get("user_id") or "")
-    record = users.get(user_id)
-    question = str(record.get("recovery_question") or "Recovery question") if isinstance(record, dict) else "Recovery question"
+    question = str(recovery.get("question") or "Recovery question")
     form = await _read_mobile_trade_payload(request)
     try:
         reset_password_with_recovery(
@@ -598,7 +608,6 @@ async def launcher_recovery_setup_submit(request: Request):
     from dashboard.auth.css_sign_on import (
         PasswordValidationError,
         build_user_context,
-        enroll_password_recovery,
         load_users,
         persist_login_session,
         save_users,
@@ -711,6 +720,7 @@ async def launcher_logout():
     response.delete_cookie("css_mobile_session")
     response.delete_cookie("css_mobile_pw_change")
     response.delete_cookie("css_mobile_recovery")
+    response.delete_cookie("css_mobile_recovery_setup")
     return response
 
 
