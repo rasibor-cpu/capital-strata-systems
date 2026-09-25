@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from html import escape
+
 from dashboard.mission_control.pages._components import (
     detail_table,
     metric_grid,
@@ -41,6 +43,81 @@ def _tier_summary(rows: object) -> dict[str, str]:
     return result
 
 
+
+def _broker_picker(
+    broker_list: list[dict],
+    *,
+    selected_broker: str,
+    selected_mode: str,
+    can_configure: bool,
+) -> str:
+    from dashboard.enterprise_shell.operator_configuration import broker_row_selectable
+
+    options: list[str] = []
+    selectable_count = 0
+    for row in broker_list:
+        if not isinstance(row, dict):
+            continue
+        broker = str(row.get("broker") or "").strip().upper()
+        if not broker or broker == "PAPER":
+            continue
+        available = broker_row_selectable(row)
+        if available:
+            selectable_count += 1
+        disabled = "" if available else " disabled"
+        selected = " selected" if broker == selected_broker else ""
+        state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
+        label = broker + (" — Available" if available else " — Unavailable: " + state)
+        options.append(
+            '<option value="' + escape(broker, quote=True) + '"' + disabled + selected + '>'
+            + escape(label)
+            + '</option>'
+        )
+
+    current_label = escape(selected_broker or "NONE")
+    if not can_configure:
+        return (
+            '<section class="mc-broker-select-card mc-broker-select-card-disabled">'
+            '<span>Selected Broker</span><strong>' + current_label + '</strong>'
+            '<em>Administrator privilege required to change broker</em></section>'
+        )
+
+    paper_selected = " selected" if selected_mode == "PAPER" else ""
+    read_only_selected = " selected" if selected_mode == "LIVE_READ_ONLY" else ""
+    button_disabled = " disabled" if selectable_count == 0 else ""
+    return (
+        '<details class="mc-broker-select-card" id="mc-selected-broker-card">'
+        '<summary><span>Selected Broker</span><strong>' + current_label + '</strong>'
+        '<em>Tap to choose and confirm</em></summary>'
+        '<div class="mc-broker-picker-body">'
+        '<form id="mc-broker-selection-form" class="mc-filter-form">'
+        '<label>Preferred broker<select name="broker" required>'
+        + ''.join(options)
+        + '</select></label>'
+        '<label>Broker mode<select name="broker_mode" required>'
+        '<option value="PAPER"' + paper_selected + '>Paper</option>'
+        '<option value="LIVE_READ_ONLY"' + read_only_selected + '>Live read-only</option>'
+        '</select></label>'
+        '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> '
+        'I confirm this broker selection before transacting.</label>'
+        '<button type="submit"' + button_disabled + '>Confirm Broker Choice</button>'
+        '</form>'
+        '<p class="mc-muted">Unavailable brokers are greyed out and cannot be selected. '
+        'Confirmation records preference only; execution remains subject to all CSS safety and certification gates.</p>'
+        '<p id="mc-broker-selection-result" class="mc-muted" aria-live="polite"></p>'
+        '<script>'
+        "document.getElementById('mc-broker-selection-form')?.addEventListener('submit', async (ev) => {"
+        "ev.preventDefault(); const result=document.getElementById('mc-broker-selection-result');"
+        "const body=new URLSearchParams(new FormData(ev.currentTarget));"
+        "try { const response=await fetch('/operator-config/broker-selection',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body});"
+        "const data=await response.json(); if(!response.ok) throw new Error(data.detail||'Save failed');"
+        "result.textContent='Broker choice confirmed. Execution remains blocked until separate transaction gates pass.';"
+        "} catch(err){result.textContent=String(err.message||err);} });"
+        '</script></div></details>'
+    )
+
+
+
 def render(state: dict) -> str:
     brokers = section(state, "brokers")
     active = brokers.get("active_broker") if isinstance(brokers.get("active_broker"), dict) else {}
@@ -57,6 +134,8 @@ def render(state: dict) -> str:
     holdings = runtime.get("holdings_readiness") if isinstance(runtime.get("holdings_readiness"), dict) else {}
     provider = runtime.get("provider_health") if isinstance(runtime.get("provider_health"), dict) else {}
     certification = runtime.get("certification") if isinstance(runtime.get("certification"), dict) else {}
+    selected_broker = str(operator_selection.get("selected_broker") or active.get("selected_broker") or "NONE").upper()
+    selected_mode = str(operator_selection.get("broker_mode") or active.get("broker_mode") or "PAPER").upper()
 
     return (
         page_header(
@@ -73,10 +152,15 @@ def render(state: dict) -> str:
           '<a href="#mc-broker-account">Account</a>'
           '<a href="#mc-broker-evidence">Evidence</a>'
           '</nav>'
+        + _broker_picker(
+            broker_list,
+            selected_broker=selected_broker,
+            selected_mode=selected_mode,
+            can_configure=can_configure,
+        )
         + metric_grid(
             (
-                ("Selected Broker", active.get("selected_broker"), active.get("selected_broker")),
-                ("Broker Mode", active.get("broker_mode"), active.get("broker_mode")),
+                ("Broker Mode", selected_mode, selected_mode),
                 ("Connection", active.get("connection_status"), active.get("connection_status")),
                 ("Execution", "BLOCKED", "blocked"),
             ),
@@ -93,36 +177,12 @@ def render(state: dict) -> str:
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Broker Management secondary metrics",
         )
-        + (
-            '<section class="mc-panel mc-section-anchor" id="mc-broker-selection-config">'
-            '<h2>Broker &amp; Mode Selection</h2>'
-            '<p class="mc-muted">This records the operator preference for the next safe reconciliation. It does not arm or authorize broker execution.</p>'
-            '<form id="mc-broker-selection-form" class="mc-filter-form">'
-            '<label>Broker<select name="broker" required>'
-            '<option value="COINBASE">Coinbase</option><option value="OANDA">OANDA</option>'
-            '<option value="QUESTRADE">Questrade</option><option value="BINANCE">Binance</option>'
-            '</select></label>'
-            '<label>Broker mode<select name="broker_mode" required>'
-            '<option value="PAPER">Paper</option><option value="LIVE_READ_ONLY">Live read-only</option>'
-            '</select></label>'
-            '<button type="submit">Save Broker Preference</button>'
-            '</form><p id="mc-broker-selection-result" class="mc-muted" aria-live="polite"></p>'
-            '<script>'
-            "document.getElementById('mc-broker-selection-form')?.addEventListener('submit', async (ev) => {"
-            "ev.preventDefault(); const result=document.getElementById('mc-broker-selection-result');"
-            "const body=new URLSearchParams(new FormData(ev.currentTarget));"
-            "try { const response=await fetch('/operator-config/broker-selection',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body});"
-            "const data=await response.json(); if(!response.ok) throw new Error(data.detail||'Save failed');"
-            "result.textContent='Broker preference saved for next safe reconciliation. Execution remains blocked.';"
-            "} catch(err){result.textContent=String(err.message||err);} });"
-            '</script></section>'
-            if can_configure else
-            '<section class="mc-panel"><h2>Broker &amp; Mode Selection</h2><p class="mc-muted">Administrator privilege is required to change broker preferences.</p></section>'
-        )
         + _anchor_panel("mc-broker-selection-state", detail_table("Operator Selection Preference", {
             "selected_broker": operator_selection.get("selected_broker") or "NOT_CONFIGURED",
             "broker_mode": operator_selection.get("broker_mode") or "NOT_CONFIGURED",
             "configured_at": operator_selection.get("configured_at") or "UNAVAILABLE",
+            "confirmed": operator_selection.get("confirmed") if operator_selection else False,
+            "confirmed_at": operator_selection.get("confirmed_at") or "UNAVAILABLE",
             "runtime_application": operator_selection.get("runtime_application") or "UNAVAILABLE",
             "execution_allowed": False,
         }))
