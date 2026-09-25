@@ -34,6 +34,7 @@ from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 from dashboard.mission_control.state_adapter import build_broker_registry
 from dashboard.runtime.frontend_contract import build_frontend_payload
 from backend.accounting.account_statement_service import AccountStatementService, StatementQuery
+from backend.accounting.retention_policy import AccountingArchiveService, assess_retention, retention_policy_payload
 
 
 STATUS_KEYS = (
@@ -2078,3 +2079,59 @@ def test_navigation_registers_transaction_history_and_user_terms() -> None:
     entries = {section.key: section for section in MISSION_CONTROL_SECTIONS}
     assert entries["transaction_history"].route == "/mission-control/transaction-history"
     assert entries["user_account_configuration"].route == "/mission-control/user-account-configuration"
+
+
+def test_accounting_retention_keeps_records_hot_for_four_years_before_archive(tmp_path) -> None:
+    from datetime import date
+
+    record = {
+        "ledger_id": "L-RET-1",
+        "user_id": "12345",
+        "transaction_date": "2022-09-24",
+        "value_date": "2022-09-24",
+        "settlement_date": "2022-09-24",
+        "entry_type": "DEBIT",
+        "amount": "10.00",
+        "currency": "USD",
+        "description": "Access charge",
+        "dispute_hold": False,
+    }
+    before = assess_retention(record, as_of=date(2026, 9, 23))
+    assert before.archive_eligible is False
+    assert before.action == "RETAIN_HOT"
+
+    on_anniversary = assess_retention(record, as_of=date(2026, 9, 24))
+    assert on_anniversary.archive_eligible is True
+    assert on_anniversary.action == "ARCHIVE_ELIGIBLE"
+
+    archived = AccountingArchiveService(tmp_path / "archive").archive_record(
+        record,
+        record_type="transaction",
+        as_of=date(2026, 9, 24),
+    )
+    assert archived["archived"] is True
+    assert archived["status"] == "ARCHIVED"
+    assert archived["record_hash_sha256"]
+
+
+def test_dispute_hold_blocks_accounting_archive() -> None:
+    from datetime import date
+
+    record = {
+        "ledger_id": "L-HOLD-1",
+        "transaction_date": "2020-01-01",
+        "dispute_hold": True,
+    }
+    assessment = assess_retention(record, as_of=date(2026, 9, 24))
+    assert assessment.archive_eligible is False
+    assert assessment.action == "RETAIN_HOT_DISPUTE_HOLD"
+
+
+def test_accounting_retention_policy_covers_audit_and_account_records() -> None:
+    policy = retention_policy_payload()
+    assert policy["minimum_hot_retention_years"] == 4
+    assert "transaction_details" in policy["hot_storage_scope"]
+    assert "account_information" in policy["hot_storage_scope"]
+    assert "audit_and_provenance_metadata" in policy["hot_storage_scope"]
+    assert policy["archive_integrity"] == "SHA256_VERIFIED"
+    assert policy["deletion_by_age_alone"] is False
