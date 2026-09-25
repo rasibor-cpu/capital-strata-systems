@@ -5548,6 +5548,26 @@ async def operator_trade_request(request: Request):
     payload["broker_execution_allowed"] = "false"
     payload["broker_mode"] = "paper"
     payload["requested_by"] = actor["user_id"]
+
+    from backend.accounting.account_funding_control import assess_trade_funding, margin_control_for_user
+    current_state = build_mission_control_state(_mission_control_registry_source(), allow_mock=False)
+    balance_block = current_state.get("broker_balance_summary") if isinstance(current_state.get("broker_balance_summary"), dict) else {}
+    account_summary = balance_block.get("account_summary") if isinstance(balance_block.get("account_summary"), dict) else {}
+    try:
+        required_amount = float(payload.get("amount") or 0)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="amount must be numeric")
+    if required_amount <= 0:
+        raise HTTPException(status_code=400, detail="amount must be greater than zero")
+    funding_gate = assess_trade_funding(
+        requested_amount=required_amount,
+        currency=str(payload.get("currency") or "USD"),
+        account_summary=account_summary,
+        margin_control=margin_control_for_user(actor["user_id"]),
+    )
+    if not funding_gate.get("allowed"):
+        raise HTTPException(status_code=409, detail="INSUFFICIENT_OR_UNVERIFIED_FUNDS:" + str(funding_gate.get("reason") or "BLOCKED"))
+
     try:
         trade_request = write_mobile_paper_trade_request(payload)
     except ValueError as exc:
@@ -5559,6 +5579,102 @@ async def operator_trade_request(request: Request):
         "execution_allowed": False,
         "live_trading_blocked": True,
     })
+
+
+@launcher_router.post("/account/funding/request")
+async def account_funding_request(request: Request):
+    from backend.accounting.account_funding_control import submit_funding_request
+
+    actor = _operator_config_auth(request, require_admin=False)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        row = submit_funding_request(
+            user_id=actor["user_id"],
+            amount=payload.get("amount"),
+            currency=str(payload.get("currency") or ""),
+            funding_method=str(payload.get("funding_method") or ""),
+            external_reference=str(payload.get("external_reference") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": "PENDING_VERIFICATION", "funding": row})
+
+
+@launcher_router.post("/account/funding/verify")
+async def account_funding_verify(request: Request):
+    from backend.accounting.account_funding_control import record_funding_verification
+
+    _operator_config_auth(request, require_admin=True)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        row = record_funding_verification(
+            funding_id=str(payload.get("funding_id") or ""),
+            status=str(payload.get("status") or ""),
+            verification_source=str(payload.get("verification_source") or ""),
+            verification_reference=str(payload.get("verification_reference") or ""),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": row.get("status"), "funding": row})
+
+
+@launcher_router.post("/account/margin/configure")
+async def account_margin_configure(request: Request):
+    from backend.accounting.account_funding_control import save_margin_setoff_control
+
+    actor = _operator_config_auth(request, require_admin=True)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        row = save_margin_setoff_control(
+            user_id=str(payload.get("user_id") or ""),
+            status="PENDING",
+            currency=str(payload.get("currency") or "USD"),
+            margin_limit=payload.get("margin_limit"),
+            linked_credit_account_alias=str(payload.get("linked_credit_account_alias") or ""),
+            setoff_form_version=str(payload.get("setoff_form_version") or ""),
+            setoff_executed=False,
+            actor_user_id=actor["user_id"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": "PENDING_USER_SETOFF", "margin": row})
+
+
+@launcher_router.post("/account/margin/setoff/accept")
+async def account_margin_setoff_accept(request: Request):
+    from backend.accounting.account_funding_control import accept_margin_setoff
+
+    actor = _operator_config_auth(request, require_admin=False)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        row = accept_margin_setoff(
+            user_id=actor["user_id"],
+            actor_user_id=actor["user_id"],
+            setoff_form_version=str(payload.get("setoff_form_version") or ""),
+        )
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": "SETOFF_ACCEPTED_PENDING_MARGIN_VERIFICATION", "margin": row})
+
+
+@launcher_router.post("/account/margin/verify")
+async def account_margin_verify(request: Request):
+    from backend.accounting.account_funding_control import verify_margin_facility
+
+    actor = _operator_config_auth(request, require_admin=True)
+    payload = await _read_mobile_trade_payload(request)
+    try:
+        row = verify_margin_facility(
+            user_id=str(payload.get("user_id") or ""),
+            verification_source=str(payload.get("verification_source") or ""),
+            verification_reference=str(payload.get("verification_reference") or ""),
+            actor_user_id=actor["user_id"],
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return JSONResponse({"status": "ACTIVE_VERIFIED", "margin": row})
 
 
 @launcher_router.post("/operator-config/broker-selection")
