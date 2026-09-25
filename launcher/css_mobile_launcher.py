@@ -5320,15 +5320,32 @@ def _operator_config_auth(request: Request, *, require_admin: bool = True) -> Di
 
 @launcher_router.post("/operator-config/broker-selection")
 async def operator_config_broker_selection(request: Request):
-    from dashboard.enterprise_shell.operator_configuration import save_broker_selection
+    from dashboard.enterprise_shell.operator_configuration import broker_row_selectable, save_broker_selection
 
     actor = _operator_config_auth(request)
     payload = await _read_mobile_trade_payload(request)
+    requested_broker = str(payload.get("broker") or "").strip().upper()
+    current_state = build_mission_control_state(_mission_control_registry_source(), allow_mock=False)
+    broker_rows = (
+        current_state.get("brokers", {}).get("broker_list", [])
+        if isinstance(current_state.get("brokers"), dict)
+        else []
+    )
+    broker_row = next(
+        (
+            row for row in broker_rows
+            if isinstance(row, dict) and str(row.get("broker") or "").upper() == requested_broker
+        ),
+        None,
+    )
+    if broker_row is None or not broker_row_selectable(broker_row):
+        raise HTTPException(status_code=409, detail="BROKER_NOT_CURRENTLY_AVAILABLE")
     try:
         result = save_broker_selection(
-            broker=str(payload.get("broker") or ""),
+            broker=requested_broker,
             broker_mode=str(payload.get("broker_mode") or ""),
             actor_user_id=actor["user_id"],
+            confirmed=str(payload.get("confirm_choice") or "").strip().upper() == "YES",
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
