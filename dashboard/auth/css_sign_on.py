@@ -309,7 +309,9 @@ def create_user(
         "unit_code": str(unit_code or "CORE").strip().upper() or "CORE",
         "home_branch": str(home_branch or "HQ").strip().upper() or "HQ",
         "password_hash": hash_password(initial_password),
-        "must_change_password": bool(must_change_password),
+        # Initial credentials are always temporary. No caller may bypass
+        # first-login password change for a newly created user.
+        "must_change_password": True,
         "last_password_change": None,
         "password_history": [],
         "failed_attempts": 0,
