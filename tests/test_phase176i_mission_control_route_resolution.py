@@ -39,9 +39,21 @@ EXPECTED = {
     },
     "trade-operations": {
         "key": "trade_operations",
-        "nav": "Trade Operations",
-        "h1": "Trade Operations",
-        "title_part": "Trade Operations",
+        "nav": "Trade / Transaction",
+        "h1": "Trade / Transaction",
+        "title_part": "Trade / Transaction",
+    },
+    "transaction-history": {
+        "key": "transaction_history",
+        "nav": "Transaction History",
+        "h1": "Transaction History",
+        "title_part": "Transaction History",
+    },
+    "account-funding": {
+        "key": "account_funding",
+        "nav": "Balances & Funding",
+        "h1": "Balances & Funding",
+        "title_part": "Balances & Funding",
     },
     "portfolio": {"key": "portfolio", "nav": "Portfolio", "h1": "Portfolio", "title_part": "Portfolio"},
     "market-intelligence": {
@@ -55,6 +67,12 @@ EXPECTED = {
         "nav": "Risk Command",
         "h1": "Risk Command",
         "title_part": "Risk Command",
+    },
+    "asset-classes": {
+        "key": "asset_classes",
+        "nav": "Asset Classes",
+        "h1": "Asset Classes",
+        "title_part": "Asset Classes",
     },
     "options-income": {
         "key": "options_income",
@@ -97,6 +115,12 @@ EXPECTED = {
         "nav": "Users and Governance",
         "h1": "Users and Governance",
         "title_part": "Users and Governance",
+    },
+    "user-account-configuration": {
+        "key": "user_account_configuration",
+        "nav": "User Accounts & Commercial Terms",
+        "h1": "User Accounts & Commercial Terms",
+        "title_part": "User Accounts & Commercial Terms",
     },
     "system-configuration": {
         "key": "system_configuration",
