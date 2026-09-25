@@ -241,7 +241,7 @@ def _launcher_login_page(message: str = "", status: str = "info") -> str:
     <input id="user_id" name="user_id" inputmode="numeric" autocomplete="username" required>
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
-    <p id="login-password-clue" class="foot">Masked: •••••••••••• · stored/checked as a one-way hash</p>
+    <p id="login-password-clue" class="foot">Masked: •••••••••••• · stored/checked as a PBKDF2-SHA256 one-way hash</p>
     <label for="broker">Broker for this session</label>
     <select id="broker" name="broker">
       <option value="">Choose later</option>
@@ -263,7 +263,7 @@ def _launcher_login_page(message: str = "", status: str = "info") -> str:
 </section></main>
 <script>
 document.getElementById('password')?.addEventListener('input',ev=>{
- const n=Math.max(1,ev.target.value.length);document.getElementById('login-password-clue').textContent='Masked: '+'•'.repeat(n)+' · stored/checked as a one-way hash';
+ const n=Math.max(1,ev.target.value.length);document.getElementById('login-password-clue').textContent='Masked: '+'•'.repeat(n)+' · stored/checked as a PBKDF2-SHA256 one-way hash';
 });
 </script>
 </body></html>""".replace("__NOTICE__", notice)
@@ -335,7 +335,7 @@ __NOTICE__
 <input id="recovery_answer" name="recovery_answer" type="password" autocomplete="off" required>
 <label for="recovery_new_password">New password</label>
 <input id="recovery_new_password" name="new_password" type="password" autocomplete="new-password" minlength="12" required>
-<p id="password-hash-clue" class="foot">Masked: •••••••••••• · stored as one-way hash</p>
+<p id="password-hash-clue" class="foot">Masked: •••••••••••• · stored as PBKDF2-SHA256 one-way hash</p>
 <label for="recovery_confirm_password">Confirm new password</label>
 <input id="recovery_confirm_password" name="confirm_password" type="password" autocomplete="new-password" minlength="12" required>
 <button type="button" id="toggle-reset-secrets">Show / Hide Entries</button>
@@ -351,7 +351,7 @@ document.getElementById('toggle-reset-secrets')?.addEventListener('click',()=>{
  });
 });
 document.getElementById('recovery_new_password')?.addEventListener('input',ev=>{
- const n=Math.max(1,ev.target.value.length);document.getElementById('password-hash-clue').textContent='Masked: '+'•'.repeat(n)+' · stored as one-way hash';
+ const n=Math.max(1,ev.target.value.length);document.getElementById('password-hash-clue').textContent='Masked: '+'•'.repeat(n)+' · stored as PBKDF2-SHA256 one-way hash';
 });
 </script>
 </body></html>""".replace("__QUESTION__", escape(question)).replace("__NOTICE__", notice)
@@ -439,7 +439,7 @@ def _launcher_password_change_page(message: str = "") -> str:
 <h1>Change Password</h1><p>CSS requires a password change before this account can continue.</p>__NOTICE__
 <form method="post" action="/password-change">
 <label for="new_password">New password</label><input id="new_password" name="new_password" type="password" autocomplete="new-password" required>
-<p id="change-password-clue">Masked: •••••••••••• · stored as one-way hash</p>
+<p id="change-password-clue">Masked: •••••••••••• · stored as PBKDF2-SHA256 one-way hash</p>
 <label for="confirm_password">Confirm new password</label><input id="confirm_password" name="confirm_password" type="password" autocomplete="new-password" required>
 <button type="button" id="toggle-change-password">Show / Hide Password</button>
 <button type="submit">Change password and continue</button>
@@ -449,7 +449,7 @@ document.getElementById('toggle-change-password')?.addEventListener('click',()=>
  ['new_password','confirm_password'].forEach(id=>{const el=document.getElementById(id);if(el)el.type=el.type==='password'?'text':'password';});
 });
 document.getElementById('new_password')?.addEventListener('input',ev=>{
- const n=Math.max(1,ev.target.value.length);document.getElementById('change-password-clue').textContent='Masked: '+'•'.repeat(n)+' · stored as one-way hash';
+ const n=Math.max(1,ev.target.value.length);document.getElementById('change-password-clue').textContent='Masked: '+'•'.repeat(n)+' · stored as PBKDF2-SHA256 one-way hash';
 });
 </script>
 </body></html>""".replace("__NOTICE__", notice)
