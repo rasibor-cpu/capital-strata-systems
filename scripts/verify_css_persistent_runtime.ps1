@@ -7,6 +7,8 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $StateFile = Join-Path $RepoRoot "runtime\supervisor\css_runtime_supervisor_state.json"
 $ExpectedPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+$StdOut = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.out.log"
+$StdErr = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.err.log"
 $Failures = New-Object System.Collections.Generic.List[string]
 
 function Pass([string]$Message) { Write-Host "[PASS] $Message" }
@@ -14,6 +16,12 @@ function Warn([string]$Message) { Write-Host "[WARN] $Message" }
 function Fail([string]$Message) { Write-Host "[FAIL] $Message"; $Failures.Add($Message) }
 
 Write-Host "=== CSS PERSISTENT RUNTIME VERIFICATION ==="
+
+if (Test-Path $ExpectedPython) {
+    Pass "Repository virtual-environment Python exists"
+} else {
+    Fail "Repository virtual-environment Python is missing: $ExpectedPython"
+}
 
 # Scheduled task
 try {
@@ -88,6 +96,19 @@ try {
     }
 } catch {
     Fail "Mobile launcher endpoint is unreachable: $($_.Exception.Message)"
+}
+
+if ($Failures.Count -gt 0) {
+    if (Test-Path $StdOut) {
+        Write-Host ""
+        Write-Host "--- Latest canonical runtime stdout ---"
+        Get-Content -Path $StdOut -Tail 80 -ErrorAction SilentlyContinue
+    }
+    if (Test-Path $StdErr) {
+        Write-Host ""
+        Write-Host "--- Latest canonical runtime stderr ---"
+        Get-Content -Path $StdErr -Tail 80 -ErrorAction SilentlyContinue
+    }
 }
 
 Write-Host "==========================================="
