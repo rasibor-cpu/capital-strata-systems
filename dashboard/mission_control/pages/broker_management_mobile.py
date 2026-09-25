@@ -79,7 +79,7 @@ def _broker_picker(
         return (
             '<section class="mc-broker-select-card mc-broker-select-card-disabled">'
             '<span>Selected Broker</span><strong>' + current_label + '</strong>'
-            '<em>Administrator privilege required to change broker</em></section>'
+            '<em>Authenticated user session required to change broker</em></section>'
         )
 
     paper_selected = " selected" if selected_mode == "PAPER" else ""
@@ -126,7 +126,7 @@ def render(state: dict) -> str:
     broker_list = brokers.get("broker_list") if isinstance(brokers.get("broker_list"), list) else []
     operator_selection = brokers.get("operator_selection") if isinstance(brokers.get("operator_selection"), dict) else {}
     auth = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
-    can_configure = str(auth.get("role") or "").upper() in {"SUPER_USER", "ADMIN"}
+    can_configure = bool(auth.get("authenticated", True)) and bool(auth.get("active", True))
     telemetry = section(state, "broker_telemetry")
     runtime = section(state, "enterprise_broker_runtime")
     balance = section(state, "broker_balance_summary")
