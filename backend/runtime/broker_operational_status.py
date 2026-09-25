@@ -194,9 +194,34 @@ def _status(
 def _failure_reason(payload: Mapping[str, Any]) -> str:
     failures = payload.get("failure_reasons")
     if isinstance(failures, list) and failures:
-        first = failures[0] if isinstance(failures[0], Mapping) else {}
-        reason = str(first.get("reason", "") if isinstance(first, Mapping) else "").strip().upper()
+        first = failures[0]
+        if isinstance(first, Mapping):
+            reason = str(first.get("reason", "") or first.get("code", "")).strip().upper()
+        else:
+            reason = str(first or "").strip().upper()
         return reason or "API_ERROR"
+
+    connection_error = str(payload.get("connection_error") or "").strip()
+    if connection_error:
+        return connection_error.upper()
+
+    connection_status = str(
+        payload.get("connection_status")
+        or payload.get("transport_status")
+        or payload.get("api_health")
+        or ""
+    ).strip().upper()
+    if connection_status in {"FAIL", "FAILED", "ERROR", "UNAVAILABLE", "NOT_AVAILABLE"}:
+        return "CONNECTION_FAILED"
+
+    authentication_status = str(
+        payload.get("authentication_status")
+        or payload.get("auth_status")
+        or ""
+    ).strip().upper()
+    if authentication_status in {"FAIL", "FAILED", "ERROR", "UNAVAILABLE", "NOT_AVAILABLE"}:
+        return "AUTHENTICATION_FAILED"
+
     return "NONE"
 
 
