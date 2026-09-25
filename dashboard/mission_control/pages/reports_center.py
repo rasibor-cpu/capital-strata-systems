@@ -147,7 +147,7 @@ def _report_selection_toggle(generatable: list[dict], can_generate: bool) -> str
         '<label for="rc-report-toggle">Choose report</label>'
         '<select id="rc-report-toggle"' + disabled + '>'
         '<option value="">Select report…</option>' + options + '</select>'
-        '<button type="button" class="rc-btn rc-btn-primary" id="rc-report-toggle-open"' + disabled + '>'
+        '<button type="button" class="rc-btn rc-btn-primary" id="rc-report-toggle-open" data-rc-action="open-selection"' + disabled + '>'
         'Open Selection</button></div>'
         '<p class="rc-muted">Choose the report here, then CSS opens the Create Report panel with that report selected.</p>'
         '</section>'
