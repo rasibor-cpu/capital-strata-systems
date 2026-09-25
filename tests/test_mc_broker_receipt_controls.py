@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.pages.transaction_history import render as render_transaction_history
-from launcher.css_mobile_launcher import _launcher_forgot_password_page, _launcher_login_page, _launcher_password_change_page, _launcher_recovery_challenge_page, validate_mobile_paper_trade_request
+from launcher.css_mobile_launcher import _launcher_forgot_password_page, _launcher_login_page, _launcher_password_change_page, _launcher_recovery_challenge_page, _launcher_recovery_enrollment_page, validate_mobile_paper_trade_request
 
 
 def test_broker_picker_greys_unavailable_brokers_and_requires_confirmation() -> None:
@@ -149,3 +149,85 @@ def test_launcher_exposes_mobile_forgot_password_recovery() -> None:
     assert 'name="new_password"' in challenge
     assert 'name="confirm_password"' in challenge
     assert "clears the failed sign-on counter" in challenge
+
+
+def test_launcher_requires_recovery_setup_screen_before_first_access() -> None:
+    page = _launcher_recovery_enrollment_page()
+    assert "<title>CSS Recovery Setup</title>" in page
+    assert "Set Up Password Recovery" in page
+    assert 'form method="post" action="/recovery-setup"' in page
+    assert 'name="recovery_question"' in page
+    assert 'name="recovery_answer"' in page
+    assert 'name="confirm_answer"' in page
+    assert "required before first access" in page
+
+
+def test_global_mission_control_broker_badge_is_clickable_for_authenticated_user() -> None:
+    from dashboard.mission_control.layout import render_mission_control_shell
+
+    html = render_mission_control_shell(
+        {
+            "schema_version": "test",
+            "generated_at": "2026-09-25T00:00:00Z",
+            "authorization_context": {
+                "authenticated": True,
+                "active": True,
+                "user_id": "00000",
+                "role": "SUPER_USER",
+            },
+            "platform": {
+                "product": "CSS Mission Control",
+                "runtime_mode": "DISABLED",
+                "broker_health": "PASS",
+                "platform_status": "AMBER",
+            },
+            "platform_status": {"runtime_mode": "DISABLED", "execution_state": "BLOCKED"},
+            "safety": {
+                "live_trading_blocked": True,
+                "safety_status": "PASS",
+                "execution_allowed": False,
+                "advisory_only": True,
+            },
+            "runtime": {"heartbeat_status": "ACTIVE"},
+            "brokers": {
+                "operator_selection": {
+                    "selected_broker": "OANDA",
+                    "broker_mode": "LIVE_READ_ONLY",
+                    "confirmed": True,
+                },
+                "active_broker": {
+                    "selected_broker": "COINBASE",
+                    "broker_mode": "LIVE_READ_ONLY",
+                },
+                "broker_list": [
+                    {
+                        "broker": "COINBASE",
+                        "operational_state": "READ_ONLY_READY",
+                        "readiness": "READ_ONLY_READY",
+                        "certification": "READ_ONLY_VALIDATED",
+                    },
+                    {
+                        "broker": "OANDA",
+                        "operational_state": "READ_ONLY_READY",
+                        "readiness": "READ_ONLY_READY",
+                        "certification": "READ_ONLY_VALIDATED",
+                    },
+                    {
+                        "broker": "QUESTRADE",
+                        "operational_state": "REACTIVATION_REQUIRED",
+                        "readiness": "CONFIGURED_REACTIVATION_REQUIRED",
+                        "certification": "NOT_CERTIFIED",
+                    },
+                ],
+            },
+        },
+        active_section="executive_overview",
+    )
+    assert 'class="mc-broker-quick"' in html
+    assert '<span class="mc-badge-value">OANDA</span>' in html
+    assert 'name="broker"' in html
+    assert "COINBASE — Available" in html
+    assert "OANDA — Available" in html
+    assert "QUESTRADE — Unavailable: REACTIVATION REQUIRED" in html
+    assert '<option value="QUESTRADE" disabled' in html
+    assert "Use This Broker" in html
