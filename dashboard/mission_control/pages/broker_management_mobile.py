@@ -88,8 +88,8 @@ def _broker_picker(
     button_disabled = " disabled" if selectable_count == 0 else ""
     return (
         '<details class="mc-broker-select-card" id="mc-selected-broker-card">'
-        '<summary><span>Preferred Broker</span><strong>' + current_label + '</strong>'
-        '<em>Tap to choose and confirm</em></summary>'
+        '<summary><span>Broker Settings</span><strong>' + current_label + '</strong>'
+        '<em>Tap to change preference</em></summary>'
         '<div class="mc-broker-picker-body">'
         '<form id="mc-broker-selection-form" class="mc-filter-form">'
         '<label>Preferred broker<select name="broker" required>'
@@ -101,10 +101,11 @@ def _broker_picker(
         '</select></label>'
         '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> '
         'I confirm this broker preference for the current session.</label>'
-        '<button type="submit"' + button_disabled + '>Confirm Broker Choice</button>'
+        '<button type="submit"' + button_disabled + '>Save Broker Preference</button>'
         '</form>'
         '<p class="mc-muted">Unavailable brokers are greyed out and cannot be selected. '
-        'Confirmation records preference only. Execution remains subject to all CSS safety and certification gates.</p>'
+        'This setting records preference only; it does not connect a broker, change the runtime-active broker, or arm execution. '
+        'Execution remains subject to all CSS safety and certification gates.</p>'
         '<p id="mc-broker-selection-result" class="mc-muted" aria-live="polite"></p>'
         '<script>'
         "document.getElementById('mc-broker-selection-form')?.addEventListener('submit', async (ev) => {"
@@ -206,8 +207,8 @@ def render(state: dict) -> str:
         }))
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-broker-status", detail_table("Broker Status Snapshot", {
-            "selected_broker": active.get("selected_broker"),
-            "broker_mode": active.get("broker_mode"),
+            "runtime_active_broker": active.get("selected_broker"),
+            "runtime_broker_mode": active.get("broker_mode"),
             "connection_status": active.get("connection_status"),
             "authentication_status": active.get("authentication_status"),
             "account_status": active.get("account_status"),
