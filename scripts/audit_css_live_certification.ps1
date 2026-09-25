@@ -37,6 +37,15 @@ Write-Host ("Safety execution    : {0}" -f $state.safety.execution_allowed)
 Write-Host ("Safety live blocked : {0}" -f $state.safety.live_trading_blocked)
 Write-Host ("Broker armed        : {0}" -f $state.safety.broker_execution_armed)
 Write-Host ("Advisory only       : {0}" -f $state.safety.advisory_only)
+Write-Host ("Safety status       : {0}" -f $state.safety.safety_status)
+Write-Host ("Contract valid      : {0}" -f $state.contract_validation.valid)
+$contractReasons = @($state.contract_validation.reasons)
+if ($contractReasons.Count -gt 0) {
+    Write-Host "Contract validation reasons:"
+    foreach ($item in $contractReasons) {
+        Write-Host ("  - {0}" -f $item)
+    }
+}
 
 Write-Host ""
 Write-Host "Runtime evidence:"
