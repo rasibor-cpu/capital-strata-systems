@@ -1006,7 +1006,7 @@ def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, An
 
     return {
         "timestamp_utc": _utc_iso_z(),
-        "source": "mission_control_trade_ticket",
+        "source": str(payload.get("source") or "mission_control_trade_ticket"),
         "paper_only": True,
         "broker": broker,
         "broker_mode": "PAPER",
@@ -5789,6 +5789,9 @@ async def mobile_trade_paper(request: Request):
     require_mutation_auth(request)
     try:
         payload = await _read_mobile_trade_payload(request)
+        payload = dict(payload)
+        payload.setdefault("broker", "PAPER")
+        payload.setdefault("source", "mobile_dashboard")
         trade_request = write_mobile_paper_trade_request(payload)
     except ValueError as exc:
         return JSONResponse(
