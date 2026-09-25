@@ -5680,6 +5680,27 @@ def _mission_control_registry_source() -> Dict[str, Any]:
         payload["operator_broker_selection"] = load_broker_selection()
     except Exception:
         payload["operator_broker_selection"] = {}
+    try:
+        from backend.accounting.account_funding_control import (
+            funding_requests_for_user,
+            margin_control_for_user,
+        )
+        identity = _launcher_auth_identity(payload.get("session") if isinstance(payload.get("session"), dict) else {})
+        user_id = str(identity.get("user_id") or "")
+        payload["account_controls"] = {
+            "user_id": user_id,
+            "funding_requests": funding_requests_for_user(user_id) if user_id else [],
+            "margin_control": margin_control_for_user(user_id) if user_id else {},
+            "funding_requires_external_verification": True,
+            "overdraft_allowed_without_margin": False,
+        }
+    except Exception:
+        payload["account_controls"] = {
+            "funding_requests": [],
+            "margin_control": {"status": "DISABLED"},
+            "funding_requires_external_verification": True,
+            "overdraft_allowed_without_margin": False,
+        }
     payload["mission_control_runtime_registry_cross_process_safe"] = True
     return payload
 
