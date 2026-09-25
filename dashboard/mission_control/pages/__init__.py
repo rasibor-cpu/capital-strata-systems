@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dashboard.mission_control.pages import (
+    account_funding,
     alerts_incidents,
     audit_explainability,
     asset_classes,
@@ -32,6 +33,7 @@ from dashboard.mission_control.pages import (
 
 PAGE_MODULES = {
     "executive_overview": executive_overview,
+    "account_funding": account_funding,
     "reports_center": reports_center,
     "runtime_operations": runtime_operations,
     "trade_operations": trade_operations,
