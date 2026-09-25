@@ -36,7 +36,7 @@ def render_mobile_landing(
     primary_labels = {
         "Home",
         "Mission Control",
-        "Trade Operations",
+        "Trade / Transaction",
         "Reports",
         "Portfolio",
         "Market Intelligence",
