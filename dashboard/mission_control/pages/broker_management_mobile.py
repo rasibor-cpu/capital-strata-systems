@@ -79,7 +79,7 @@ def _broker_picker(
     if not can_configure:
         return (
             '<section class="mc-broker-select-card mc-broker-select-card-disabled">'
-            '<span>Selected Broker</span><strong>' + current_label + '</strong>'
+            '<span>Preferred Broker</span><strong>' + current_label + '</strong>'
             '<em>Authenticated user session required to change broker</em></section>'
         )
 
@@ -88,7 +88,7 @@ def _broker_picker(
     button_disabled = " disabled" if selectable_count == 0 else ""
     return (
         '<details class="mc-broker-select-card" id="mc-selected-broker-card">'
-        '<summary><span>Selected Broker</span><strong>' + current_label + '</strong>'
+        '<summary><span>Preferred Broker</span><strong>' + current_label + '</strong>'
         '<em>Tap to choose and confirm</em></summary>'
         '<div class="mc-broker-picker-body">'
         '<form id="mc-broker-selection-form" class="mc-filter-form">'
@@ -100,7 +100,7 @@ def _broker_picker(
         '<option value="LIVE_READ_ONLY"' + read_only_selected + '>Live read-only</option>'
         '</select></label>'
         '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> '
-        'I confirm this broker selection before transacting.</label>'
+        'I confirm this broker preference for the current session.</label>'
         '<button type="submit"' + button_disabled + '>Confirm Broker Choice</button>'
         '</form>'
         '<p class="mc-muted">Unavailable brokers are greyed out and cannot be selected. '
@@ -112,7 +112,7 @@ def _broker_picker(
         "const body=new URLSearchParams(new FormData(ev.currentTarget));"
         "try { const response=await fetch('/operator-config/broker-selection',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body});"
         "const data=await response.json(); if(!response.ok) throw new Error(data.detail||'Save failed');"
-        "result.textContent='Broker choice confirmed. Execution remains blocked until separate transaction gates pass.';"
+        "result.textContent='Broker preference confirmed. This does not activate or authorize broker execution.';"
         "} catch(err){result.textContent=String(err.message||err);} });"
         '</script></div></details>'
     )
