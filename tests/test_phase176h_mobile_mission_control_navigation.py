@@ -18,10 +18,13 @@ REQUIRED_LABELS = [
     "Executive Overview",
     "Reports",
     "Runtime Operations",
-    "Trade Operations",
+    "Trade / Transaction",
+    "Transaction History",
+    "Balances & Funding",
     "Portfolio",
     "Market Intelligence",
     "Risk Command",
+    "Asset Classes",
     "Options Income",
     "Broker Management",
     "Alerts and Incidents",
@@ -29,6 +32,7 @@ REQUIRED_LABELS = [
     "Audit and Explainability",
     "Learning and Performance",
     "Users and Governance",
+    "User Accounts & Commercial Terms",
     "System Configuration",
     "Documentation / Runbooks",
 ]
@@ -109,7 +113,9 @@ def test_touch_debug_overlay_only_when_enabled() -> None:
     assert "elementFromPoint" in enabled
 
 
-def test_http_routes_resolve_for_every_section() -> None:
+def test_http_routes_resolve_for_every_section(monkeypatch) -> None:
+    monkeypatch.setenv("CSS_TRUST_INTERNAL_AUTH_HEADERS", "1")
+    monkeypatch.setenv("CSS_AUTH_BRIDGE_MODE", "off")
     app = FastAPI()
     register_mission_control(app, lambda: None)
     client = TestClient(app)
