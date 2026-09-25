@@ -33,40 +33,65 @@ def render_mobile_landing(
         and item.get("href")
         and "/api/" not in str(item.get("href") or "")
     ]
-    primary_labels = {
+    core_labels = {
         "Home",
         "Mission Control",
-        "Trade / Transaction",
-        "Balances & Funding",
+        "Trade Operations",
         "Reports",
         "Portfolio",
         "Market Intelligence",
         "Risk Command",
-        "Asset Classes",
         "Options Income",
+    }
+    operations_labels = {
+        "Broker Management",
+        "Runtime Operations",
+        "Certification and Readiness",
+        "Alerts and Incidents",
+        "Users and Governance",
+        "System Configuration",
+        "Documentation and Runbooks",
     }
 
     def _link(item: Mapping[str, Any]) -> str:
-        return '<a class="landing-link" href="{href}" aria-label="{aria}">{label}</a>'.format(
+        label = str(item.get("label") or "")
+        return (
+            '<a class="landing-link" href="{href}" aria-label="{aria}">'
+            '<span>{label}</span><small>Open</small></a>'
+        ).format(
             href=_esc(item["href"]),
-            aria=_esc(item.get("aria_label") or item["label"]),
-            label=_esc(item["label"]),
+            aria=_esc(item.get("aria_label") or label),
+            label=_esc(label),
         )
 
-    primary_links = "".join(
-        _link(item) for item in destinations if str(item.get("label")) in primary_labels
+    core_links = "".join(
+        _link(item) for item in destinations if str(item.get("label")) in core_labels
     )
-    secondary_links = "".join(
-        _link(item) for item in destinations if str(item.get("label")) not in primary_labels
+    operations_links = "".join(
+        _link(item) for item in destinations if str(item.get("label")) in operations_labels
     )
+    other_links = "".join(
+        _link(item)
+        for item in destinations
+        if str(item.get("label")) not in core_labels
+        and str(item.get("label")) not in operations_labels
+    )
+
     links = (
-        f'<nav class="landing-primary" aria-label="CSS primary mobile destinations">{primary_links}</nav>'
+        '<section class="launcher-group" aria-labelledby="css-core-destinations">'
+        '<h2 id="css-core-destinations">Core</h2>'
+        f'<nav class="landing-primary" aria-label="CSS core mobile destinations">{core_links}</nav>'
+        '</section>'
+        '<section class="launcher-group" aria-labelledby="css-operations-destinations">'
+        '<h2 id="css-operations-destinations">Operations &amp; Governance</h2>'
+        f'<nav class="landing-primary" aria-label="CSS operations and governance destinations">{operations_links}</nav>'
+        '</section>'
         + (
-            '<details class="landing-more">'
-            '<summary>More read-only destinations</summary>'
-            f'<nav aria-label="CSS additional mobile destinations">{secondary_links}</nav>'
-            '</details>'
-            if secondary_links
+            '<section class="launcher-group" aria-labelledby="css-additional-destinations">'
+            '<h2 id="css-additional-destinations">Additional</h2>'
+            f'<nav class="landing-primary" aria-label="CSS additional mobile destinations">{other_links}</nav>'
+            '</section>'
+            if other_links
             else ""
         )
     )
@@ -176,7 +201,7 @@ def render_mobile_landing(
     .landing-more {{ margin-top:12px; border:1px solid var(--line); border-radius:8px; background:var(--panel); }}
     .landing-more summary {{ min-height:48px; display:flex; align-items:center; padding:10px 14px; cursor:pointer; font-weight:750; }}
     .landing-more nav {{ padding:0 10px 10px; }}
-    .landing-link {{ min-height:52px; display:flex; align-items:center; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); text-decoration:none; }}
+    .landing-link {{ min-height:58px; display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 14px; border:1px solid var(--line); border-radius:8px; background:var(--panel); color:var(--text); text-decoration:none; font-weight:700; }}\n    .landing-link small {{ color:var(--muted); font-size:.72rem; font-weight:650; text-transform:uppercase; letter-spacing:.04em; }}
     .landing-link:hover {{ border-color:var(--focus); }}
     .balance {{ margin:0 0 12px; padding:12px 14px; border:1px solid var(--line); border-radius:8px; display:grid; gap:3px; }}
     .balance span {{ font-size:1.15rem; }} .balance small {{ color:var(--muted); }}
@@ -203,7 +228,7 @@ def render_mobile_landing(
   <main>
     <a class="brand" href="{_esc(navigation.get('canonical_home') or '/mobile-launcher')}" aria-label="CSS Home"><img src="{_esc(brand.asset_url('logo'))}" alt="" aria-hidden="true"><span>CSS</span></a>
     <h1>{_esc(title)}</h1>
-    <p>Choose a read-only CSS destination. Mission Control is available but is not the default landing surface.</p>
+    <p>CSS Mobile command launcher. Choose a destination below; Mission Control remains available without replacing this landing screen.</p>
     {balance_html}
     {operator_html}
     <section class="theme-control" aria-label="Appearance">
