@@ -15,6 +15,7 @@ from dashboard.mission_control.pages.portfolio import render as render_portfolio
 from dashboard.mission_control.pages.market_intelligence import render as render_market_intelligence
 from dashboard.mission_control.pages.certification_readiness import render as render_certification_readiness
 from dashboard.mission_control.pages.audit_explainability import render as render_audit_explainability
+from dashboard.mission_control.pages.asset_classes import render as render_asset_classes
 from dashboard.mission_control.pages.production_readiness import render as render_production_readiness
 from dashboard.enterprise_shell.mobile_landing import render_mobile_landing
 from dashboard.mission_control.pages.options_income import render as render_options_income
@@ -1803,3 +1804,41 @@ def test_executive_overview_mobile_hides_forensic_payloads() -> None:
     assert "provenance" not in body
     assert "account_context" not in body
     assert "<details open" not in body
+
+
+def test_asset_classes_mobile_hub_exposes_all_asset_destinations() -> None:
+    body = render_asset_classes({
+        "portfolio": {
+            "asset_allocation": {
+                "EQUITIES": 1,
+                "CRYPTO": 2,
+                "FX": 3,
+                "FUTURES": 4,
+                "OPTIONS": 5,
+            }
+        },
+        "market_intelligence": {"market_regime": "DISABLED"},
+        "learning": {"asset_class_rankings": []},
+        "safety": {"live_trading_blocked": True},
+    })
+    assert 'aria-label="Asset Classes"' in body
+    for label in (
+        "Equities / ETFs",
+        "Crypto",
+        "FX",
+        "Futures",
+        "Options",
+        "Other Derivatives",
+    ):
+        assert label in body
+    assert 'href="/mission-control/options-income"' in body
+    assert "Open Options Income workbench" in body
+    assert "Dedicated read-only asset-class destination" in body
+    assert "<form" not in body
+    assert "method=" not in body
+
+
+def test_asset_classes_are_registered_in_mission_control_navigation() -> None:
+    entries = {section.key: section for section in MISSION_CONTROL_SECTIONS}
+    assert "asset_classes" in entries
+    assert entries["asset_classes"].route == "/mission-control/asset-classes"
