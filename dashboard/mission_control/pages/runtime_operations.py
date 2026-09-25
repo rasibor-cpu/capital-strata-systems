@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, section
+from dashboard.mission_control.pages._components import detail_table, metric_grid, page_header, section, warning_banner
 
 
 def _anchor_panel(anchor: str, content: str) -> str:
@@ -41,8 +41,35 @@ def render(state: dict) -> str:
     metrics = section(state, "system_metrics")
     consistency = section(state, "source_consistency")
     subsystem = runtime.get("subsystem_health", {}) if isinstance(runtime.get("subsystem_health"), dict) else {}
+    freshness_token = str(runtime.get("source_freshness") or runtime.get("heartbeat_status") or "UNAVAILABLE").strip().upper()
+    source_status = str(runtime.get("source_status") or "UNAVAILABLE").strip().upper()
+    stale_or_unavailable = freshness_token in {"STALE", "EXPIRED", "UNAVAILABLE", "UNKNOWN"} or source_status == "RED"
+    source_summary = {
+        "selected_source": runtime.get("selected_source", "UNAVAILABLE"),
+        "authoritative_source": runtime.get("authoritative_source", runtime.get("source", "UNAVAILABLE")),
+        "fallback_source": runtime.get("fallback_source", "UNAVAILABLE"),
+        "available_sources": runtime.get("available_sources", []),
+        "source_freshness": runtime.get("source_freshness", "UNAVAILABLE"),
+        "source_confidence": runtime.get("source_confidence", "UNAVAILABLE"),
+        "source_status": runtime.get("source_status", "UNAVAILABLE"),
+        "source_disagreement": runtime.get("source_disagreement", False),
+        "supervisor_state": runtime.get("supervisor_state", "UNAVAILABLE"),
+        "heartbeat_status": runtime.get("heartbeat_status", "UNAVAILABLE"),
+        "heartbeat_age_seconds": runtime.get("heartbeat_age_seconds", "UNAVAILABLE"),
+    }
     return (
         page_header("Runtime Operations", "Read-only runtime cycle, supervisor, dependency, API, dashboard, mobile, and certification visibility.")
+        + (
+            warning_banner(
+                "AUTHORITATIVE RUNTIME EVIDENCE IS STALE OR UNAVAILABLE — runtime conclusions remain fail-closed until the canonical supervisor/source refreshes.",
+                status="warn",
+            )
+            if stale_or_unavailable
+            else warning_banner(
+                "Authoritative runtime evidence is current enough for read-only operational visibility.",
+                status="good",
+            )
+        )
         + '<nav class="mc-page-jump" aria-label="Runtime Operations sections">'
           '<a href="#mc-runtime-health">Health</a>'
           '<a href="#mc-runtime-metrics">Metrics</a>'
@@ -63,14 +90,15 @@ def render(state: dict) -> str:
             (
                 ("Engine Mode", runtime.get("engine_mode"), _metric_status(runtime.get("engine_mode"))),
                 ("Cycle", runtime.get("cycle"), "neutral"),
-                ("Heartbeat At", runtime.get("heartbeat"), "neutral"),
-                ("Source", runtime.get("source"), "neutral"),
+                ("Heartbeat At", runtime.get("heartbeat"), "warn" if stale_or_unavailable else "neutral"),
+                ("Source", runtime.get("authoritative_source", runtime.get("source")), "warn" if stale_or_unavailable else "neutral"),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Runtime Operations secondary metrics",
         )
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-runtime-health", detail_table("Runtime Snapshot", _runtime_snapshot(runtime)))
+        + _anchor_panel("mc-runtime-source", detail_table("Runtime Source & Freshness", source_summary))
         + _anchor_panel("mc-runtime-metrics", detail_table("System Metrics", {
             "source_system": metrics.get("source_selected"),
             "active_broker": metrics.get("active_broker"),
