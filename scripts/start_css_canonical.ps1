@@ -44,11 +44,11 @@ foreach ($proc in $existingCanonical) {
 # Retire it only when both process identity and HTTP identity prove it is ours.
 $portListeners = @(Get-NetTCPConnection -LocalPort 8765 -State Listen -ErrorAction SilentlyContinue)
 if ($portListeners.Count -gt 0) {
-    $ownerPids = @($portListeners | Select-Object -ExpandProperty OwningProcess -Unique)
+    $listenerOwnerPids = @($portListeners | Select-Object -ExpandProperty OwningProcess -Unique)
     $safeStandaloneOwners = @()
 
-    foreach ($ownerPid in $ownerPids) {
-        $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$ownerPid" -ErrorAction SilentlyContinue
+    foreach ($listenerOwnerPid in $listenerOwnerPids) {
+        $owner = Get-CimInstance Win32_Process -Filter "ProcessId=$listenerOwnerPid" -ErrorAction SilentlyContinue
         if ($null -eq $owner -or -not $owner.CommandLine) { continue }
 
         $isPython = [string]$owner.Name -match '^(?i)pythonw?(\d+(\.\d+)*)?\.exe$'
@@ -79,7 +79,7 @@ if ($portListeners.Count -gt 0) {
 
     if (
         $endpointIdentifiedAsCss -and
-        $safeStandaloneOwners.Count -eq $ownerPids.Count -and
+        $safeStandaloneOwners.Count -eq $listenerOwnerPids.Count -and
         $safeStandaloneOwners.Count -gt 0
     ) {
         foreach ($owner in $safeStandaloneOwners) {
