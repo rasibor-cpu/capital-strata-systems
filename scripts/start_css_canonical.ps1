@@ -9,11 +9,27 @@ $Launcher = Join-Path $RepoRoot "launcher\css_runtime_launcher.py"
 $LogDir = Join-Path $RepoRoot "runtime\logs"
 $StdOut = Join-Path $LogDir "css_canonical_runtime.out.log"
 $StdErr = Join-Path $LogDir "css_canonical_runtime.err.log"
+$BootstrapLog = Join-Path $LogDir "css_canonical_runtime.bootstrap.log"
+
+New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
+
+trap {
+    $message = @(
+        "timestamp=$([DateTimeOffset]::Now.ToString('o'))",
+        "message=$($_.Exception.Message)",
+        "type=$($_.Exception.GetType().FullName)",
+        "position=$($_.InvocationInfo.PositionMessage)",
+        "script=$($_.InvocationInfo.ScriptName)",
+        "line=$($_.InvocationInfo.ScriptLineNumber)"
+    ) -join [Environment]::NewLine
+    Set-Content -Path $BootstrapLog -Value $message -Encoding UTF8
+    Write-Error $message -ErrorAction Continue
+    exit 1
+}
 
 if (-not (Test-Path $Python)) { throw "CSS virtual environment Python not found: $Python" }
 if (-not (Test-Path $Launcher)) { throw "Canonical CSS runtime launcher not found: $Launcher" }
 
-New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 Set-Location $RepoRoot
 
 # If the canonical runtime is already running under the repo venv, do nothing.
