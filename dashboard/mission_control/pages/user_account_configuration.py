@@ -85,6 +85,11 @@ def render(state: dict) -> str:
     <label>Independent trade platform fee rate / amount<input name="independent_trade_fee_rate" inputmode="decimal" value="0"></label>
     <label><input type="checkbox" name="broker_charges_pass_through" value="true"> Pass broker/exchange charges through separately</label>
     <label>Agreement version<input name="agreement_version" required placeholder="e.g. CSS-TERMS-2026-09"></label>
+    <label><input type="checkbox" name="margin_enabled" value="true"> Configure margin facility (pending verification and user set-off)</label>
+    <label>Margin limit<input name="margin_limit" inputmode="decimal" value="0"></label>
+    <label>Margin currency<input name="margin_currency" value="USD" maxlength="8"></label>
+    <label>Linked credit account alias<input name="linked_credit_account_alias" placeholder="e.g. CASH-USD-01"></label>
+    <label>Set-off form version<input name="setoff_form_version" placeholder="e.g. CSS-SETOFF-2026-09"></label>
     <button type="submit">Save Configuration</button>
   </form>
   <p id="mc-user-config-result" class="mc-muted" aria-live="polite"></p>
