@@ -9,6 +9,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterable
 
+from backend.accounting.retention_policy import canonical_record_hash, retention_policy_payload
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEDGER_FILE = PROJECT_ROOT / "artifacts" / "css_account_ledger.jsonl"
 
@@ -154,7 +156,9 @@ class AccountStatementService:
             "symbol": str(symbol or "").strip().upper(),
             "metadata": dict(metadata or {}),
             "recorded_at": _utc_now(),
+            "dispute_hold": False,
         }
+        row["record_hash"] = canonical_record_hash(row)
         self.ledger_file.parent.mkdir(parents=True, exist_ok=True)
         with self.ledger_file.open("a", encoding="utf-8") as fh:
             fh.write(json.dumps(row, sort_keys=True) + "\n")
@@ -221,6 +225,7 @@ class AccountStatementService:
             "credit_total": format(credit_total, "f"),
             "net_movement": format(credit_total - debit_total, "f"),
             "generated_at": _utc_now(),
+            "retention_policy": retention_policy_payload(),
             "read_only": True,
         }
 
