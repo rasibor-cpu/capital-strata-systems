@@ -194,4 +194,4 @@ def test_production_readiness_dashboard_is_admin_only_and_read_only() -> None:
     denied = render_mission_control_shell({}, active_section="production_readiness")
     assert "Administrator authentication is required" in denied
     assert resolve_section_slug("production-readiness").key == "production_readiness"
-    assert len(MISSION_CONTROL_SECTIONS) == 16
+    assert len(MISSION_CONTROL_SECTIONS) == 20
