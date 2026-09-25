@@ -29,11 +29,11 @@ def _tier_summary(rows: object) -> dict[str, str]:
         if not isinstance(row, dict) or row.get("broker") == "PAPER":
             continue
         broker = str(row.get("broker") or "UNAVAILABLE")
-        role = str(row.get("role") or row.get("broker_role") or "UNAVAILABLE")
-        state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE")
-        readiness = str(row.get("readiness") or "UNAVAILABLE")
-        certification = str(row.get("certification") or "UNAVAILABLE")
-        execution = str(row.get("execution") or "BLOCKED")
+        role = str(row.get("role") or row.get("broker_role") or "UNAVAILABLE").replace("_", " ")
+        state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
+        readiness = str(row.get("readiness") or "UNAVAILABLE").replace("_", " ")
+        certification = str(row.get("certification") or "UNAVAILABLE").replace("_", " ")
+        execution = str(row.get("execution") or "BLOCKED").replace("_", " ")
         result[broker] = (
             f"{role} · {state} · readiness {readiness} · "
             f"certification {certification} · execution {execution}"
