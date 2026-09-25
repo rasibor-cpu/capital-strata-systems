@@ -6441,4 +6441,15 @@ app.include_router(launcher_router)
 app.mount("/static", StaticFiles(directory=os.path.join(os.path.dirname(__file__), "static")), name="static")
 
 if __name__ == "__main__":
+    managed = os.environ.get("CSS_CANONICAL_RUNTIME_MANAGED", "").strip() == "1"
+    standalone_override = os.environ.get("CSS_ALLOW_STANDALONE_MOBILE", "").strip() == "1"
+    if not managed and not standalone_override:
+        print(
+            "Standalone CSS Mobile startup is blocked by default. "
+            "Start CSS with .venv\\Scripts\\python.exe launcher\\css_runtime_launcher.py "
+            "so the canonical supervisor heartbeat remains authoritative and current. "
+            "For deliberate development-only standalone testing, set "
+            "CSS_ALLOW_STANDALONE_MOBILE=1."
+        )
+        raise SystemExit(2)
     uvicorn.run(app, host=LauncherConfig.HOST, port=LauncherConfig.PORT)
