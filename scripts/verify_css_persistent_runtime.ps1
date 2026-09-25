@@ -7,6 +7,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 $StateFile = Join-Path $RepoRoot "runtime\supervisor\css_runtime_supervisor_state.json"
 $ExpectedPython = Join-Path $RepoRoot ".venv\Scripts\python.exe"
+$StartScript = Join-Path $RepoRoot "scripts\start_css_canonical.ps1"
 $StdOut = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.out.log"
 $StdErr = Join-Path $RepoRoot "runtime\logs\css_canonical_runtime.err.log"
 $Failures = New-Object System.Collections.Generic.List[string]
@@ -21,6 +22,25 @@ if (Test-Path $ExpectedPython) {
     Pass "Repository virtual-environment Python exists"
 } else {
     Fail "Repository virtual-environment Python is missing: $ExpectedPython"
+}
+
+if (Test-Path $StartScript) {
+    $tokens = $null
+    $parseErrors = $null
+    [void][System.Management.Automation.Language.Parser]::ParseFile(
+        $StartScript,
+        [ref]$tokens,
+        [ref]$parseErrors
+    )
+    if (@($parseErrors).Count -eq 0) {
+        Pass "Canonical startup wrapper parses successfully"
+    } else {
+        foreach ($parseError in @($parseErrors)) {
+            Fail ("Canonical startup wrapper parse error: " + $parseError.Message)
+        }
+    }
+} else {
+    Fail "Canonical startup wrapper is missing: $StartScript"
 }
 
 # Scheduled task
