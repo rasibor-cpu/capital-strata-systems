@@ -72,6 +72,9 @@ def render(state: dict) -> str:
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-runtime-health", detail_table("Runtime Snapshot", _runtime_snapshot(runtime)))
         + _anchor_panel("mc-runtime-metrics", detail_table("System Metrics", {
+            "source_system": metrics.get("source_selected"),
+            "active_broker": metrics.get("active_broker"),
+            "broker_mode": metrics.get("broker_mode"),
             "cpu": metrics.get("cpu"),
             "memory": metrics.get("memory"),
             "runtime_latency": metrics.get("runtime_latency"),
@@ -82,6 +85,34 @@ def render(state: dict) -> str:
             "runtime_age": metrics.get("runtime_age"),
             "heartbeat_age": metrics.get("heartbeat_age"),
         }))
+        + '<section class="mc-panel mc-section-anchor" id="mc-client-system-metrics">'
+          '<h2>Current Device / Browser Metrics</h2>'
+          '<p class="mc-muted">Automatically detected from the device and browser currently operating CSS. Availability depends on browser support.</p>'
+          '<div class="mc-table-wrap"><table><tbody id="mc-client-metrics-body">'
+          '<tr><th>device</th><td>Detecting…</td></tr></tbody></table></div></section>'
+        + """<script>
+(function () {
+  const body = document.getElementById('mc-client-metrics-body');
+  if (!body) return;
+  const nav = window.navigator || {};
+  const connection = nav.connection || nav.mozConnection || nav.webkitConnection || {};
+  const rows = {
+    platform: nav.userAgentData?.platform || nav.platform || 'UNAVAILABLE',
+    browser_user_agent: nav.userAgent || 'UNAVAILABLE',
+    logical_processors: nav.hardwareConcurrency || 'UNAVAILABLE',
+    device_memory_gb: nav.deviceMemory || 'UNAVAILABLE',
+    online: typeof nav.onLine === 'boolean' ? nav.onLine : 'UNAVAILABLE',
+    network_type: connection.effectiveType || 'UNAVAILABLE',
+    downlink_mbps: connection.downlink || 'UNAVAILABLE',
+    viewport: window.innerWidth + ' × ' + window.innerHeight,
+    screen: window.screen ? (window.screen.width + ' × ' + window.screen.height) : 'UNAVAILABLE',
+    pixel_ratio: window.devicePixelRatio || 1
+  };
+  body.innerHTML = Object.entries(rows).map(([k,v]) =>
+    '<tr><th>' + String(k).replaceAll('_',' ') + '</th><td>' + String(v) + '</td></tr>'
+  ).join('');
+})();
+</script>"""
         + _anchor_panel("mc-runtime-subsystems", detail_table("Subsystem Health", subsystem))
         + _anchor_panel("mc-runtime-events", detail_table("Event Stream", {
             "event_count": event_stream.get("event_count"),
