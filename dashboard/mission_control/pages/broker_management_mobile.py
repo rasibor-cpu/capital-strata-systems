@@ -47,6 +47,9 @@ def render(state: dict) -> str:
     safety = brokers.get("safety") if isinstance(brokers.get("safety"), dict) else {}
     roles = brokers.get("primary_roles") if isinstance(brokers.get("primary_roles"), dict) else {}
     broker_list = brokers.get("broker_list") if isinstance(brokers.get("broker_list"), list) else []
+    operator_selection = brokers.get("operator_selection") if isinstance(brokers.get("operator_selection"), dict) else {}
+    auth = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
+    can_configure = str(auth.get("role") or "").upper() in {"SUPER_USER", "ADMIN"}
     telemetry = section(state, "broker_telemetry")
     runtime = section(state, "enterprise_broker_runtime")
     balance = section(state, "broker_balance_summary")
@@ -61,7 +64,7 @@ def render(state: dict) -> str:
             "Sanitized Tier-1 broker posture, account readiness, and advisory-only operating state.",
         )
         + warning_banner(
-            "Broker selection and onboarding controls are disabled. Execution remains blocked.",
+            "Broker and broker-mode preference can be configured by an authorized administrator. Selection does not arm execution; onboarding mutations remain disabled and execution stays blocked.",
             status="bad",
         )
         + '<nav class="mc-page-jump" aria-label="Broker Management sections">'
@@ -90,6 +93,39 @@ def render(state: dict) -> str:
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Broker Management secondary metrics",
         )
+        + (
+            '<section class="mc-panel mc-section-anchor" id="mc-broker-selection-config">'
+            '<h2>Broker &amp; Mode Selection</h2>'
+            '<p class="mc-muted">This records the operator preference for the next safe reconciliation. It does not arm or authorize broker execution.</p>'
+            '<form id="mc-broker-selection-form" class="mc-filter-form">'
+            '<label>Broker<select name="broker" required>'
+            '<option value="COINBASE">Coinbase</option><option value="OANDA">OANDA</option>'
+            '<option value="QUESTRADE">Questrade</option><option value="BINANCE">Binance</option>'
+            '</select></label>'
+            '<label>Broker mode<select name="broker_mode" required>'
+            '<option value="PAPER">Paper</option><option value="LIVE_READ_ONLY">Live read-only</option>'
+            '</select></label>'
+            '<button type="submit">Save Broker Preference</button>'
+            '</form><p id="mc-broker-selection-result" class="mc-muted" aria-live="polite"></p>'
+            '<script>'
+            "document.getElementById('mc-broker-selection-form')?.addEventListener('submit', async (ev) => {"
+            "ev.preventDefault(); const result=document.getElementById('mc-broker-selection-result');"
+            "const body=new URLSearchParams(new FormData(ev.currentTarget));"
+            "try { const response=await fetch('/operator-config/broker-selection',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/x-www-form-urlencoded','X-Requested-With':'XMLHttpRequest'},body});"
+            "const data=await response.json(); if(!response.ok) throw new Error(data.detail||'Save failed');"
+            "result.textContent='Broker preference saved for next safe reconciliation. Execution remains blocked.';"
+            "} catch(err){result.textContent=String(err.message||err);} });"
+            '</script></section>'
+            if can_configure else
+            '<section class="mc-panel"><h2>Broker &amp; Mode Selection</h2><p class="mc-muted">Administrator privilege is required to change broker preferences.</p></section>'
+        )
+        + _anchor_panel("mc-broker-selection-state", detail_table("Operator Selection Preference", {
+            "selected_broker": operator_selection.get("selected_broker") or "NOT_CONFIGURED",
+            "broker_mode": operator_selection.get("broker_mode") or "NOT_CONFIGURED",
+            "configured_at": operator_selection.get("configured_at") or "UNAVAILABLE",
+            "runtime_application": operator_selection.get("runtime_application") or "UNAVAILABLE",
+            "execution_allowed": False,
+        }))
         + '<div class="mc-operator-stack">'
         + _anchor_panel("mc-broker-status", detail_table("Broker Status Snapshot", {
             "selected_broker": active.get("selected_broker"),
@@ -109,7 +145,7 @@ def render(state: dict) -> str:
             "certification": certification.get("outcome") or "NOT_CERTIFIED",
         }))
         + _anchor_panel("mc-broker-safety", detail_table("Broker Safety Snapshot", {
-            "selection_editing": "DISABLED",
+            "selection_editing": "CONTROLLED_CONFIG_ONLY",
             "onboarding_changes": "DISABLED",
             "execution": "BLOCKED",
             "safety_status": safety.get("status") or safety.get("execution") or "FAIL_CLOSED",
