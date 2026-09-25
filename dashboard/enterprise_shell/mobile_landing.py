@@ -191,6 +191,9 @@ def render_mobile_landing(
     .theme-select {{ min-height:40px; padding:6px 10px; border:1px solid var(--line); border-radius:7px; background:var(--panel-2); color:var(--text); font:inherit; font-weight:650; }}
     .theme-select:focus-visible {{ outline:3px solid var(--focus); outline-offset:2px; }}
     a:focus-visible {{ outline:3px solid var(--focus); outline-offset:2px; }}
+    .logout-form {{ margin-top:16px; }}
+    .logout-btn {{ width:100%; min-height:50px; border:1px solid #b95e5e; border-radius:8px; background:#3a2024; color:#ffe0e0; font:inherit; font-weight:800; cursor:pointer; }}
+    .logout-btn:focus-visible {{ outline:3px solid var(--focus); outline-offset:2px; }}
     footer {{ margin-top:20px; color:var(--muted); font-size:.85rem; }}
     @media(max-width:520px) {{ nav {{ grid-template-columns:1fr; }} }}
   </style>
@@ -211,6 +214,7 @@ def render_mobile_landing(
       </select>
     </section>
     {links}
+    <form class="logout-form" method="post" action="/logout"><button class="logout-btn" type="submit">Log out / Exit</button></form>
     <footer>Execution remains DISABLED / BLOCKED / FAIL_CLOSED / ADVISORY_ONLY.</footer>
   </main>
   {service_worker_script}
