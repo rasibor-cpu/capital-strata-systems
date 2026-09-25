@@ -1202,7 +1202,11 @@ def get_runtime_summary() -> Dict[str, Any]:
         summary["supervisor_cycles_completed"] = tele.get("supervisor_cycles_completed")
         summary["display_cycle"] = tele.get("display_cycle")
         if summary["current_cycle"] is None:
-            summary["current_cycle"] = tele.get("session_cycle")
+            telemetry_cycle = tele.get("session_cycle")
+            if isinstance(telemetry_cycle, int):
+                summary["current_cycle"] = telemetry_cycle
+            elif isinstance(telemetry_cycle, str) and telemetry_cycle.strip().isdigit():
+                summary["current_cycle"] = int(telemetry_cycle.strip())
         summary["telemetry"] = tele
     except Exception:
         summary["supervisor_cycles_completed"] = None
