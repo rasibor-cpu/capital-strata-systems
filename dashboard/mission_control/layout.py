@@ -187,14 +187,23 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
     selection = _mapping(brokers.get("operator_selection"))
     auth = _mapping(state_dict.get("authorization_context"))
     rows = brokers.get("broker_list") if isinstance(brokers.get("broker_list"), list) else []
-    selected = str(
-        selection.get("selected_broker")
-        or active.get("selected_broker")
-        or _mapping(state_dict.get("platform")).get("selected_broker")
-        or "UNAVAILABLE"
+    platform = _mapping(state_dict.get("platform"))
+    runtime = _mapping(state_dict.get("runtime"))
+    runtime_stale = (
+        str(runtime.get("heartbeat_status") or "").strip().upper()
+        in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}
+        or str(platform.get("runtime_mode") or "").strip().upper() == "DISABLED"
+    )
+    preferred = str(selection.get("selected_broker") or "").strip().upper()
+    active_selected = str(
+        active.get("selected_broker")
+        or platform.get("selected_broker")
+        or ""
     ).strip().upper()
+    selected = preferred or ("" if runtime_stale else active_selected) or "UNAVAILABLE"
     selected_mode = str(selection.get("broker_mode") or active.get("broker_mode") or "PAPER").strip().upper()
     can_select = bool(auth.get("authenticated")) and bool(auth.get("active"))
+    broker_label = "Preferred Broker" if preferred or runtime_stale else "Broker"
 
     options = []
     selectable_count = 0
@@ -217,14 +226,14 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         )
 
     if not can_select:
-        return _badge("Broker", selected or "NONE")
+        return _badge(broker_label, selected or "NONE")
 
     paper_selected = " selected" if selected_mode == "PAPER" else ""
     read_selected = " selected" if selected_mode == "LIVE_READ_ONLY" else ""
     submit_disabled = " disabled" if selectable_count == 0 else ""
     return (
         '<details class="mc-broker-quick" data-mc-status="broker">'
-        '<summary class="mc-badge neutral"><span class="mc-badge-label">Broker</span>'
+        '<summary class="mc-badge neutral"><span class="mc-badge-label">' + escape(broker_label) + '</span>'
         '<span class="mc-badge-sep">: </span><span class="mc-badge-value">' + escape(selected or "NONE") + '</span>'
         '<span class="mc-broker-caret" aria-hidden="true"> ▾</span></summary>'
         '<div class="mc-broker-quick-popover">'
@@ -265,6 +274,8 @@ def _global_balance_bar(state_dict: Mapping[str, Any]) -> str:
             return "UNAVAILABLE"
         value = row.get("value")
         currency = str(row.get("currency") or "").strip().upper()
+        if currency in {"", "UNAVAILABLE", "UNKNOWN", "N/A", "NONE"}:
+            return str(value)
         return f"{value} {currency}".strip()
 
     currency_parts = []
