@@ -1283,6 +1283,18 @@ def restore_login_session(users: Optional[Dict[str, Any]] = None) -> Optional[Di
         invalidate_login_session()
         return None
 
+    if not recovery_is_configured(user_record):
+        AuthMetrics.rejected_restored_sessions += 1
+        record_auth_audit_event(
+            "restored_session_rejection",
+            user_id,
+            "FAIL",
+            "recovery_setup_incomplete",
+            auth_source="restored",
+        )
+        invalidate_login_session()
+        return None
+
     # Derive role and permission info from user registry, never from persisted payload alone
     registry_role = str(user_record.get("role", "VIEWER")).strip().upper()
     persisted_role = str(data["role"]).strip().upper()
