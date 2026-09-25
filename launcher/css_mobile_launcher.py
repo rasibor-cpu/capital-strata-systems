@@ -776,6 +776,11 @@ def build_launcher_frontend_state(
     broker_parity = broker_parity_payload(broker_startup)
     coinbase_validation = get_launcher_coinbase_live_validation_feed()
     oanda_validation = get_launcher_oanda_live_validation_feed()
+    questrade_activation = _QUESTRADE_MISSION_CONTROL_ACTIVATION.status()
+    questrade_token_store_present = bool(
+        _questrade_refresh_token_store_path()
+        and os.path.exists(_questrade_refresh_token_store_path())
+    )
     runtime_certification_snapshots = _launcher_runtime_certification_snapshots(
         runtime.get("current_cycle", 0),
         coinbase_validation=coinbase_validation,
@@ -920,6 +925,17 @@ def build_launcher_frontend_state(
             "rc1_operational_dashboard": dict(rc1_operational),
             "coinbase_live_validation": dict(coinbase_validation),
             "oanda_live_validation": dict(oanda_validation),
+            "questrade_read_only_status": {
+                "status": str(questrade_activation.get("status") or "DISABLED"),
+                "reason": str(questrade_activation.get("reason") or "NOT_ACTIVATED"),
+                "attempted": bool(questrade_activation.get("attempted", False)),
+                "provider_available": bool(questrade_activation.get("provider_available", False)),
+                "secure_token_store_present": questrade_token_store_present,
+                "execution_allowed": False,
+                "live_trading_blocked": True,
+                "broker_execution_armed": False,
+                "advisory_only": True,
+            },
             "broker_operational_status": {
                 "selected_broker": str(broker).upper(),
                 "selected": dict(
