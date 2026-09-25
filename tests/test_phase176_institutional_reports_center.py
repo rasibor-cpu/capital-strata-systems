@@ -83,7 +83,7 @@ def test_format_claims_match_implementation() -> None:
 def test_navigation_includes_reports_and_count_16() -> None:
     keys = [s.key for s in MISSION_CONTROL_SECTIONS]
     assert "reports_center" in keys
-    assert len(MISSION_CONTROL_SECTIONS) == 16
+    assert len(MISSION_CONTROL_SECTIONS) == 20
 
 
 def test_unsafe_filters_rejected() -> None:
