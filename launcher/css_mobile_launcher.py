@@ -382,7 +382,7 @@ document.querySelectorAll('[data-toggle-secret]').forEach(btn=>{
   });
 });
 </script>
-</body></html>""".replace("__ROWS__", rows.join("")).replace("__NOTICE__", notice)
+</body></html>""".replace("__ROWS__", "".join(rows)).replace("__NOTICE__", notice)
 
 
 
