@@ -7,9 +7,37 @@ from dashboard.mission_control.pages._components import (
     detail_table,
     metric_grid,
     page_header,
-    split_panels,
     warning_banner,
 )
+
+
+def _anchor_panel(anchor: str, content: str) -> str:
+    return f'<div class="mc-section-anchor" id="{anchor}">{content}</div>'
+
+
+def _evidence_panel(anchor: str, title: str, content: str) -> str:
+    return (
+        f'<div class="mc-section-anchor mc-evidence-disclosure" id="{anchor}">'
+        f'<details><summary>{title}</summary>{content}</details>'
+        '</div>'
+    )
+
+
+def _count(value: object) -> object:
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value)
+    return "EVIDENCE_MISSING"
+
+
+def _risk_status(risk: dict, key: str) -> str:
+    if key not in risk:
+        return "EVIDENCE_MISSING"
+    value = risk.get(key)
+    try:
+        count = int(value)
+    except (TypeError, ValueError):
+        return "EVIDENCE_MISSING"
+    return "PASS" if count == 0 else "WARNING"
 
 
 def render(state: dict) -> str:
@@ -39,25 +67,57 @@ def render(state: dict) -> str:
             "Enterprise OAuth",
             "Registration-only OAuth authority. No authorization, refresh, redirect handling, browser launch, or execution.",
         )
+        + '<nav class="mc-page-jump" aria-label="Enterprise OAuth sections">'
+          '<a href="#mc-oauth-status">Status</a>'
+          '<a href="#mc-oauth-risk">Risk</a>'
+          '<a href="#mc-oauth-policy">Policy</a>'
+          '<a href="#mc-oauth-evidence">Evidence</a>'
+          '</nav>'
         + metric_grid(
             (
-                ("Providers", len(providers), "neutral"),
-                ("Registrations", len(authorization), "neutral"),
-                ("High Risk", risk.get("high_risk_count", 0), "warning"),
-                ("Certification", certification.get("outcome", "NOT_CERTIFIED"), certification.get("outcome", "neutral")),
+                ("Providers", _count(providers), "neutral"),
+                ("Registrations", _count(authorization), "neutral"),
+                ("Certification", certification.get("outcome", "NOT_CERTIFIED"), certification.get("outcome", "NOT_CERTIFIED")),
                 ("Execution", "BLOCKED", "blocked"),
-            )
+            ),
+            css_class="mc-metric-grid mc-metric-grid-priority mc-oauth-priority",
+            aria_label="Enterprise OAuth priority",
         )
-        + split_panels(
-            detail_table("Provider Inventory", providers),
-            detail_table("Authorization Status", authorization),
-            detail_table("Scope Summary", scopes),
-            detail_table("Expiry Forecast", expiry),
-            detail_table("Rotation Readiness", rotation),
-            detail_table("Risk", risk),
-            detail_table("Policy", policy),
-            detail_table("Audit", audit),
+        + metric_grid(
+            (
+                ("High Risk", risk.get("high_risk_count", "EVIDENCE_MISSING"), _risk_status(risk, "high_risk_count")),
+                ("Expiry Forecast", _count(expiry), "neutral"),
+                ("Audit Events", _count(audit), "neutral"),
+                ("Scope Groups", _count(scopes), "neutral"),
+            ),
+            css_class="mc-metric-grid mc-metric-grid-secondary",
+            aria_label="Enterprise OAuth secondary metrics",
         )
+        + '<div class="mc-operator-stack">'
+        + _anchor_panel("mc-oauth-status", detail_table("OAuth Governance Snapshot", {
+            "provider_count": _count(providers),
+            "registration_count": _count(authorization),
+            "certification": certification.get("outcome", "NOT_CERTIFIED"),
+            "execution": "BLOCKED",
+        }))
+        + _anchor_panel("mc-oauth-risk", detail_table("OAuth Risk Snapshot", {
+            "high_risk_count": risk.get("high_risk_count", "EVIDENCE_MISSING"),
+            "expiry_forecast_count": _count(expiry),
+            "audit_event_count": _count(audit),
+            "rotation_readiness": rotation.get("status", rotation.get("outcome", "EVIDENCE_MISSING")),
+        }))
+        + _anchor_panel("mc-oauth-policy", detail_table("OAuth Policy Snapshot", {
+            "policy_status": policy.get("status", policy.get("outcome", "EVIDENCE_MISSING")),
+            "scope_group_count": _count(scopes),
+            "authorization_flow_enabled": "DISABLED",
+            "refresh_flow_enabled": "DISABLED",
+            "browser_launch_enabled": "DISABLED",
+        }))
+        + _evidence_panel("mc-oauth-evidence", "Show provider and registration metadata", detail_table("Provider Inventory", providers) + detail_table("Authorization Status", authorization))
+        + _evidence_panel("mc-oauth-scope", "Show scope and expiry metadata", detail_table("Scope Summary", scopes) + detail_table("Expiry Forecast", expiry))
+        + _evidence_panel("mc-oauth-rotation", "Show rotation and risk metadata", detail_table("Rotation Readiness", rotation) + detail_table("Risk", risk))
+        + _evidence_panel("mc-oauth-governance", "Show policy and audit metadata", detail_table("Policy", policy) + detail_table("Audit", audit))
+        + '</div>'
     )
 
 
