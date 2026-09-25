@@ -593,17 +593,25 @@ def _coerce_mobile_trade_quantity(value: Any) -> float:
 
 
 def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, Any]:
-    symbol = str(payload.get("symbol", "")).strip().upper()
+    symbol = str(payload.get("symbol") or payload.get("instrument") or "").strip().upper()
     asset_class = str(payload.get("asset_class", "")).strip().upper()
     side = str(payload.get("side", "")).strip().upper()
+    broker = str(payload.get("broker", "")).strip().upper()
     broker_mode = str(payload.get("broker_mode", "paper")).strip().lower()
     paper_only = str(payload.get("paper_only", "true")).strip().lower()
     broker_execution_allowed = str(
         payload.get("broker_execution_allowed", "false")
     ).strip().lower()
+    currency = str(payload.get("currency") or "USD").strip().upper()
+    tenor = str(payload.get("tenor") or "").strip().upper()
+    order_type = str(payload.get("order_type") or "MARKET").strip().upper()
+    value_date = str(payload.get("value_date") or "").strip()
+    settlement_date = str(payload.get("settlement_date") or value_date).strip()
+    time_in_force = str(payload.get("time_in_force") or "DAY").strip().upper()
+    notes = str(payload.get("notes") or "").strip()[:500]
 
     if not symbol:
-        raise ValueError("symbol is required")
+        raise ValueError("instrument is required")
 
     if not asset_class:
         raise ValueError("asset_class is required")
@@ -611,7 +619,27 @@ def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, An
     if side not in _VALID_MOBILE_TRADE_SIDES:
         raise ValueError("side must be BUY or SELL")
 
+    if not broker:
+        raise ValueError("broker is required")
+
     quantity = _coerce_mobile_trade_quantity(payload.get("quantity"))
+    try:
+        amount = float(payload.get("amount") or 0)
+    except (TypeError, ValueError):
+        raise ValueError("amount must be numeric")
+    if amount < 0:
+        raise ValueError("amount cannot be negative")
+
+    rate_raw = payload.get("rate")
+    if rate_raw in (None, ""):
+        rate = None
+    else:
+        try:
+            rate = float(rate_raw)
+        except (TypeError, ValueError):
+            raise ValueError("rate must be numeric")
+        if rate < 0:
+            raise ValueError("rate cannot be negative")
 
     if broker_mode == "live":
         raise ValueError("live mode is not allowed for mobile paper trade requests")
@@ -624,13 +652,27 @@ def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, An
 
     return {
         "timestamp_utc": _utc_iso_z(),
-        "source": "mobile_dashboard",
+        "source": "mission_control_trade_ticket",
         "paper_only": True,
+        "broker": broker,
+        "broker_mode": "PAPER",
         "symbol": symbol,
+        "instrument": symbol,
         "asset_class": asset_class,
         "side": side,
         "quantity": quantity,
+        "amount": amount,
+        "currency": currency,
+        "tenor": tenor,
+        "rate": rate,
+        "order_type": order_type,
+        "value_date": value_date,
+        "settlement_date": settlement_date,
+        "time_in_force": time_in_force,
+        "notes": notes,
         "status": "REQUESTED",
+        "execution_allowed": False,
+        "live_trading_blocked": True,
     }
 
 
@@ -5484,6 +5526,39 @@ def _operator_config_auth(request: Request, *, require_admin: bool = True) -> Di
     if require_admin and role not in {"SUPER_USER", "ADMIN"}:
         raise HTTPException(status_code=403, detail="ADMIN_REQUIRED")
     return {"user_id": str(auth.user_id or ""), "role": role}
+
+
+@launcher_router.post("/operator-trade/request")
+async def operator_trade_request(request: Request):
+    from dashboard.enterprise_shell.operator_configuration import load_broker_selection
+
+    actor = _operator_config_auth(request, require_admin=False)
+    payload = await _read_mobile_trade_payload(request)
+    selection = load_broker_selection()
+    selected_broker = str(selection.get("selected_broker") or "").strip().upper()
+    if not selection.get("confirmed") or not selected_broker:
+        raise HTTPException(status_code=409, detail="CONFIRMED_BROKER_REQUIRED")
+    if str(payload.get("broker") or "").strip().upper() != selected_broker:
+        raise HTTPException(status_code=409, detail="TRADE_BROKER_MUST_MATCH_CONFIRMED_SELECTION")
+    if str(payload.get("confirm_trade") or "").strip().upper() != "YES":
+        raise HTTPException(status_code=400, detail="TRADE_CONFIRMATION_REQUIRED")
+
+    payload = dict(payload)
+    payload["paper_only"] = "true"
+    payload["broker_execution_allowed"] = "false"
+    payload["broker_mode"] = "paper"
+    payload["requested_by"] = actor["user_id"]
+    try:
+        trade_request = write_mobile_paper_trade_request(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    return JSONResponse({
+        "status": "REQUESTED",
+        "trade_request": trade_request,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+    })
 
 
 @launcher_router.post("/operator-config/broker-selection")
