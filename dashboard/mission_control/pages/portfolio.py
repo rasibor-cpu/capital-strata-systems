@@ -74,6 +74,7 @@ def render(state: dict) -> str:
             aria_label="Portfolio secondary metrics",
         )
         + '<div class="mc-operator-stack">'
+        + _anchor_panel("mc-portfolio-command", detail_table("Portfolio Command View", command))
         + _anchor_panel("mc-portfolio-capital", detail_table("Capital Snapshot", _capital_snapshot(portfolio, command)))
         + _anchor_panel("mc-portfolio-allocation", detail_table("Allocation Snapshot", {
             "asset_allocation": portfolio.get("asset_allocation"),
