@@ -24,6 +24,7 @@ from dashboard.mission_control.pages.documentation_runbooks import render as ren
 from dashboard.mission_control.pages.enterprise_governance import render as render_enterprise_governance
 from dashboard.mission_control.pages.credential_governance import render as render_credential_governance
 from dashboard.mission_control.pages.enterprise_identity import render as render_enterprise_identity
+from dashboard.mission_control.pages.enterprise_oauth import render as render_enterprise_oauth
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1544,3 +1545,33 @@ def test_enterprise_identity_missing_high_risk_fails_closed() -> None:
     assert "<strong>EVIDENCE_MISSING</strong>" in card
     assert ">EVIDENCE_MISSING</em>" in card
     assert 'class="mc-status bad"' in card
+
+
+def test_enterprise_oauth_mobile_compacts_governance_metadata() -> None:
+    body = render_enterprise_oauth({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "oauth_governance": {
+            "provider_inventory": [],
+            "authorization_status": [],
+            "scope_summary": {},
+            "expiry_forecast": [],
+            "rotation_readiness": {"status": "UNCONFIGURED"},
+            "risk": {"high_risk_count": 0},
+            "policy": {"status": "RECORDED"},
+            "audit": [],
+            "certification": {"outcome": "NOT_CERTIFIED"},
+        },
+    })
+    assert 'aria-label="Enterprise OAuth sections"' in body
+    assert 'aria-label="Enterprise OAuth priority"' in body
+    assert "OAuth Governance Snapshot" in body
+    assert "OAuth Risk Snapshot" in body
+    assert "OAuth Policy Snapshot" in body
+    assert "<th>authorization_flow_enabled</th><td>DISABLED</td>" in body
+    assert "<th>refresh_flow_enabled</th><td>DISABLED</td>" in body
+    assert "<th>browser_launch_enabled</th><td>DISABLED</td>" in body
+    assert "<summary>Show provider and registration metadata</summary>" in body
+    assert "<summary>Show scope and expiry metadata</summary>" in body
+    assert "<summary>Show rotation and risk metadata</summary>" in body
+    assert "<summary>Show policy and audit metadata</summary>" in body
+    assert "<details open" not in body
