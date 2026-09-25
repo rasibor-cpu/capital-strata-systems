@@ -316,29 +316,38 @@ def _is_proven_interpreter_parent_shim(
     if not expected_role or expected_role != candidate_role:
         return False
 
-    def _target_signature(command_line: str) -> tuple[str, ...]:
+    def _invocation_signature(command_line: str) -> tuple[str, ...]:
+        """Return canonical invocation arguments after the Python interpreter.
+
+        A Windows venv shim must preserve the exact canonical invocation. A
+        parent/child pair with any extra/different argument remains a genuine
+        duplicate owner and therefore fails closed.
+        """
         tokens = _tokenize_command(command_line)
         for index, token in enumerate(tokens):
             if not _is_python_interpreter_token(token):
                 continue
             args = tokens[index + 1 :]
-            if "-m" in args:
-                mi = args.index("-m")
-                if mi + 1 < len(args):
-                    return ("module", args[mi + 1])
+            if not args:
+                return ()
+            if classify_canonical_process_command(command_line) is None:
+                return ()
+            normalized: list[str] = []
             for arg in args:
                 if _path_has_canonical_suffix(arg, CANONICAL_LAUNCHER_SCRIPT_SUFFIX):
-                    return ("script", CANONICAL_LAUNCHER_SCRIPT_SUFFIX)
-                if _path_has_canonical_suffix(arg, CANONICAL_MOBILE_SCRIPT_SUFFIX):
-                    return ("script", CANONICAL_MOBILE_SCRIPT_SUFFIX)
-                if _path_has_canonical_suffix(arg, CANONICAL_DASHBOARD_SCRIPT_SUFFIX):
-                    return ("script", CANONICAL_DASHBOARD_SCRIPT_SUFFIX)
-            break
+                    normalized.append(CANONICAL_LAUNCHER_SCRIPT_SUFFIX.replace("\\", "/").casefold())
+                elif _path_has_canonical_suffix(arg, CANONICAL_MOBILE_SCRIPT_SUFFIX):
+                    normalized.append(CANONICAL_MOBILE_SCRIPT_SUFFIX.replace("\\", "/").casefold())
+                elif _path_has_canonical_suffix(arg, CANONICAL_DASHBOARD_SCRIPT_SUFFIX):
+                    normalized.append(CANONICAL_DASHBOARD_SCRIPT_SUFFIX.replace("\\", "/").casefold())
+                else:
+                    normalized.append(str(arg).replace("\\", "/").casefold())
+            return tuple(normalized)
         return ()
 
-    return bool(_target_signature(expected_cmd)) and (
-        _target_signature(expected_cmd) == _target_signature(candidate_command_line)
-    )
+    expected_signature = _invocation_signature(expected_cmd)
+    candidate_signature = _invocation_signature(candidate_command_line)
+    return bool(expected_signature) and expected_signature == candidate_signature
 
 
 def discover_canonical_runtime_processes(
