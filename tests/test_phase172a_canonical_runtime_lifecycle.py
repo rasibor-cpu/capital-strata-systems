@@ -405,7 +405,7 @@ class TestGapFillPublisherDoesNotFabricateHealth:
 
 class TestLauncherHeartbeatContinuity:
     def _supervisor(self, tmp_path: Path) -> CSSRuntimeSupervisor:
-        return CSSRuntimeSupervisor(state_dir=str(tmp_path / "supervisor"), alert_service=MagicMock())
+        return CSSRuntimeSupervisor(state_dir=str(tmp_path / "supervisor"), trusted_root=str(tmp_path), alert_service=MagicMock())
 
     def test_l01_heartbeat_advances_timestamp_and_mtime_across_cycles(self, tmp_path: Path):
         sup = self._supervisor(tmp_path)
