@@ -148,6 +148,13 @@ class RuntimeSupervisor:
 
     def record_cycle(self, equity: float, broker_mode: str, engine_mode: str) -> None:
         try:
+            # The legacy watchdog monitors engine-cycle continuity, not general
+            # CSS process health.  Arm it lazily only after an actual cycle is
+            # observed.  Read-only / disabled runtime sessions may legitimately
+            # remain healthy without entering the trading-cycle path.
+            if not self._watchdog_thread or not self._watchdog_thread.is_alive():
+                self.start_watchdog()
+
             with self._lock:
                 self.state["cycles_completed"] += 1
                 self.last_heartbeat_time = time.time()

@@ -1024,7 +1024,9 @@ except ModuleNotFoundError:
 try:
     from backend.runtime.runtime_supervisor import RuntimeSupervisor
     runtime_supervisor = RuntimeSupervisor()
-    runtime_supervisor.start_watchdog()
+    # RuntimeSupervisor's legacy watchdog tracks engine-cycle continuity.
+    # It is armed lazily by record_cycle() so disabled/read-only sessions do
+    # not generate a false ENGINE_HEARTBEAT_LOST before any cycle is expected.
 except ModuleNotFoundError:
     class _FallbackRuntimeSupervisor:
         def start_watchdog(self): pass
