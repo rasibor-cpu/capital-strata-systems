@@ -1526,6 +1526,22 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
     )
     credential_diagnostics = _mapping(broker_payload.get("credential_diagnostics"))
     canonical_credential_diagnostics = broker_credential_diagnostics(dashboard_payload)
+    canonical_credential_status = str(canonical_state.get("credential_status") or "").strip().upper()
+    detailed_credential_status = str(
+        broker_payload.get("credential_status")
+        or credential_diagnostics.get("credential_status")
+        or ""
+    ).strip().upper()
+    if canonical_credential_status == "PASS":
+        ui_credential_status = "PRESENT"
+    elif canonical_credential_status == "FAIL" and detailed_credential_status in {"MISSING", "PRESENT"}:
+        ui_credential_status = detailed_credential_status
+    else:
+        ui_credential_status = (
+            canonical_credential_status
+            or detailed_credential_status
+            or DATA_UNAVAILABLE
+        )
     limit_reconciliation = _mapping(broker_payload.get("limit_reconciliation"))
     broker_readiness = _mapping(broker_payload.get("broker_readiness"))
     certification_snapshot = runtime_certification_snapshot(dashboard_payload)
@@ -1638,25 +1654,10 @@ def broker(dashboard_payload: Mapping[str, Any]) -> dict[str, Any]:
         "missing_credential_names": _string_list(
             broker_payload.get("missing_credential_names", credential_diagnostics.get("missing_credentials"))
         ),
-        "credential_status": str(
-            (
-                "PRESENT"
-                if str(canonical_state.get("credential_status", "")).upper() == "PASS"
-                else canonical_state.get("credential_status")
-            )
-            or broker_payload.get("credential_status")
-            or credential_diagnostics.get("credential_status")
-            or DATA_UNAVAILABLE
-        ),
+        "credential_status": str(ui_credential_status),
         "credentials": str(
-            (
-                "PRESENT"
-                if str(canonical_state.get("credential_status", "")).upper() == "PASS"
-                else canonical_state.get("credential_status")
-            )
-            or broker_payload.get("credentials")
-            or broker_payload.get("credential_status")
-            or credential_diagnostics.get("credential_status")
+            broker_payload.get("credentials")
+            or ui_credential_status
             or DATA_UNAVAILABLE
         ),
         "auth_status": str(
