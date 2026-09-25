@@ -148,7 +148,8 @@ def resolve_bootstrap_admin_password() -> str:
     return str(os.getenv("CSS_BOOTSTRAP_ADMIN_PASSWORD", "") or "").strip()
 
 
-def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
+def load_users(users_file: Path | None = None) -> Dict[str, Any]:
+    users_file = Path(users_file) if users_file is not None else Path(USERS_FILE)
     users_file.parent.mkdir(parents=True, exist_ok=True)
 
     changed = False
@@ -252,7 +253,8 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
     return users
 
 
-def save_users(users: Dict[str, Any], users_file: Path = USERS_FILE) -> None:
+def save_users(users: Dict[str, Any], users_file: Path | None = None) -> None:
+    users_file = Path(users_file) if users_file is not None else Path(USERS_FILE)
     users_file.parent.mkdir(parents=True, exist_ok=True)
     users_file.write_text(json.dumps(users, indent=2), encoding="utf-8")
 
