@@ -1701,3 +1701,29 @@ def test_broker_management_mobile_hides_sensitive_runtime_fields() -> None:
     assert "state_hash" not in body
     assert "account_id_sanitized" not in body
     assert "<details open" not in body
+
+
+def test_broker_management_tier1_snapshot_is_mobile_compact() -> None:
+    body = render_broker_management_mobile({
+        "brokers": {
+            "broker_list": [
+                {
+                    "broker": "COINBASE",
+                    "role": "PRIMARY_CRYPTO_BROKER",
+                    "operational_state": "CREDENTIALS_REQUIRED",
+                    "readiness": "NOT_INITIALIZED",
+                    "certification": "NOT_INITIALIZED",
+                    "execution": "DISABLED",
+                }
+            ]
+        }
+    })
+    start = body.find("Tier-1 Broker Snapshot")
+    end = body.find("Account &amp; Balance Snapshot", start)
+    snapshot = body[start:end]
+    assert "<th>COINBASE</th>" in snapshot
+    assert "PRIMARY_CRYPTO_BROKER" in snapshot
+    assert "readiness NOT_INITIALIZED" in snapshot
+    assert "certification NOT_INITIALIZED" in snapshot
+    assert "execution DISABLED" in snapshot
+    assert "<thead>" not in snapshot
