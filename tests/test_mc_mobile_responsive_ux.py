@@ -29,6 +29,7 @@ from dashboard.mission_control.pages.enterprise_oauth import render as render_en
 from dashboard.mission_control.pages.learning_performance_mobile import render as render_learning_performance_mobile
 from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
+from dashboard.mission_control.state_adapter import build_broker_registry
 
 
 STATUS_KEYS = (
@@ -1842,3 +1843,54 @@ def test_asset_classes_are_registered_in_mission_control_navigation() -> None:
     entries = {section.key: section for section in MISSION_CONTROL_SECTIONS}
     assert "asset_classes" in entries
     assert entries["asset_classes"].route == "/mission-control/asset-classes"
+
+
+def test_broker_registry_uses_persisted_coinbase_oanda_read_only_evidence() -> None:
+    rows = build_broker_registry({
+        "selected_broker": "COINBASE",
+        "coinbase_live_validation": {
+            "validation_status": "PASS",
+            "authentication": True,
+            "account_loaded": True,
+            "market_data_loaded": True,
+            "last_successful_sync": "2026-09-24T20:00:00Z",
+            "validation_timestamp": "2026-09-24T20:00:01Z",
+            "broker_operational_status": {"operational_state": "READ_ONLY_READY"},
+        },
+        "oanda_live_validation": {
+            "validation_status": "PASS",
+            "authentication": True,
+            "account_loaded": True,
+            "market_data_loaded": True,
+            "last_successful_sync": "2026-09-24T20:01:00Z",
+            "validation_timestamp": "2026-09-24T20:01:01Z",
+            "broker_operational_status": {"operational_state": "READ_ONLY_READY"},
+        },
+    })
+    by_broker = {row["broker"]: row for row in rows}
+    assert by_broker["COINBASE"]["readiness"] == "READ_ONLY_READY"
+    assert by_broker["COINBASE"]["certification"] == "READ_ONLY_VALIDATED"
+    assert by_broker["OANDA"]["readiness"] == "READ_ONLY_READY"
+    assert by_broker["OANDA"]["certification"] == "READ_ONLY_VALIDATED"
+    assert by_broker["OANDA"]["evidence_source"] == "PERSISTED_READ_ONLY_VALIDATION"
+    assert by_broker["COINBASE"]["execution"] == "DISABLED"
+    assert by_broker["OANDA"]["execution_authority"] == "BLOCKED"
+
+
+def test_broker_registry_distinguishes_questrade_reactivation_from_unconfigured() -> None:
+    rows = build_broker_registry({
+        "selected_broker": "COINBASE",
+        "questrade_read_only_status": {
+            "status": "DISABLED",
+            "reason": "NOT_ACTIVATED",
+            "attempted": False,
+            "secure_token_store_present": True,
+        },
+    })
+    by_broker = {row["broker"]: row for row in rows}
+    questrade = by_broker["QUESTRADE"]
+    assert questrade["operational_state"] == "REACTIVATION_REQUIRED"
+    assert questrade["readiness"] == "CONFIGURED_REACTIVATION_REQUIRED"
+    assert questrade["certification"] == "NOT_CERTIFIED"
+    assert questrade["evidence_source"] == "SECURE_TOKEN_STORE_PRESENT"
+    assert questrade["execution"] == "DISABLED"
