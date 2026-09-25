@@ -24,7 +24,65 @@ class ExecutiveDecisionIntelligenceService:
             return self.degraded()
 
     def summary(self, state: dict[str, Any] | None = None) -> dict[str, Any]:
+        state = state if isinstance(state, dict) else {}
+        freshness = state.get("data_freshness") if isinstance(state.get("data_freshness"), dict) else {}
+        runtime = state.get("runtime") if isinstance(state.get("runtime"), dict) else {}
+        stale_evidence = (
+            str(freshness.get("overall_freshness") or "").strip().upper()
+            in {"STALE", "EXPIRED", "UNAVAILABLE", "UNKNOWN"}
+            or bool(freshness.get("stale_mandatory_data"))
+            or str(runtime.get("heartbeat_status") or "").strip().upper()
+            in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}
+        )
         full = self.generate(state)
+        if stale_evidence:
+            generated_at = full.get("generated_at")
+            return deep_freeze_dict(
+                {
+                    "schema_version": full.get("schema_version"),
+                    "generated_at": generated_at,
+                    "executive_state": "NOT_READY",
+                    "recommended_executive_focus": "Refresh or validate stale source evidence before relying on executive conclusions.",
+                    "recommended_next_action": {
+                        "code": "rec:refresh_source_evidence",
+                        "title": "Refresh or validate stale source evidence before relying on executive conclusions.",
+                        "priority": "CRITICAL",
+                        "advisory_only": True,
+                        "trading_impact": False,
+                    },
+                    "top_five_priorities": [
+                        {
+                            "code": "priority:refresh_source_evidence",
+                            "title": "Refresh or validate stale source evidence.",
+                            "priority": "CRITICAL",
+                            "advisory_only": True,
+                            "trading_impact": False,
+                        }
+                    ],
+                    "top_risks": [
+                        {
+                            "code": "risk:stale_evidence",
+                            "title": "Executive risk conclusions are withheld because mandatory evidence is stale or unavailable.",
+                            "priority": "HIGH",
+                            "advisory_only": True,
+                            "trading_impact": False,
+                        }
+                    ],
+                    "top_opportunities": [],
+                    "confidence": {
+                        "overall_confidence": 0.0,
+                        "confidence_band": "VERY_LOW",
+                        "reasons": ["stale_or_unavailable_mandatory_evidence"],
+                    },
+                    "upstream": {
+                        **(full.get("upstream") if isinstance(full.get("upstream"), dict) else {}),
+                        "freshness_gate": "STALE_OR_UNAVAILABLE",
+                    },
+                    "disclaimer": full.get("disclaimer"),
+                    "advisory_only": True,
+                    "trading_impact": False,
+                }
+            )
         return deep_freeze_dict(
             {
                 "schema_version": full.get("schema_version"),
