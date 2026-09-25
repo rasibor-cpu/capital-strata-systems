@@ -1995,7 +1995,7 @@ def test_transaction_history_supports_period_and_accounting_date_filters() -> No
     assert "Value date" in body and "Settlement date" in body
     assert "Print Statement" in body
     assert "Download CSV" in body
-    assert "View / Print" in body
+    assert "Generate Receipt" in body
 
 
 def test_account_statement_service_filters_debits_and_settlement_dates(tmp_path) -> None:
