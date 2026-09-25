@@ -551,15 +551,22 @@ def render(state: dict) -> str:
     from backend.product_honesty import eis_dashboard_honesty
 
     honesty = eis_dashboard_honesty()
+    stale_snapshot = (
+        str(freshness.get("overall_freshness") or "").strip().upper()
+        in {"STALE", "EXPIRED", "UNAVAILABLE", "UNKNOWN"}
+        or str(runtime.get("heartbeat_status") or "").strip().upper()
+        in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}
+    )
+    cockpit_tone = "warn" if stale_snapshot else None
     return (
         page_header("Executive Overview", "Enterprise-level platform, runtime, capital, risk, readiness, and alert posture.")
         + metric_grid(
             (
                 ("Execution Status", portfolio.get("execution_status"), _cockpit_status(portfolio.get("execution_status"))),
-                ("Cash", portfolio.get("cash"), _cockpit_status(portfolio.get("cash"))),
-                ("Portfolio Value", portfolio.get("portfolio_value"), _cockpit_status(portfolio.get("portfolio_value"))),
-                ("Session P&L", portfolio.get("session_pnl"), _cockpit_status(portfolio.get("session_pnl"))),
-                ("Open Positions", portfolio.get("open_positions"), _cockpit_status(portfolio.get("open_positions"))),
+                ("Cash", portfolio.get("cash"), cockpit_tone or _cockpit_status(portfolio.get("cash"))),
+                ("Portfolio Value", portfolio.get("portfolio_value"), cockpit_tone or _cockpit_status(portfolio.get("portfolio_value"))),
+                ("Session P&L", portfolio.get("session_pnl"), cockpit_tone or _cockpit_status(portfolio.get("session_pnl"))),
+                ("Open Positions", portfolio.get("open_positions"), cockpit_tone or _cockpit_status(portfolio.get("open_positions"))),
                 ("Next Maturity", portfolio.get("next_maturity"), _cockpit_status(portfolio.get("next_maturity"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-priority",
@@ -567,12 +574,20 @@ def render(state: dict) -> str:
         )
         + metric_grid(
             (
-                ("Available / Free", portfolio.get("available_free"), _cockpit_status(portfolio.get("available_free"))),
-                ("Realized P&L", portfolio.get("realized_pnl"), _cockpit_status(portfolio.get("realized_pnl"))),
-                ("Unrealized P&L", portfolio.get("unrealized_pnl"), _cockpit_status(portfolio.get("unrealized_pnl"))),
+                ("Available / Free", portfolio.get("available_free"), cockpit_tone or _cockpit_status(portfolio.get("available_free"))),
+                ("Realized P&L", portfolio.get("realized_pnl"), cockpit_tone or _cockpit_status(portfolio.get("realized_pnl"))),
+                ("Unrealized P&L", portfolio.get("unrealized_pnl"), cockpit_tone or _cockpit_status(portfolio.get("unrealized_pnl"))),
             ),
             css_class="mc-metric-grid mc-metric-grid-secondary",
             aria_label="Executive cockpit secondary metrics",
+        )
+        + (
+            warning_banner(
+                "STALE / SIMULATED SNAPSHOT — account, position and P&L values below are retained for reference only and are not current broker-authoritative balances.",
+                status="warn",
+            )
+            if stale_snapshot
+            else ""
         )
         + warning_banner(honesty["customer_banner"], status="warn")
         + warning_banner(
