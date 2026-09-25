@@ -699,17 +699,47 @@ def _live_process_fields(pid: int | None, *, role: str) -> dict[str, Any]:
 
 
 def _service_identity_info(svc: CSSServiceManager) -> dict[str, Any]:
+    # Reconcile process state immediately before strong identity probing. A
+    # child can exit cleanly between Popen() and process-tree capture.
+    status = svc.check_status()
     info = dict(svc.get_info())
+    info.update(
+        {
+            "service_role": svc.service_name,
+            "repo_root": REPO_ROOT,
+        }
+    )
+
+    if status != "RUNNING":
+        # Absence of a live identity is expected for a child already proven
+        # stopped. Preserve that evidence rather than misclassifying the race
+        # as a strong-identity failure for the still-running canonical owner.
+        process = getattr(svc, "process", None)
+        exit_code = process.poll() if process is not None else None
+        info.update(
+            {
+                "identity_status": "NOT_RUNNING",
+                "process_exit_code": exit_code,
+                "parent_pid": None,
+                "creation_time": None,
+                "executable_path": None,
+                "executable_sha256": None,
+                "command_line": None,
+            }
+        )
+        return info
+
+    # A child that still claims RUNNING must have complete live identity.
+    # Missing identity in that state remains fatal/fail-closed.
     live = _live_process_fields(info.get("pid"), role=svc.service_name)
     info.update(
         {
+            "identity_status": "VERIFIED",
             "parent_pid": live["parent_pid"],
             "creation_time": live["creation_time"],
             "executable_path": live["executable_path"],
             "executable_sha256": live["executable_sha256"],
             "command_line": live["command_line"],
-            "service_role": svc.service_name,
-            "repo_root": REPO_ROOT,
         }
     )
     return info
@@ -890,10 +920,17 @@ def run_launcher():
 
         _record_process_tree_or_fail(supervisor, services)
 
-        print("\nCSS Runtime ........ RUNNING")
-        print("Mobile Launcher .... RUNNING")
+        runtime_status = runtime_svc.check_status()
+        mobile_status = mobile_svc.check_status()
+        system_status = (
+            "OPERATIONAL"
+            if runtime_status == "RUNNING" and mobile_status == "RUNNING"
+            else "DEGRADED / FAIL-CLOSED"
+        )
+        print(f"\nCSS Runtime ........ {runtime_status}")
+        print(f"Mobile Launcher .... {mobile_status}")
         print("Supervisor ......... RUNNING")
-        print("\nSYSTEM STATUS ...... OPERATIONAL\n")
+        print(f"\nSYSTEM STATUS ...... {system_status}\n")
 
         while True:
             time.sleep(10)
