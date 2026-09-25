@@ -231,7 +231,9 @@ def render(state: dict) -> str:
         + _evidence_panel("mc-trade-assets", "Show full asset-breakdown evidence", detail_table("Asset Breakdown Evidence (Full)", balances.get("asset_breakdown", [])))
         + _evidence_panel("mc-trade-position-value", "Show full position-value evidence", detail_table("Position Value Evidence (Full)", balances.get("position_value", {})))
         + _evidence_panel("mc-trade-collateral", "Show full collateral / margin evidence", detail_table("Collateral / Margin Evidence (Full)", balances.get("collateral_margin", {})))
+        + _anchor_panel("mc-trade-decision-panel", detail_table("Decision Panel", decision))
         + _anchor_panel("mc-trade-decisions", detail_table("Decision Snapshot", _decision_snapshot(decision)))
+        + _anchor_panel("mc-trade-decision-trace", detail_table("Decision Trace", trace))
         + _anchor_panel("mc-trade-trace-summary", detail_table("Decision Trace Summary", _trace_summary_rows(trace)))
         + _evidence_panel("mc-trade-trace", "Show full decision trace evidence", detail_table("Decision Trace Evidence (Full)", trace.get("stages", [])))
         + _evidence_panel("mc-trade-decision-evidence", "Show full decision evidence", detail_table("Decision Evidence (Full)", {
