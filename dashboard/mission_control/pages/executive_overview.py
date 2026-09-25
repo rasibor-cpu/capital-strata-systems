@@ -644,13 +644,13 @@ def render(state: dict) -> str:
                 ("Cycle", platform.get("cycle"), "neutral"),
                 ("Heartbeat", platform.get("heartbeat"), runtime.get("heartbeat_status", "neutral")),
                 ("Broker Health", platform.get("broker_health"), platform.get("broker_health")),
-                ("Portfolio Equity", portfolio.get("equity"), "neutral"),
-                ("Cash / Buying Power", portfolio.get("buying_power"), "neutral"),
+                ("Portfolio Equity", portfolio.get("equity"), "warn" if stale_snapshot else "neutral"),
+                ("Cash / Buying Power", portfolio.get("buying_power"), "warn" if stale_snapshot else "neutral"),
                 ("Risk Status", risk.get("overall_risk_state"), risk.get("overall_risk_state")),
                 ("Market Regime", market.get("market_regime"), market.get("market_regime")),
                 ("Active Alerts", alerts.get("count"), "good" if alerts.get("count") == 0 else "warn"),
                 ("RC1 Certification", certification.get("rc1_platform_certification"), certification.get("rc1_platform_certification")),
-                ("Last Runtime Heartbeat", freshness.get("last_runtime_heartbeat"), "neutral"),
+                ("Last Runtime Heartbeat", freshness.get("last_runtime_heartbeat"), "warn" if stale_snapshot else "neutral"),
             )
         )
         + '<div class="mc-operator-stack">'
