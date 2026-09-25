@@ -50,6 +50,13 @@ try {
     $info = Get-ScheduledTaskInfo -TaskName $TaskName -ErrorAction Stop
     Write-Host "       State: $($task.State)"
     Write-Host "       Last result: $($info.LastTaskResult)"
+    Write-Host "       Last run: $($info.LastRunTime)"
+    Write-Host "       Next run: $($info.NextRunTime)"
+    foreach ($action in @($task.Actions)) {
+        Write-Host "       Execute: $($action.Execute)"
+        Write-Host "       Arguments: $($action.Arguments)"
+        Write-Host "       Working directory: $($action.WorkingDirectory)"
+    }
 } catch {
     Fail "Scheduled task is missing or unreadable: $TaskName"
 }
@@ -119,6 +126,22 @@ try {
 }
 
 if ($Failures.Count -gt 0) {
+    try {
+        $schedulerEvents = Get-WinEvent -FilterHashtable @{
+            LogName = "Microsoft-Windows-TaskScheduler/Operational"
+            StartTime = (Get-Date).AddMinutes(-15)
+        } -ErrorAction SilentlyContinue | Where-Object {
+            $_.Message -and $_.Message -match [regex]::Escape($TaskName)
+        } | Select-Object -First 8
+        if ($schedulerEvents) {
+            Write-Host ""
+            Write-Host "--- Recent Task Scheduler events ---"
+            foreach ($evt in $schedulerEvents) {
+                Write-Host ("[{0}] Event {1}: {2}" -f $evt.TimeCreated, $evt.Id, (($evt.Message -replace "\r?\n"," ") -replace "\s+"," "))
+            }
+        }
+    } catch {}
+
     if (Test-Path $StdOut) {
         Write-Host ""
         Write-Host "--- Latest canonical runtime stdout ---"
