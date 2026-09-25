@@ -173,11 +173,14 @@ def test_mc002_routes_are_get_only_and_have_api_prefixes() -> None:
     assert all(methods <= {"GET", "HEAD"} for methods in paths.values())
 
 
-def test_mc002_all_pages_render_from_runtime_state_without_mock_label() -> None:
+def test_mc002_all_pages_render_from_runtime_state_without_mock_label(monkeypatch) -> None:
+    monkeypatch.setenv("CSS_TRUST_INTERNAL_AUTH_HEADERS", "1")
+    monkeypatch.setenv("CSS_AUTH_BRIDGE_MODE", "off")
     client = TestClient(create_web_app(lambda: _runtime_state()))
+    headers = {"X-CSS-Role": "SUPER_USER", "X-CSS-User-Id": "00000"}
 
     for section in MISSION_CONTROL_SECTIONS:
-        response = client.get(section.route)
+        response = client.get(section.route, headers=headers)
         assert response.status_code == 200
         assert section.label in response.text
         assert "MOCK DATA - NOT LIVE" not in response.text
