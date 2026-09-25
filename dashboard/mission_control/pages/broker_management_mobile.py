@@ -134,9 +134,24 @@ def render(state: dict) -> str:
     runtime_safe = redact_value(runtime)
     balance = section(state, "broker_balance_summary")
 
-    holdings = runtime_safe.get("holdings_readiness") if isinstance(runtime_safe.get("holdings_readiness"), dict) else {}
-    provider = runtime_safe.get("provider_health") if isinstance(runtime_safe.get("provider_health"), dict) else {}
-    certification = runtime_safe.get("certification") if isinstance(runtime_safe.get("certification"), dict) else {}
+    holdings_raw = runtime_safe.get("holdings_readiness") if isinstance(runtime_safe.get("holdings_readiness"), dict) else {}
+    provider_raw = runtime_safe.get("provider_health") if isinstance(runtime_safe.get("provider_health"), dict) else {}
+    certification_raw = runtime_safe.get("certification") if isinstance(runtime_safe.get("certification"), dict) else {}
+    holdings = {
+        key: holdings_raw.get(key)
+        for key in ("status", "readiness", "freshness", "reason", "source")
+        if key in holdings_raw
+    }
+    provider = {
+        key: provider_raw.get(key)
+        for key in ("status", "health", "readiness", "freshness", "reason", "source")
+        if key in provider_raw
+    }
+    certification = {
+        key: certification_raw.get(key)
+        for key in ("outcome", "status", "readiness", "reason", "generated_at")
+        if key in certification_raw
+    }
     selected_broker = str(operator_selection.get("selected_broker") or active.get("selected_broker") or "NONE").upper()
     selected_mode = str(operator_selection.get("broker_mode") or active.get("broker_mode") or "PAPER").upper()
 
