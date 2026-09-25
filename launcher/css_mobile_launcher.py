@@ -377,7 +377,7 @@ __NOTICE__
 __ROWS__
 <button type="submit" style="width:100%;margin-top:20px">Save All 5 Answers and Continue</button>
 </form>
-<p class="foot">Answers are masked on screen and stored only as one-way hashes. <span class="hash-clue">•••••• → SHA-256 hash</span></p>
+<p class="foot">Answers are masked on screen and stored only as one-way hashes. <span class="hash-clue">•••••• → PBKDF2-SHA256 protected hash</span></p>
 </section></main>
 <script>
 document.querySelectorAll('[data-toggle-secret]').forEach(btn=>{
@@ -628,10 +628,10 @@ async def launcher_recovery_setup_submit(request: Request):
     form = await _read_mobile_trade_payload(request)
     users = load_users()
     try:
-        from dashboard.auth.css_sign_on import RECOVERY_QUESTIONS, enroll_all_password_recovery
+        from dashboard.auth.css_sign_on import enroll_all_password_recovery
         recovery_answers = {
             question: str(form.get(f"recovery_answer_{index}") or "")
-            for index, question in enumerate(RECOVERY_QUESTIONS, start=1)
+            for index, question in enumerate(_LAUNCHER_RECOVERY_QUESTIONS, start=1)
         }
         enroll_all_password_recovery(users, user_id, recovery_answers)
         save_users(users)
