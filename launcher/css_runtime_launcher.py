@@ -750,6 +750,10 @@ def run_launcher():
 
     env = os.environ.copy()
     env["PYTHONPATH"] = REPO_ROOT
+    # Managed child marker: the mobile launcher must normally be owned by this
+    # canonical always-on runtime process so supervisor heartbeat/freshness
+    # cannot silently go stale while the UI remains reachable.
+    env["CSS_CANONICAL_RUNTIME_MANAGED"] = "1"
 
     # Create Service Managers
     runtime_cmd = [sys.executable, os.path.join(REPO_ROOT, "scripts", "css_live_dashboard.py")]
