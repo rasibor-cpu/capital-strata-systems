@@ -1921,7 +1921,7 @@ def test_frontend_contract_carries_multi_broker_read_only_evidence() -> None:
             "questrade_read_only_status": {
                 "status": "DISABLED",
                 "reason": "NOT_ACTIVATED",
-                "secure_token_store_present": True,
+                "secure_store_configured": True,
                 "execution_allowed": False,
             },
         }
