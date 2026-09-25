@@ -29,3 +29,17 @@ def test_live_certification_audit_avoids_powershell7_ternary_syntax():
     assert " ? " not in text
     assert "? $" not in text
     assert "[string]::IsNullOrWhiteSpace" in text
+
+
+def test_live_certification_audit_fails_contradictory_certified_state_closed():
+    text = (ROOT / "scripts" / "audit_css_live_certification.ps1").read_text(
+        encoding="utf-8"
+    )
+    assert "Certification response is internally inconsistent" in text
+    assert "certified_with_runtime_" in text
+    assert "certified_with_production_readiness_" in text
+    assert "certified_with_broker_evidence_missing" in text
+    assert "certified_with_runtime_evidence_missing" in text
+    assert "certified_with_incomplete_evidence" in text
+    assert "certified_without_deployment_authorization" in text
+    assert "exit 2" in text
