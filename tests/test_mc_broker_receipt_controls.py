@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dashboard.mission_control.pages.broker_management_mobile import render as render_broker_management_mobile
 from dashboard.mission_control.pages.transaction_history import render as render_transaction_history
-from launcher.css_mobile_launcher import _launcher_login_page, _launcher_password_change_page
+from launcher.css_mobile_launcher import _launcher_login_page, _launcher_password_change_page, validate_mobile_paper_trade_request
 
 
 def test_broker_picker_greys_unavailable_brokers_and_requires_confirmation() -> None:
@@ -94,3 +94,36 @@ def test_launcher_exposes_mobile_login_and_password_change_pages() -> None:
     assert 'form method="post" action="/password-change"' in password_change
     assert 'name="new_password"' in password_change
     assert 'name="confirm_password"' in password_change
+
+
+def test_full_trade_ticket_validation_preserves_transaction_fields() -> None:
+    record = validate_mobile_paper_trade_request({
+        "broker": "COINBASE",
+        "broker_mode": "paper",
+        "instrument": "BTC-USD",
+        "asset_class": "CRYPTO",
+        "side": "BUY",
+        "quantity": "0.01",
+        "amount": "500",
+        "currency": "USD",
+        "tenor": "SPOT",
+        "rate": "50000",
+        "order_type": "LIMIT",
+        "value_date": "2026-09-25",
+        "settlement_date": "2026-09-25",
+        "time_in_force": "DAY",
+        "paper_only": "true",
+        "broker_execution_allowed": "false",
+    })
+    assert record["broker"] == "COINBASE"
+    assert record["instrument"] == "BTC-USD"
+    assert record["asset_class"] == "CRYPTO"
+    assert record["side"] == "BUY"
+    assert record["quantity"] == 0.01
+    assert record["amount"] == 500.0
+    assert record["tenor"] == "SPOT"
+    assert record["rate"] == 50000.0
+    assert record["value_date"] == "2026-09-25"
+    assert record["settlement_date"] == "2026-09-25"
+    assert record["execution_allowed"] is False
+    assert record["live_trading_blocked"] is True
