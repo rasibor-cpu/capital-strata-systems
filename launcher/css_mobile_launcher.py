@@ -193,12 +193,21 @@ def apply_launcher_questrade_read_only_cache(dashboard_payload: Dict[str, Any]) 
     if not snapshot:
         return payload
     payload["questrade"] = dict(snapshot)
-    selected = str(
-        (payload.get("broker_summary") or {}).get("selected_broker")
+    broker_summary = (
+        payload.get("broker_summary")
         if isinstance(payload.get("broker_summary"), dict)
-        else payload.get("selected_broker")
+        else {}
+    )
+    selected = str(
+        broker_summary.get("selected_broker")
+        or payload.get("selected_broker")
         or ""
     ).strip().upper()
+    if not selected:
+        # A fresh Questrade cache is explicit read-only broker evidence. Preserve
+        # the historical bridge identity without granting runtime authority.
+        selected = "QUESTRADE"
+        payload["selected_broker"] = "QUESTRADE"
     if selected == "QUESTRADE":
         payload["canonical_mode"] = "LIVE_READ_ONLY"
     payload["execution_allowed"] = False
