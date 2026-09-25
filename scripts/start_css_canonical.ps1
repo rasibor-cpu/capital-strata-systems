@@ -132,17 +132,17 @@ if ($Foreground) {
     $proc.StartInfo = $psi
     $null = $proc.Start()
 
-    $stdoutTask = $proc.StandardOutput.ReadToEndAsync()
-    $stderrTask = $proc.StandardError.ReadToEndAsync()
+    $stdoutReadTask = $proc.StandardOutput.ReadToEndAsync()
+    $stderrReadTask = $proc.StandardError.ReadToEndAsync()
     $proc.WaitForExit()
-    $stdout = $stdoutTask.Result
-    $stderr = $stderrTask.Result
+    $capturedStdout = $stdoutReadTask.Result
+    $capturedStderr = $stderrReadTask.Result
 
     $utf8 = New-Object System.Text.UTF8Encoding($false)
-    [System.IO.File]::WriteAllText($StdOut, [string]$stdout, $utf8)
-    [System.IO.File]::WriteAllText($StdErr, [string]$stderr, $utf8)
-    if ($stdout) { Write-Host $stdout }
-    if ($stderr) { Write-Error $stderr -ErrorAction Continue }
+    [System.IO.File]::WriteAllText($StdOut, [string]$capturedStdout, $utf8)
+    [System.IO.File]::WriteAllText($StdErr, [string]$capturedStderr, $utf8)
+    if ($capturedStdout) { Write-Host $capturedStdout }
+    if ($capturedStderr) { Write-Error $capturedStderr -ErrorAction Continue }
     Write-Host "CSS canonical runtime exited with code $($proc.ExitCode)."
     exit $proc.ExitCode
 }
