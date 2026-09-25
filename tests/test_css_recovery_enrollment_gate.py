@@ -26,6 +26,7 @@ def _record(password: str) -> dict:
         "lockout_started_at": None,
         "recovery_question": None,
         "recovery_answer_hash": None,
+        "recovery_answers": {},
         "recovery_required": True,
         "recovery_configured_at": None,
     }
@@ -40,16 +41,20 @@ def test_authenticated_new_user_must_enroll_recovery_before_session(monkeypatch)
         css_sign_on.authenticate_credentials(users, "00001", "StrongPassword!234")
     assert exc.value.user_id == "00001"
 
-    css_sign_on.enroll_password_recovery(
+    css_sign_on.enroll_all_password_recovery(
         users,
         "00001",
-        css_sign_on.RECOVERY_QUESTIONS[0],
-        "Private Recovery Answer",
-        "Private Recovery Answer",
+        {
+            question: f"Private Recovery Answer {index}"
+            for index, question in enumerate(css_sign_on.RECOVERY_QUESTIONS, start=1)
+        },
     )
     assert users["00001"]["recovery_required"] is False
-    assert users["00001"]["recovery_answer_hash"]
-    assert users["00001"]["recovery_answer_hash"] != "Private Recovery Answer"
+    assert len(users["00001"]["recovery_answers"]) == 5
+    assert all(
+        users["00001"]["recovery_answers"][question] != f"Private Recovery Answer {index}"
+        for index, question in enumerate(css_sign_on.RECOVERY_QUESTIONS, start=1)
+    )
 
     ctx = css_sign_on.authenticate_credentials(users, "00001", "StrongPassword!234")
     assert ctx["user_id"] == "00001"
@@ -71,3 +76,42 @@ def test_created_user_is_marked_recovery_required(monkeypatch) -> None:
     assert row["recovery_required"] is True
     assert row["recovery_question"] is None
     assert row["recovery_answer_hash"] is None
+    assert row["recovery_answers"] == {}
+
+
+def test_single_recovery_answer_is_not_enough(monkeypatch) -> None:
+    users = {"00001": _record("StrongPassword!234")}
+    monkeypatch.setattr(css_sign_on, "save_users", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(css_sign_on, "record_auth_audit_event", lambda *_args, **_kwargs: None)
+
+    css_sign_on.enroll_password_recovery(
+        users,
+        "00001",
+        css_sign_on.RECOVERY_QUESTIONS[0],
+        "Only One Answer",
+        "Only One Answer",
+    )
+    assert css_sign_on.recovery_is_configured(users["00001"]) is False
+    assert users["00001"]["recovery_required"] is True
+
+
+def test_random_challenge_reset_uses_selected_question(monkeypatch) -> None:
+    users = {"00001": _record("StrongPassword!234")}
+    monkeypatch.setattr(css_sign_on, "save_users", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(css_sign_on, "record_auth_audit_event", lambda *_args, **_kwargs: None)
+    answers = {
+        question: f"Answer {index}"
+        for index, question in enumerate(css_sign_on.RECOVERY_QUESTIONS, start=1)
+    }
+    css_sign_on.enroll_all_password_recovery(users, "00001", answers)
+    question = css_sign_on.RECOVERY_QUESTIONS[3]
+    ctx = css_sign_on.reset_password_with_recovery(
+        users,
+        "00001",
+        answers[question],
+        "DifferentStrongPassword!567",
+        "DifferentStrongPassword!567",
+        recovery_question=question,
+    )
+    assert ctx["user_id"] == "00001"
+    assert users["00001"]["failed_attempts"] == 0
