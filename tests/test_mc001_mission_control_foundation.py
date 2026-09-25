@@ -94,7 +94,8 @@ def test_mc001_every_page_renders_read_only_contract_content() -> None:
 
     for section in MISSION_CONTROL_SECTIONS:
         rendered = render_page(section.key, state)
-        assert section.label.split(" / ")[0].split(" and ")[0] in rendered
+        rendered_text = rendered.replace("&amp;", "&")
+        assert section.label.split(" / ")[0].split(" and ")[0] in rendered_text
         assert "READ ONLY" in rendered
 
 
