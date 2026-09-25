@@ -5,6 +5,7 @@ Phase 176H.1: navigation is native-anchor only (no touchend preventDefault).
 
 from __future__ import annotations
 
+from html import unescape
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
@@ -68,11 +69,12 @@ def _shell_html(**kwargs) -> str:
 
 def test_all_mc_nav_items_are_real_anchors() -> None:
     html = _shell_html()
+    decoded_html = unescape(html)
     assert 'class="mc-nav"' in html
     for section in MISSION_CONTROL_SECTIONS:
         assert f'href="{section.route}"' in html
         assert f'data-section="{section.key}"' in html
-        assert section.label in html
+        assert section.label in decoded_html
     # Count sidebar module anchors only (exclude Home + breadcrumb links).
     import re
 
