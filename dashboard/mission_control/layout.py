@@ -214,12 +214,11 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         if not broker or broker == "PAPER":
             continue
         available = broker_row_selectable(dict(row))
-        if available:
-            selectable_count += 1
-        disabled = "" if available else " disabled"
+        selectable_count += 1
+        disabled = ""
         selected_attr = " selected" if broker == selected else ""
         state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE").replace("_", " ")
-        label = broker + (" — Available" if available else " — Unavailable: " + state)
+        label = broker + (" — Service available" if available else " — Preference only; service currently " + state)
         options.append(
             '<option value="' + escape(broker) + '"' + disabled + selected_attr + '>'
             + escape(label) + '</option>'
@@ -242,7 +241,7 @@ def _broker_quick_control(state_dict: Mapping[str, Any]) -> str:
         '<label>Mode<select name="broker_mode" required>'
         '<option value="PAPER"' + paper_selected + '>Paper</option>'
         '<option value="LIVE_READ_ONLY"' + read_selected + '>Live read-only</option></select></label>'
-        '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> Confirm broker choice</label>'
+        '<label class="mc-confirm-choice"><input type="checkbox" name="confirm_choice" value="YES" required> Confirm session broker preference</label>'
         '<button type="submit"' + submit_disabled + '>Use This Broker</button>'
         '</form><p class="mc-broker-quick-result" aria-live="polite"></p>'
         '<a href="/mission-control/broker-management">Open Broker Management</a>'
