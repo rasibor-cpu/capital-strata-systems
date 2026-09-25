@@ -9,6 +9,7 @@ from dashboard.runtime.frontend_contract import DATA_UNAVAILABLE
 CERTIFICATION_AREAS = (
     "architecture",
     "runtime",
+    "production_readiness",
     "broker",
     "portfolio",
     "decision_intelligence",
@@ -56,10 +57,39 @@ def _check(state: Mapping[str, Any], area: str) -> dict[str, Any]:
         reason = "canonical_mission_control_state_contract"
     elif area == "runtime":
         runtime = _mapping(state.get("runtime"))
+        runtime_status = str(runtime.get("runtime_status") or "").strip().upper()
+        heartbeat_status = str(runtime.get("heartbeat_status") or "").strip().upper()
         if _runtime_unavailable(state):
             status, reason = "FAIL_CLOSED", "runtime_unavailable"
+        elif runtime_status in {"RED", "FAILED", "DEGRADED", "STOPPED", "NOT_READY"}:
+            status, reason = "FAIL_CLOSED", f"runtime_status_{runtime_status.lower()}"
+        elif heartbeat_status in {"STALE", "OFFLINE", "UNAVAILABLE", "UNKNOWN"}:
+            status, reason = "FAIL_CLOSED", f"heartbeat_status_{heartbeat_status.lower()}"
         else:
-            reason = str(runtime.get("runtime_status", "runtime_available"))
+            reason = runtime_status or "runtime_available"
+    elif area == "production_readiness":
+        readiness = _mapping(state.get("production_readiness"))
+        readiness_status = str(readiness.get("status") or "").strip().upper()
+        broker_readiness = str(readiness.get("broker_readiness") or "").strip().upper()
+        runtime_readiness = str(readiness.get("runtime_readiness") or "").strip().upper()
+        evidence_completeness = readiness.get("evidence_completeness")
+        deployment_authorized = readiness.get("deployment_authorized")
+        production_trading_certified = readiness.get("production_trading_certified")
+
+        if readiness_status != "CERTIFIED":
+            status, reason = "FAIL_CLOSED", f"production_readiness_{readiness_status.lower() or 'missing'}"
+        elif broker_readiness in {"", "EVIDENCE_MISSING", "UNAVAILABLE", "UNKNOWN", "NOT_READY"}:
+            status, reason = "FAIL_CLOSED", "broker_readiness_evidence_missing"
+        elif runtime_readiness in {"", "EVIDENCE_MISSING", "UNAVAILABLE", "UNKNOWN", "NOT_READY"}:
+            status, reason = "FAIL_CLOSED", "runtime_readiness_evidence_missing"
+        elif evidence_completeness not in {100, 100.0, "100", "100.0"}:
+            status, reason = "FAIL_CLOSED", "production_evidence_incomplete"
+        elif deployment_authorized is not True:
+            status, reason = "FAIL_CLOSED", "deployment_not_authorized"
+        elif production_trading_certified is not True:
+            status, reason = "FAIL_CLOSED", "production_trading_not_certified"
+        else:
+            reason = "production_readiness_certified"
     elif area == "broker":
         active = _mapping(_mapping(state.get("brokers")).get("active_broker"))
         if active.get("selected_broker") in {DATA_UNAVAILABLE, "UNAVAILABLE", None, ""}:
