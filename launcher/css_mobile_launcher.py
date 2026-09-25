@@ -220,7 +220,7 @@ def _launcher_login_page(message: str = "", status: str = "info") -> str:
     .card{border:1px solid #2b3b4a;border-radius:14px;background:#151d25;padding:22px}
     h1{margin:0 0 8px;font-size:1.65rem} p{color:#a8b4c0}
     label{display:block;margin:14px 0 6px;font-weight:700}
-    input{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
+    input,select{box-sizing:border-box;width:100%;min-height:48px;border:1px solid #405364;border-radius:9px;background:#0f1419;color:#fff;padding:10px 12px;font:inherit}
     button,a.button{box-sizing:border-box;width:100%;min-height:48px;margin-top:18px;border:0;border-radius:9px;background:#2c78c4;color:#fff;font:inherit;font-weight:800;display:flex;align-items:center;justify-content:center;text-decoration:none;cursor:pointer}
     .notice{padding:10px 12px;border-radius:8px;background:#25313c;color:#fff}.notice.error{background:#47252a}
     .foot{margin-top:16px;font-size:.9rem}
@@ -236,6 +236,20 @@ def _launcher_login_page(message: str = "", status: str = "info") -> str:
     <label for="password">Password</label>
     <input id="password" name="password" type="password" autocomplete="current-password" required>
     <p id="login-password-clue" class="foot">Masked: •••••••••••• · stored/checked as a one-way hash</p>
+    <label for="broker">Broker for this session</label>
+    <select id="broker" name="broker">
+      <option value="">Choose later</option>
+      <option value="COINBASE">Coinbase</option>
+      <option value="OANDA">OANDA</option>
+      <option value="QUESTRADE">Questrade</option>
+      <option value="BINANCE">Binance</option>
+    </select>
+    <label for="broker_mode">Broker access mode</label>
+    <select id="broker_mode" name="broker_mode">
+      <option value="PAPER">Paper</option>
+      <option value="LIVE_READ_ONLY">Live read-only</option>
+    </select>
+    <p class="foot">Selecting a broker sets session preference only. It does not enable trading or arm broker execution.</p>
     <button type="submit">Log on to CSS</button>
   </form>
   <a class="button" href="/forgot-password">Forgot password?</a>
@@ -545,6 +559,38 @@ async def launcher_forgot_password_reset(request: Request):
     return response
 
 
+def _apply_session_broker_preference(
+    user_ctx: Dict[str, Any],
+    *,
+    user_id: str,
+    broker: str,
+    broker_mode: str,
+) -> Dict[str, Any]:
+    """Persist optional broker preference and carry it in this auth session."""
+    from dashboard.enterprise_shell.operator_configuration import (
+        load_broker_selection,
+        save_broker_selection,
+    )
+
+    broker_name = str(broker or "").strip().upper()
+    mode = str(broker_mode or "PAPER").strip().upper()
+    if broker_name:
+        selection = save_broker_selection(
+            broker=broker_name,
+            broker_mode=mode,
+            actor_user_id=str(user_id),
+            confirmed=True,
+        )
+    else:
+        selection = load_broker_selection(str(user_id))
+
+    result = dict(user_ctx)
+    if isinstance(selection, dict) and selection.get("confirmed"):
+        result["selected_broker"] = str(selection.get("selected_broker") or "").strip().upper()
+        result["broker_mode"] = str(selection.get("broker_mode") or "").strip().upper()
+    return result
+
+
 @launcher_router.get("/login", response_class=HTMLResponse)
 async def launcher_login_screen(request: Request):
     reset = str(request.query_params.get("reset") or "") == "1"
@@ -566,6 +612,8 @@ async def launcher_login_submit(request: Request):
     from backend.security.mutation_guard import secure_cookie_kwargs
 
     form = await _read_mobile_trade_payload(request)
+    requested_broker = str(form.get("broker") or "").strip().upper()
+    requested_broker_mode = str(form.get("broker_mode") or "PAPER").strip().upper()
     users = load_users()
     try:
         user_ctx = authenticate_credentials(
@@ -576,6 +624,16 @@ async def launcher_login_submit(request: Request):
         save_users(users)
     except PasswordChangeRequired as required:
         save_users(users)
+        if requested_broker:
+            try:
+                _apply_session_broker_preference(
+                    {},
+                    user_id=str(required.user_id),
+                    broker=requested_broker,
+                    broker_mode=requested_broker_mode,
+                )
+            except ValueError as exc:
+                return HTMLResponse(_launcher_login_page(str(exc), "error"), status_code=400)
         token = secrets.token_urlsafe(32)
         _LAUNCHER_PASSWORD_CHANGES[token] = str(required.user_id)
         response = HTMLResponse(_launcher_password_change_page())
@@ -588,6 +646,16 @@ async def launcher_login_submit(request: Request):
         return response
     except RecoverySetupRequired as required:
         save_users(users)
+        if requested_broker:
+            try:
+                _apply_session_broker_preference(
+                    {},
+                    user_id=str(required.user_id),
+                    broker=requested_broker,
+                    broker_mode=requested_broker_mode,
+                )
+            except ValueError as exc:
+                return HTMLResponse(_launcher_login_page(str(exc), "error"), status_code=400)
         token = secrets.token_urlsafe(32)
         _LAUNCHER_RECOVERY_ENROLLMENTS[token] = str(required.user_id)
         response = HTMLResponse(_launcher_recovery_enrollment_page())
@@ -601,6 +669,16 @@ async def launcher_login_submit(request: Request):
     except AuthFailure as exc:
         save_users(users)
         return HTMLResponse(_launcher_login_page(exc.message, "error"), status_code=401)
+
+    try:
+        user_ctx = _apply_session_broker_preference(
+            user_ctx,
+            user_id=str(user_ctx.get("user_id") or ""),
+            broker=requested_broker,
+            broker_mode=requested_broker_mode,
+        )
+    except ValueError as exc:
+        return HTMLResponse(_launcher_login_page(str(exc), "error"), status_code=400)
 
     persist_login_session(user_ctx)
     response = RedirectResponse("/mobile-launcher", status_code=303)
@@ -643,6 +721,12 @@ async def launcher_recovery_setup_submit(request: Request):
         return HTMLResponse(_launcher_recovery_enrollment_page(str(exc), "error"), status_code=400)
 
     user_ctx = build_user_context(users[user_id], user_id)
+    user_ctx = _apply_session_broker_preference(
+        user_ctx,
+        user_id=str(user_id),
+        broker="",
+        broker_mode="",
+    )
     persist_login_session(user_ctx)
     _LAUNCHER_RECOVERY_ENROLLMENTS.pop(token, None)
     response = RedirectResponse("/mobile-launcher", status_code=303)
@@ -708,6 +792,12 @@ async def launcher_password_change_submit(request: Request):
         )
         return response
 
+    user_ctx = _apply_session_broker_preference(
+        user_ctx,
+        user_id=str(user_id),
+        broker="",
+        broker_mode="",
+    )
     persist_login_session(user_ctx)
     response = RedirectResponse("/mobile-launcher", status_code=303)
     response.delete_cookie("css_mobile_pw_change")
