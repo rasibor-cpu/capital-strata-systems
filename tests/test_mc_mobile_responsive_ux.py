@@ -25,6 +25,7 @@ from dashboard.mission_control.pages.enterprise_governance import render as rend
 from dashboard.mission_control.pages.credential_governance import render as render_credential_governance
 from dashboard.mission_control.pages.enterprise_identity import render as render_enterprise_identity
 from dashboard.mission_control.pages.enterprise_oauth import render as render_enterprise_oauth
+from dashboard.mission_control.pages.learning_performance_mobile import render as render_learning_performance_mobile
 from dashboard.mission_control.theme import MISSION_CONTROL_CSS
 
 
@@ -1598,3 +1599,53 @@ def test_enterprise_oauth_missing_collections_fail_closed() -> None:
     assert "<th>expiry_forecast_count</th><td>EVIDENCE_MISSING</td>" in body
     assert "<th>audit_event_count</th><td>EVIDENCE_MISSING</td>" in body
     assert "<th>scope_group_count</th><td>EVIDENCE_MISSING</td>" in body
+
+
+def test_learning_performance_mobile_hides_runtime_forensic_fields() -> None:
+    body = render_learning_performance_mobile({
+        "learning": {
+            "win_rate": "UNAVAILABLE",
+            "expectancy": 0.0,
+            "profit_factor": 0.0,
+            "drawdown": "UNAVAILABLE",
+            "rolling_reliability": "UNAVAILABLE",
+            "strategy_rankings": [],
+            "asset_class_rankings": [],
+            "symbol_rankings": [],
+        },
+        "recommendation_panel": {
+            "decision": "BLOCKED",
+            "recommendations": [{"action": "Increase evidence", "reason": "BLOCKED"}],
+            "execution_controls": "DISABLED_READ_ONLY",
+        },
+        "investment_committee": {
+            "current_decisions": [{
+                "decision": "BLOCKED",
+                "runtime_id": "must-not-render",
+                "state_hash": "must-not-render",
+                "provenance": {"secret": "must-not-render"},
+            }],
+            "highest_ranked_ideas": [{
+                "symbol": "DATA UNAVAILABLE",
+                "runtime_id": "must-not-render",
+                "state_hash": "must-not-render",
+                "provenance": {"secret": "must-not-render"},
+            }],
+            "blocked_ideas": [],
+            "capital_recommendations": [],
+            "decision_quality": "BLOCKED",
+        },
+        "performance_panel": {
+            "source": "RUNTIME",
+            "state_hash": "must-not-render",
+        },
+    })
+    assert 'aria-label="Learning and Performance priority"' in body
+    assert "Performance Snapshot" in body
+    assert "Guidance Snapshot" in body
+    assert "Committee Snapshot" in body
+    assert "must-not-render" not in body
+    assert "runtime_id" not in body
+    assert "state_hash" not in body
+    assert "provenance" not in body
+    assert "<details open" not in body
