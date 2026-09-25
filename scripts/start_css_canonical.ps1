@@ -13,6 +13,10 @@ $BootstrapLog = Join-Path $LogDir "css_canonical_runtime.bootstrap.log"
 
 New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 
+if (Test-Path $BootstrapLog) {
+    Remove-Item -Path $BootstrapLog -Force -ErrorAction SilentlyContinue
+}
+
 trap {
     $message = @(
         "timestamp=$([DateTimeOffset]::Now.ToString('o'))",
