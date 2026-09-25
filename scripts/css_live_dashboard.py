@@ -2260,6 +2260,30 @@ def close_active_session(reason: str, extra: Optional[dict[str, Any]] = None) ->
 # Using canonical dashboard.auth.css_sign_on import defined at top of file.
 
 
+def _run_canonical_background_service() -> None:
+    """Hold the managed CSS runtime process without creating an operator session.
+
+    The canonical launcher is an unattended service owner. Operator authentication,
+    broker selection, and runtime-cycle authority remain interactive concerns and
+    must not be synthesized for the background service.
+
+    This process therefore remains alive in a fail-closed advisory posture while
+    the canonical CSSRuntimeSupervisor owns heartbeat and lifecycle authority.
+    """
+    print(
+        "[CANONICAL BACKGROUND SERVICE] "
+        "Managed runtime active; operator session not authenticated; "
+        "execution remains DISABLED / BLOCKED / ADVISORY_ONLY."
+    )
+
+    while True:
+        time.sleep(10)
+
+
+if os.getenv("CSS_CANONICAL_RUNTIME_MANAGED") == "1":
+    _run_canonical_background_service()
+
+
 SESSION_USER_CTX = authenticate_startup_user()
 
 GLOBAL_BROKER_MODE = select_global_broker_mode()
