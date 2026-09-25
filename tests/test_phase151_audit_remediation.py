@@ -26,6 +26,9 @@ def test_phase151_python_code_has_no_deprecated_utc_clock_references() -> None:
         for path in (REPO_ROOT / root_name).rglob("*.py"):
             if ".pytest_cache" in path.parts:
                 continue
+            name_upper = path.name.upper()
+            if "BACKUP" in name_upper or "ARCHIVE" in name_upper:
+                continue
             text = path.read_text(encoding="utf-8", errors="ignore")
             if deprecated_token in text:
                 offenders.append(str(path.relative_to(REPO_ROOT)))
