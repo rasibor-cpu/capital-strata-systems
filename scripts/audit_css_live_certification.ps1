@@ -49,7 +49,17 @@ Write-Host ("  supervisor_state      : {0}" -f $state.runtime.supervisor_state)
 Write-Host ("  selected_broker       : {0}" -f $state.brokers.active_broker.selected_broker)
 Write-Host ("  broker_health         : {0}" -f $state.brokers.active_broker.broker_health)
 Write-Host ("  broker_connection     : {0}" -f $state.brokers.active_broker.connection_status)
+Write-Host ("  broker_authentication : {0}" -f $state.brokers.active_broker.authentication_status)
+Write-Host ("  broker_account        : {0}" -f $state.brokers.active_broker.account_status)
+Write-Host ("  broker_market_data    : {0}" -f $state.brokers.active_broker.market_data_status)
 Write-Host ("  broker_failure_reason : {0}" -f $state.runtime_snapshot.broker.failure_reason)
+$brokerWarnings = @($state.brokers.active_broker.warnings)
+if ($brokerWarnings.Count -gt 0) {
+    Write-Host "  broker warnings:"
+    foreach ($item in $brokerWarnings) {
+        Write-Host ("    - {0}" -f $item)
+    }
+}
 Write-Host ("  rc1_certification     : {0}" -f $state.runtime_snapshot.certification.rc1_certification)
 Write-Host ("  rc1_operational       : {0}" -f $state.runtime_snapshot.certification.rc1_operational_readiness)
 Write-Host ("  runtime_readiness     : {0}" -f $state.runtime_snapshot.certification.runtime_readiness)
@@ -122,7 +132,13 @@ if ($null -ne $prod) {
     Write-Host ("  runtime_readiness     : {0}" -f $prod.runtime_readiness)
     Write-Host ("  evidence_completeness : {0}" -f $prod.evidence_completeness)
     Write-Host ("  deployment_authorized : {0}" -f $prod.deployment_authorized)
-    Write-Host ("  deployment_blockers   : {0}" -f (@($prod.deployment_blockers).Count))
+    $deploymentBlockers = @($prod.deployment_blockers)
+    Write-Host ("  deployment_blockers   : {0}" -f $deploymentBlockers.Count)
+    if ($deploymentBlockers.Count -gt 0) {
+        foreach ($item in $deploymentBlockers) {
+            Write-Host ("    - {0}" -f $item)
+        }
+    }
     Write-Host ("  outstanding_risks     : {0}" -f (@($prod.outstanding_risks).Count))
 }
 
