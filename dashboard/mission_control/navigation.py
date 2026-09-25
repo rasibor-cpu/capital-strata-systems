@@ -19,7 +19,7 @@ MISSION_CONTROL_SECTIONS: tuple[MissionControlSection, ...] = (
     MissionControlSection("executive_overview", "Executive Overview", "/mission-control/executive-overview", "Enterprise status, readiness, capital, alerts, and runtime heartbeat.", "grid"),
     MissionControlSection("reports_center", "Reports", "/mission-control/reports", "Institutional Reports Center — catalogue, generate, library, print, export, and audit.", "file"),
     MissionControlSection("runtime_operations", "Runtime Operations", "/mission-control/runtime-operations", "Runtime cycle, supervisor, subsystem, dependency, API, dashboard, and mobile health.", "activity"),
-    MissionControlSection("trade_operations", "Trade Operations", "/mission-control/trade-operations", "Read-only trade decisions, gates, paper positions, orders, fills, rejections, and execution quality.", "route"),
+    MissionControlSection("trade_operations", "Trade / Transaction", "/mission-control/trade-operations", "Transaction entry plus trade decisions, gates, positions, orders, fills, rejections, and execution quality.", "route"),
     MissionControlSection("transaction_history", "Transaction History", "/mission-control/transaction-history", "Persisted trade history, printable transaction receipts, and read-only transaction snapshots.", "history"),
     MissionControlSection("portfolio", "Portfolio", "/mission-control/portfolio", "Equity, cash, exposure, allocation, PnL, drawdown, and performance attribution.", "briefcase"),
     MissionControlSection("market_intelligence", "Market Intelligence", "/mission-control/market-intelligence", "Regime, trend, volatility, liquidity, rankings, watchlists, and data freshness.", "waves"),
