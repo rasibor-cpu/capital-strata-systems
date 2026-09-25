@@ -29,6 +29,11 @@ def test_diagnostics_prefers_live_read_only_profile(monkeypatch, tmp_path):
 
     import backend.app.brokers.credential_loader as loader
     monkeypatch.setattr(loader, "load_credentials", fake_load_credentials)
+    monkeypatch.setattr(
+        diag,
+        "_coinbase_pem_valid",
+        lambda *args, **kwargs: True,
+    )
     diag._cached_diagnostic_source_from_canonical_loader.cache_clear()
 
     result = diag.diagnose_broker_credentials("coinbase")
@@ -57,6 +62,11 @@ def test_diagnostics_falls_back_to_paper_when_read_only_profile_empty(monkeypatc
 
     import backend.app.brokers.credential_loader as loader
     monkeypatch.setattr(loader, "load_credentials", fake_load_credentials)
+    monkeypatch.setattr(
+        diag,
+        "_coinbase_pem_valid",
+        lambda *args, **kwargs: True,
+    )
     diag._cached_diagnostic_source_from_canonical_loader.cache_clear()
 
     result = diag.diagnose_broker_credentials("coinbase")

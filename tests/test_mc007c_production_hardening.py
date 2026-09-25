@@ -21,6 +21,21 @@ def _runtime_payload() -> dict:
         "engine_mode": "SAFE",
         "resolved_mode": "paper",
         "mission_control_data_source": "RUNTIME",
+        "production_readiness": {
+            "schema_version": "css.production_readiness.certification.v1",
+            "status": "CERTIFIED",
+            "broker_readiness": "GREEN",
+            "runtime_readiness": "GREEN",
+            "evidence_completeness": 100,
+            "deployment_authorized": True,
+            "production_trading_certified": True,
+            "deployment_performed": False,
+            "execution_allowed": False,
+            "execution_authority": "BLOCKED",
+            "execution_posture": "DISABLED",
+            "advisory_only": True,
+            "evidence_fabricated": False,
+        },
         "session": {"session_id": "mc007c-session", "user_id": "operator", "role": "Operator", "engine_mode": "SAFE"},
         "alerts": {"active": [{"severity": "INFO", "category": "runtime", "message": "stable", "timestamp": now}], "count": 1, "severity": "INFO"},
         "sections": {
@@ -32,7 +47,10 @@ def _runtime_payload() -> dict:
             "market": {"regime_state": "RISK_ON", "trend_state": "UP", "volatility_state": "LOW", "liquidity_state": "GOOD"},
             "broker": {
                 "selected_broker": "COINBASE",
+                "broker": "COINBASE",
                 "broker_mode": "paper",
+                "overall_status": "GREEN",
+                "readiness": "GREEN",
                 "broker_health": "GREEN",
                 "connection_status": "PASS",
                 "authentication_status": "PASS",
@@ -77,8 +95,14 @@ def test_mc007c_final_certification_has_explicit_status_for_every_area() -> None
 
     assert list(checks) == list(CERTIFICATION_AREAS)
     assert final["version"] == "Mission Control v1.0"
-    assert final["overall"] == "CERTIFIED"
-    assert all(status == "CERTIFIED" for status in checks.values())
+    assert final["overall"] == "FAIL_CLOSED"
+    assert checks["production_readiness"] == "FAIL_CLOSED"
+    assert all(
+        status == "CERTIFIED"
+        for area, status in checks.items()
+        if area != "production_readiness"
+    )
+    assert "production_readiness" in final["blockers"]
     assert final["execution_allowed"] is False
     assert final["live_trading_blocked"] is True
     assert final["broker_execution_armed"] is False

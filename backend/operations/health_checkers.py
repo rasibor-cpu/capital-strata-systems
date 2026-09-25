@@ -198,7 +198,7 @@ def broker_readiness_checker(provider: OperationsHealthEvidenceProvider) -> Call
         )
         overall = str(readiness.get("overall_status") or "UNAVAILABLE").upper()
 
-        if not _has_broker_evidence(broker_section, runtime_broker):
+        if not _has_broker_evidence(broker_section):
             status = "CRITICAL"
             message = "Broker readiness evidence is missing"
         elif overall == "GREEN":
