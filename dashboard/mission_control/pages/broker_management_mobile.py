@@ -21,22 +21,22 @@ def _evidence_panel(anchor: str, title: str, content: str) -> str:
     )
 
 
-def _tier_rows(rows: object) -> list[dict]:
+def _tier_summary(rows: object) -> dict[str, str]:
     if not isinstance(rows, list):
-        return []
-    result = []
+        return {}
+    result: dict[str, str] = {}
     for row in rows:
         if not isinstance(row, dict) or row.get("broker") == "PAPER":
             continue
-        result.append(
-            {
-                "broker": row.get("broker"),
-                "role": row.get("role") or row.get("broker_role"),
-                "state": row.get("operational_state") or row.get("status") or "UNAVAILABLE",
-                "readiness": row.get("readiness") or "UNAVAILABLE",
-                "certification": row.get("certification") or "UNAVAILABLE",
-                "execution": row.get("execution") or "BLOCKED",
-            }
+        broker = str(row.get("broker") or "UNAVAILABLE")
+        role = str(row.get("role") or row.get("broker_role") or "UNAVAILABLE")
+        state = str(row.get("operational_state") or row.get("status") or "UNAVAILABLE")
+        readiness = str(row.get("readiness") or "UNAVAILABLE")
+        certification = str(row.get("certification") or "UNAVAILABLE")
+        execution = str(row.get("execution") or "BLOCKED")
+        result[broker] = (
+            f"{role} · {state} · readiness {readiness} · "
+            f"certification {certification} · execution {execution}"
         )
     return result
 
@@ -100,7 +100,7 @@ def render(state: dict) -> str:
             "market_data_status": active.get("market_data_status"),
             "execution_scope": active.get("execution_scope") or "BLOCKED",
         }))
-        + _anchor_panel("mc-broker-tier1", detail_table("Tier-1 Broker Snapshot", _tier_rows(broker_list)))
+        + _anchor_panel("mc-broker-tier1", detail_table("Tier-1 Broker Snapshot", _tier_summary(broker_list)))
         + _anchor_panel("mc-broker-account", detail_table("Account & Balance Snapshot", {
             "balance_status": balance.get("status") or balance.get("availability_state") or "UNAVAILABLE",
             "account_value": balance.get("total_account_value") or balance.get("account_value") or "UNAVAILABLE",
