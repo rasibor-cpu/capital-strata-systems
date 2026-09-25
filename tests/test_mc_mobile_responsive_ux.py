@@ -1575,3 +1575,26 @@ def test_enterprise_oauth_mobile_compacts_governance_metadata() -> None:
     assert "<summary>Show rotation and risk metadata</summary>" in body
     assert "<summary>Show policy and audit metadata</summary>" in body
     assert "<details open" not in body
+
+
+def test_enterprise_identity_missing_collections_fail_closed() -> None:
+    body = render_enterprise_identity({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "identity_governance": {"risk": {"high_risk_count": 0}},
+    })
+    assert "<th>identity_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>managed_entry_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>certificate_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>audit_event_count</th><td>EVIDENCE_MISSING</td>" in body
+
+
+def test_enterprise_oauth_missing_collections_fail_closed() -> None:
+    body = render_enterprise_oauth({
+        "authorization_context": {"authenticated": True, "active": True, "role": "ADMIN"},
+        "oauth_governance": {"risk": {"high_risk_count": 0}},
+    })
+    assert "<th>provider_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>registration_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>expiry_forecast_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>audit_event_count</th><td>EVIDENCE_MISSING</td>" in body
+    assert "<th>scope_group_count</th><td>EVIDENCE_MISSING</td>" in body
