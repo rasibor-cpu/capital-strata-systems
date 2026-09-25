@@ -494,3 +494,35 @@ th { color: var(--mc-muted); width: 34%; font-weight: 600; }
 
 
 __all__ = ["MISSION_CONTROL_CSS"]
+
+.mc-broker-select-card {
+  display: block;
+  margin: 0 0 14px;
+  border: 1px solid var(--mc-line);
+  border-radius: 10px;
+  background: var(--mc-panel);
+  overflow: hidden;
+}
+.mc-broker-select-card > summary {
+  min-height: 76px;
+  padding: 14px;
+  display: grid;
+  gap: 4px;
+  cursor: pointer;
+  list-style: none;
+  touch-action: manipulation;
+}
+.mc-broker-select-card > summary::-webkit-details-marker { display: none; }
+.mc-broker-select-card > summary span { color: var(--mc-muted); font-size: .82rem; font-weight: 700; }
+.mc-broker-select-card > summary strong { font-size: 1.35rem; letter-spacing: .02em; }
+.mc-broker-select-card > summary em { color: var(--mc-info); font-style: normal; font-size: .82rem; }
+.mc-broker-picker-body { padding: 0 14px 14px; border-top: 1px solid var(--mc-line); }
+.mc-broker-picker-body option:disabled { color: #7b838d; background: #252b31; }
+.mc-broker-select-card-disabled { padding: 14px; opacity: .72; }
+.mc-broker-select-card-disabled span,
+.mc-broker-select-card-disabled strong,
+.mc-broker-select-card-disabled em { display: block; margin-bottom: 4px; }
+.mc-confirm-choice { display: flex; gap: 8px; align-items: flex-start; }
+@media (max-width: 680px) {
+  .mc-broker-select-card > summary { min-height: 68px; }
+}
