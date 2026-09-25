@@ -211,7 +211,7 @@ def test_certification_reports_and_mission_control_are_metadata_only() -> None:
     assert "BLOCKED" in html
     assert "synthetic-phase179b" not in html
     assert resolve_section_slug("enterprise-oauth").key == "enterprise_oauth"
-    assert len(MISSION_CONTROL_SECTIONS) == 16
+    assert len(MISSION_CONTROL_SECTIONS) == 20
     denied = render_mission_control_shell({}, active_section="enterprise_oauth")
     assert "Administrator authentication is required" in denied
 
