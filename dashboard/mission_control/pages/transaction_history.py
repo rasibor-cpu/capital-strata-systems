@@ -77,7 +77,7 @@ def _history_table(rows: object) -> str:
             f"<td>{escape(_value(row, 'currency'))}</td>"
             f"<td>{escape(_value(row, 'description', _value(row, 'symbol')))}</td>"
             f"<td>{escape(_value(row, 'reference', ledger_id))}</td>"
-            f'<td><a class="mc-inline-action" href="{receipt_href}">View / Print</a></td>'
+            f'<td><a class="mc-inline-action" href="{receipt_href}">Generate Receipt</a></td>'
             "</tr>"
         )
     return (
