@@ -226,10 +226,35 @@ _UNAVAILABLE_TOKENS = {
 def ensure_mc_authorization_state(state: Mapping[str, Any] | dict[str, Any]) -> dict[str, Any]:
     """Ensure MC page state carries canonical auth (from prior overlay or explicit governance)."""
     state_dict = dict(state)
-    if isinstance(state_dict.get("authorization_context"), dict) and isinstance(
-        state_dict.get("reports_authorization"), dict
-    ):
-        return state_dict
+    raw_auth = state_dict.get("authorization_context")
+    if isinstance(raw_auth, dict):
+        if isinstance(state_dict.get("reports_authorization"), dict):
+            return state_dict
+        if bool(raw_auth.get("authenticated")) and bool(raw_auth.get("active")):
+            auth = context_from_identity(
+                user_id=str(raw_auth.get("user_id") or ""),
+                role=str(raw_auth.get("role") or ""),
+                display_name=str(raw_auth.get("display_name") or raw_auth.get("user_id") or ""),
+                unit=str(raw_auth.get("unit") or ""),
+                session_id=str(raw_auth.get("session_id") or ""),
+                channel="mission_control_shell",
+                identity_source=str(raw_auth.get("identity_source") or "provided_authorization_context"),
+                permission_source=str(raw_auth.get("permission_source") or "PermissionEngine"),
+                issued_at_utc=str(raw_auth.get("issued_at_utc") or ""),
+                expires_at_utc=str(raw_auth.get("expires_at_utc") or ""),
+                correlation_id=str(raw_auth.get("correlation_id") or "") or None,
+                active=True,
+            )
+            return apply_auth_to_mission_control_state(state_dict, auth)
+        return apply_auth_to_mission_control_state(
+            state_dict,
+            unauthenticated_context(
+                channel="mission_control_shell",
+                correlation_id=str(raw_auth.get("correlation_id") or "") or None,
+                denial_reason=str(raw_auth.get("denial_reason") or "authorization_context_not_active"),
+                identity_source=str(raw_auth.get("identity_source") or "provided_authorization_context"),
+            ),
+        )
     gov = state_dict.get("governance") if isinstance(state_dict.get("governance"), dict) else {}
     role = str(gov.get("role") or "").strip().upper()
     user_id = str(gov.get("current_user") or "").strip()
