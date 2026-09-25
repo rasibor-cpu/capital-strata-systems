@@ -211,7 +211,10 @@ def build_mission_control_state(
             runtime_state_hash=str(runtime_snapshot.get("state_hash") or DATA_UNAVAILABLE),
         ),
         "options_income": _options_income(sections),
-        "brokers": {**_brokers(broker, runtime_snapshot), "operator_selection": dict(broker_selection_source)},
+        "brokers": {
+            **_brokers(broker, runtime_snapshot),
+            "operator_selection": _safe_operator_broker_selection(broker_selection_source),
+        },
         "alerts": _alerts_from_runtime(alerts, runtime_snapshot),
         "certification": _certification(certification, broker, runtime_snapshot),
         "audit": _audit(sections),
@@ -1624,6 +1627,37 @@ def _safe_lease_health(source: Mapping[str, Any]) -> list[Any]:
         if isinstance(value, list):
             return value
     return []
+
+
+def _safe_operator_broker_selection(source: Mapping[str, Any]) -> dict[str, Any]:
+    """Project persisted broker choice strictly as preference metadata.
+
+    Persisted/session broker choice is never runtime activation or execution
+    authority. Safety fields are forced fail-closed even if a stale/corrupt
+    artifact contains conflicting values.
+    """
+    raw = dict(source or {})
+    broker = str(raw.get("selected_broker") or "").strip().upper()
+    mode = str(raw.get("broker_mode") or "").strip().upper()
+    if broker not in {"COINBASE", "OANDA", "QUESTRADE", "BINANCE"}:
+        broker = ""
+    if mode not in {"PAPER", "LIVE_READ_ONLY"}:
+        mode = ""
+    return {
+        "selected_broker": broker or None,
+        "broker_mode": mode or None,
+        "configured_by": raw.get("configured_by"),
+        "configured_at": raw.get("configured_at"),
+        "confirmed": bool(raw.get("confirmed")),
+        "confirmed_at": raw.get("confirmed_at"),
+        "runtime_application": str(raw.get("runtime_application") or "NEXT_SAFE_RECONCILIATION"),
+        "preference_only": True,
+        "runtime_activation_changed": False,
+        "execution_allowed": False,
+        "live_trading_blocked": True,
+        "broker_execution_armed": False,
+        "advisory_only": True,
+    }
 
 
 def _safe_enterprise_broker_runtime_source(source: Mapping[str, Any]) -> dict[str, Any]:
