@@ -67,6 +67,12 @@ class PasswordChangeRequired(Exception):
         self.user_id = user_id
 
 
+class RecoverySetupRequired(Exception):
+    def __init__(self, user_id: str) -> None:
+        super().__init__("RECOVERY_SETUP_REQUIRED")
+        self.user_id = user_id
+
+
 class PasswordValidationError(ValueError):
     pass
 
@@ -201,11 +207,18 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
             "lockout_started_at": None,
             "recovery_question": None,
             "recovery_answer_hash": None,
+            "recovery_required": True,
+            "recovery_configured_at": None,
         }
         for field, default in defaults.items():
             if field not in record:
                 record[field] = default
                 changed = True
+
+        recovery_required = not recovery_is_configured(record)
+        if bool(record.get("recovery_required", recovery_required)) != recovery_required:
+            record["recovery_required"] = recovery_required
+            changed = True
 
         history = record.get("password_history")
         if not isinstance(history, list):
@@ -295,6 +308,10 @@ def create_user(
         "lockout_until": None,
         "lockout_seconds": 0,
         "lockout_started_at": None,
+        "recovery_question": None,
+        "recovery_answer_hash": None,
+        "recovery_required": True,
+        "recovery_configured_at": None,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "created_by": str(actor_ctx.get("user_id", "")),
     }
@@ -479,6 +496,9 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     if password_expired(user_record):
         raise PasswordChangeRequired(normalized_user_id)
 
+    if not recovery_is_configured(user_record):
+        raise RecoverySetupRequired(normalized_user_id)
+
     user_ctx = build_user_context(user_record, normalized_user_id)
     
     # Latency tracking
@@ -532,6 +552,44 @@ def recovery_is_configured(user_record: Dict[str, Any]) -> bool:
     )
 
 
+def enroll_password_recovery(
+    users: Dict[str, Any],
+    user_id: str,
+    recovery_question: str,
+    recovery_answer: str,
+    confirm_answer: str | None = None,
+) -> None:
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        raise AuthFailure("USER_NOT_FOUND", "User ID not recognized.")
+
+    question = str(recovery_question or "").strip()
+    if question not in RECOVERY_QUESTIONS:
+        raise PasswordValidationError("Select a valid recovery question.")
+
+    answer = str(recovery_answer or "")
+    if confirm_answer is not None and answer != str(confirm_answer or ""):
+        raise PasswordValidationError("Recovery answers do not match.")
+
+    answer_hash = hash_recovery_answer(answer)
+    if not answer_hash:
+        raise PasswordValidationError("Recovery answer cannot be blank.")
+
+    user_record["recovery_question"] = question
+    user_record["recovery_answer_hash"] = answer_hash
+    user_record["recovery_required"] = False
+    user_record["recovery_configured_at"] = datetime.now(timezone.utc).isoformat()
+    save_users(users)
+
+    record_auth_audit_event(
+        "password_recovery_configured",
+        normalized_user_id,
+        "SUCCESS",
+        auth_source="interactive",
+    )
+
+
 def configure_password_recovery(
     users: Dict[str, Any],
     user_id: str,
@@ -551,23 +609,11 @@ def configure_password_recovery(
             "Current password is incorrect.",
         )
 
-    question = str(recovery_question or "").strip()
-    if question not in RECOVERY_QUESTIONS:
-        raise PasswordValidationError("Select a valid recovery question.")
-
-    answer_hash = hash_recovery_answer(recovery_answer)
-    if not answer_hash:
-        raise PasswordValidationError("Recovery answer cannot be blank.")
-
-    user_record["recovery_question"] = question
-    user_record["recovery_answer_hash"] = answer_hash
-    save_users(users)
-
-    record_auth_audit_event(
-        "password_recovery_configured",
+    enroll_password_recovery(
+        users,
         normalized_user_id,
-        "SUCCESS",
-        auth_source="interactive",
+        recovery_question,
+        recovery_answer,
     )
 
 
@@ -2183,6 +2229,8 @@ def _default_admin_record(bootstrap_password: str) -> Dict[str, Any]:
         "lockout_started_at": None,
         "recovery_question": None,
         "recovery_answer_hash": None,
+        "recovery_required": True,
+        "recovery_configured_at": None,
     }
 
 
