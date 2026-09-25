@@ -660,6 +660,39 @@ def create_mission_control_router(state_provider: StateProvider | None = None) -
             safe_serialize(_read_only_payload(ReportsCenterService().audit_history(report_id, role=role)))
         )
 
+    @router.get("/mission-control/user-account-configuration", response_class=HTMLResponse)
+    async def user_account_configuration_page(request: Request) -> HTMLResponse:
+        from dashboard.auth.css_sign_on import available_roles, list_user_summaries, load_users
+        from dashboard.enterprise_shell.operator_configuration import (
+            load_user_account_profiles,
+            public_user_account_configuration,
+        )
+
+        auth = resolve_authorization_context(channel="mission_control_user_account_configuration", request=request)
+        if not auth.authenticated or not auth.active:
+            return HTMLResponse("Authentication required.", status_code=401)
+
+        all_users = list(list_user_summaries(load_users()))
+        all_profiles = load_user_account_profiles()
+        role = str(auth.role or "").upper()
+        if role in {"SUPER_USER", "ADMIN"}:
+            visible_users = all_users
+            visible_profiles = all_profiles
+        else:
+            uid = str(auth.user_id or "")
+            visible_users = [row for row in all_users if str(row.get("user_id") or "") == uid]
+            visible_profiles = {uid: all_profiles[uid]} if uid in all_profiles else {}
+
+        cfg = public_user_account_configuration(visible_users)
+        cfg["profiles"] = visible_profiles
+        cfg["roles"] = list(available_roles()) if role in {"SUPER_USER", "ADMIN"} else []
+        current = state(request)
+        current["user_account_configuration"] = cfg
+        return HTMLResponse(
+            render_mission_control_shell(current, active_section="user_account_configuration"),
+            headers={"Cache-Control": "no-store"},
+        )
+
     @router.get("/mission-control/transaction-history", response_class=HTMLResponse)
     async def transaction_history_page(
         request: Request,
