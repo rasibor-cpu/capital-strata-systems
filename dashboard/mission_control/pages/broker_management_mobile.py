@@ -126,7 +126,7 @@ def render(state: dict) -> str:
     broker_list = brokers.get("broker_list") if isinstance(brokers.get("broker_list"), list) else []
     operator_selection = brokers.get("operator_selection") if isinstance(brokers.get("operator_selection"), dict) else {}
     auth = state.get("authorization_context") if isinstance(state.get("authorization_context"), dict) else {}
-    can_configure = bool(auth.get("authenticated", True)) and bool(auth.get("active", True))
+    can_configure = bool(auth.get("authenticated")) and bool(auth.get("active"))
     telemetry = section(state, "broker_telemetry")
     runtime = section(state, "enterprise_broker_runtime")
     balance = section(state, "broker_balance_summary")
