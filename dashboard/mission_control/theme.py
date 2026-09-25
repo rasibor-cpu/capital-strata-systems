@@ -96,6 +96,35 @@ body.mc-body {
 }
 .mc-logout-btn:focus-visible { outline: 2px solid var(--mc-bad); outline-offset: 2px; }
 .mc-main { min-width: 0; position: relative; z-index: 1; }
+.mc-global-balance {
+  position: sticky;
+  top: 0;
+  z-index: 22;
+  display: grid;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--mc-line);
+  background: rgba(15, 20, 25, .97);
+  backdrop-filter: blur(8px);
+}
+.mc-balance-main { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.mc-balance-label { color: var(--mc-muted); font-size: .82rem; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; }
+.mc-balance-main strong { font-size: 1.15rem; }
+.mc-balance-eye {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--mc-line);
+  border-radius: 999px;
+  background: var(--mc-panel);
+  color: var(--mc-text);
+  font: inherit;
+  cursor: pointer;
+}
+.mc-eye-closed { display: none; }
+.mc-balance-masked .mc-eye-open { display: none; }
+.mc-balance-masked .mc-eye-closed { display: inline; }
+.mc-balance-meta { display: flex; gap: 10px 16px; flex-wrap: wrap; color: var(--mc-muted); font-size: .78rem; }
+.mc-balance-meta b { color: var(--mc-text); }
 .mc-topbar {
   position: sticky;
   top: 0;
