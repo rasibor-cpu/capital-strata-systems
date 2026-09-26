@@ -61,6 +61,8 @@ FUTURE_SKEW_SECONDS = 5 * 60
 WRITER_ROLE = "ov002_monitor"
 CRITICAL_LEDGER_FILENAME = "CRITICAL_EVENTS.jsonl"
 INVALIDATION_BLOCKED_FILENAME = "INVALIDATION_BLOCKED.json"
+HTTP_CONFIRM_ATTEMPTS = 3
+HTTP_CONFIRM_DELAY_SECONDS = 1.0
 
 
 def _utc_now() -> datetime:
@@ -520,6 +522,51 @@ def _http_json(path: str, timeout: float = 8.0) -> tuple[int | None, Any]:
         return None, {"error": str(exc), "url": url}
 
 
+def _http_json_confirmed(
+    path: str,
+    *,
+    timeout: float = 8.0,
+    attempts: int = HTTP_CONFIRM_ATTEMPTS,
+    delay_seconds: float = HTTP_CONFIRM_DELAY_SECONDS,
+) -> tuple[int | None, Any, dict[str, Any]]:
+    """Confirm transport-level reachability failures without weakening HTTP failures.
+
+    HTTP responses of any status are authoritative immediately.  Only a transport
+    failure (status is None: timeout, refusal, socket error, etc.) receives bounded
+    confirmation attempts.  Persistent transport failure remains unreachable.
+    """
+    max_attempts = max(1, int(attempts))
+    observations: list[dict[str, Any]] = []
+
+    for attempt in range(1, max_attempts + 1):
+        status, payload = _http_json(path, timeout=timeout)
+        observations.append(
+            {
+                "attempt": attempt,
+                "status": status,
+                "transport_failure": status is None,
+                "error": payload.get("error") if isinstance(payload, dict) else None,
+            }
+        )
+
+        # Any actual HTTP response is authoritative; do not retry 4xx/5xx.
+        if status is not None:
+            return status, payload, {
+                "attempts": attempt,
+                "recovered_after_transport_failure": attempt > 1,
+                "observations": observations,
+            }
+
+        if attempt < max_attempts and delay_seconds > 0:
+            time.sleep(delay_seconds)
+
+    return None, payload, {
+        "attempts": max_attempts,
+        "recovered_after_transport_failure": False,
+        "observations": observations,
+    }
+
+
 def machine_identity() -> dict[str, Any]:
     return {
         "hostname": socket.gethostname(),
@@ -750,8 +797,8 @@ def capture_health_snapshot(
 ) -> dict[str, Any]:
     now = time.time()
     elapsed_h = (now - start_epoch) / 3600.0
-    health_code, health = _http_json("/health")
-    mode_code, runtime = _http_json("/api/runtime-mode")
+    health_code, health, health_probe = _http_json_confirmed("/health")
+    mode_code, runtime, runtime_probe = _http_json_confirmed("/api/runtime-mode")
     auth_code, authority = _http_json("/api/v1/live-execution-authority")
     telem_code, telem = _http_json("/api/runtime-telemetry")
     oi_code, oi = _http_json("/api/options-income/status")
@@ -823,7 +870,9 @@ def capture_health_snapshot(
         "synthetic_timing": False,
         "health_http": health_code,
         "health": health if isinstance(health, dict) else {"payload": health},
+        "health_probe_confirmation": health_probe,
         "runtime_http": mode_code,
+        "runtime_probe_confirmation": runtime_probe,
         "runtime_mode": runtime.get("runtime_mode"),
         "advisory_only": runtime.get("advisory_only"),
         "fail_closed": runtime.get("fail_closed"),

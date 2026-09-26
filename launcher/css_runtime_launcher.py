@@ -6,6 +6,8 @@ import socket
 import threading
 import json
 import subprocess
+import urllib.error
+import urllib.request
 from typing import Any, List
 
 # Ensure repository root is in PYTHONPATH
@@ -43,6 +45,11 @@ CANONICAL_DASHBOARD_SCRIPT_SUFFIX = os.path.normcase(
 CANONICAL_MOBILE_SCRIPT_SUFFIX = os.path.normcase(
     os.path.join("launcher", "css_mobile_launcher.py")
 )
+MOBILE_HEALTH_URL = "http://127.0.0.1:8765/health"
+MOBILE_HEALTH_TIMEOUT_SECONDS = 2.0
+MOBILE_HEALTH_FAILURE_THRESHOLD = 3
+
+
 _PYTHON_INTERPRETER_NAMES = {
     "python",
     "python.exe",
@@ -795,6 +802,62 @@ def output_stream_reader(stream, service_name):
                 print(f"[{service_name}] {line.strip()}")
         stream.close()
 
+def probe_mobile_http_health(
+    *,
+    url: str = MOBILE_HEALTH_URL,
+    timeout: float = MOBILE_HEALTH_TIMEOUT_SECONDS,
+) -> bool:
+    """Return True only when the canonical mobile HTTP health endpoint responds 200.
+
+    This is a liveness probe, not a certification decision.  Transport errors,
+    connection failures, and timeouts return False.  HTTP non-200 responses also
+    return False and remain fail-closed.
+    """
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as response:
+            return int(response.status) == 200
+    except (urllib.error.URLError, TimeoutError, OSError):
+        return False
+    except Exception:
+        return False
+
+
+def monitor_mobile_http_liveness(
+    mobile_service: CSSServiceManager,
+    consecutive_failures: int,
+) -> int:
+    """Track consecutive HTTP liveness failures for the Mobile Launcher.
+
+    A single transient miss never mutates service state.  Three consecutive
+    failures mark the still-running child FAILED so the existing supervised
+    restart machinery can terminate/restart it under the normal restart limit.
+
+    A successful probe resets the counter.
+    """
+    status = mobile_service.check_status()
+
+    if status != "RUNNING":
+        return 0
+
+    if probe_mobile_http_health():
+        return 0
+
+    failures = int(consecutive_failures) + 1
+    print(
+        f"[Mobile Launcher] HTTP liveness failure "
+        f"{failures}/{MOBILE_HEALTH_FAILURE_THRESHOLD}"
+    )
+
+    if failures >= MOBILE_HEALTH_FAILURE_THRESHOLD:
+        print(
+            "[Mobile Launcher] HTTP endpoint remained unresponsive; "
+            "escalating to supervised restart."
+        )
+        mobile_service.status = "FAILED"
+
+    return failures
+
+
 def monitor_and_restart_services(
     services: List[CSSServiceManager],
     supervisor: CSSRuntimeSupervisor,
@@ -932,6 +995,8 @@ def run_launcher():
         print("Supervisor ......... RUNNING")
         print(f"\nSYSTEM STATUS ...... {system_status}\n")
 
+        mobile_health_failures = 0
+
         while True:
             time.sleep(10)
             supervisor.heartbeat()
@@ -959,7 +1024,20 @@ def run_launcher():
                     }
                 )
             _record_process_tree_or_fail(supervisor, services)
+
+            mobile_health_failures = monitor_mobile_http_liveness(
+                mobile_svc,
+                mobile_health_failures,
+            )
+
             monitor_and_restart_services(services, supervisor)
+
+            # If a supervised restart occurred, the new child must begin with a
+            # fresh liveness counter.  OV002 still observes that restart through
+            # supervisor restart/process-generation evidence and invalidates.
+            if mobile_svc.check_status() == "RUNNING":
+                if probe_mobile_http_health():
+                    mobile_health_failures = 0
     except KeyboardInterrupt:
         print("\nShutdown requested...")
     finally:
