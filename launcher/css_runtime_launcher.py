@@ -49,6 +49,9 @@ MOBILE_HEALTH_URL = "http://127.0.0.1:8765/health"
 MOBILE_HEALTH_TIMEOUT_SECONDS = 2.0
 MOBILE_HEALTH_FAILURE_THRESHOLD = 3
 
+PROCESS_IDENTITY_PROBE_ATTEMPTS = 3
+PROCESS_IDENTITY_PROBE_RETRY_DELAY_SECONDS = 0.25
+
 
 _PYTHON_INTERPRETER_NAMES = {
     "python",
@@ -681,9 +684,25 @@ def check_environment() -> bool:
 def _live_process_fields(pid: int | None, *, role: str) -> dict[str, Any]:
     if pid is None:
         raise RuntimeError(f"process_identity_pid_missing:{role}")
-    live = default_identity_probe(int(pid))
+
+    live = None
+    pid_value = int(pid)
+
+    for attempt in range(1, PROCESS_IDENTITY_PROBE_ATTEMPTS + 1):
+        # Do not catch provider exceptions here.  An exception is materially
+        # different from the transient "no identity returned" race and must
+        # continue to fail closed immediately.
+        live = default_identity_probe(pid_value)
+
+        if isinstance(live, dict):
+            break
+
+        if attempt < PROCESS_IDENTITY_PROBE_ATTEMPTS:
+            time.sleep(PROCESS_IDENTITY_PROBE_RETRY_DELAY_SECONDS)
+
     if not isinstance(live, dict):
         raise RuntimeError(f"process_identity_unavailable:{role}")
+
     required = (
         "parent_pid",
         "creation_time",
@@ -693,9 +712,12 @@ def _live_process_fields(pid: int | None, *, role: str) -> dict[str, Any]:
     )
     missing = [field for field in required if live.get(field) in (None, "")]
     if missing:
+        # A returned identity object that is incomplete is not treated as a
+        # transient enumeration miss.  Preserve strict fail-closed behavior.
         raise RuntimeError(
             f"process_identity_live_fields_missing:{role}:{','.join(missing)}"
         )
+
     return {
         "parent_pid": live["parent_pid"],
         "creation_time": live["creation_time"],
