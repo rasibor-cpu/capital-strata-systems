@@ -37,8 +37,12 @@ class ReconciliationException:
 
 
 class ReconciliationService:
-    def __init__(self):
+    def __init__(self, repository=None):
+        self.repository = repository
         self.exceptions: Dict[str, ReconciliationException] = {}
+        if repository is not None:
+            for item in repository.list_all():
+                self.exceptions[self._key(item.collection_id, item.reason, item.expected, item.observed)] = item
 
     def reconcile(self, collection: CollectionTransaction, evidence: SettlementEvidence) -> ReconciliationState:
         checks = [
@@ -72,15 +76,27 @@ class ReconciliationService:
         item.resolved_at = datetime.utcnow()
         item.resolved_by = resolved_by
         item.resolution_reference = resolution_reference
+        if self.repository is not None:
+            self.repository.save(
+                item,
+                exception_key=self._key(item.collection_id, item.reason, item.expected, item.observed),
+            )
         return item
 
     def open_exceptions(self):
         return [item for item in self.exceptions.values() if item.resolved_at is None]
 
+    @staticmethod
+    def _key(collection_id, reason, expected, observed):
+        return f"{collection_id}:{reason}:{expected}:{observed}"
+
     def _raise(self, collection, reason, expected, observed):
-        key = f"{collection.collection_id}:{reason}:{expected}:{observed}"
+        key = self._key(collection.collection_id, reason, expected, observed)
         if key not in self.exceptions:
-            self.exceptions[key] = ReconciliationException(
+            item = ReconciliationException(
                 collection_id=collection.collection_id, reason=reason,
                 expected=str(expected), observed=str(observed),
             )
+            self.exceptions[key] = item
+            if self.repository is not None:
+                self.repository.save(item, exception_key=key)
