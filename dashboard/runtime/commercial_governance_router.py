@@ -210,4 +210,5 @@ def commercial_governance_router_from_env(env=None) -> Optional[APIRouter]:
     return create_commercial_governance_router(
         controls=controls, reconciliation=reconciliation, collections=CollectionRepository(db_path),
         history=CollectionHistoryRepository(db_path), audit=audit,
+        session_resolver=token_store_session_resolver,
     )

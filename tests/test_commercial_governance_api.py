@@ -237,3 +237,35 @@ def test_web_app_mounts_governance_api_only_when_configured(tmp_path, monkeypatc
     assert client.get("/api/v1/commercial/reconciliation/exceptions").status_code == 401
     assert client.get("/api/v1/commercial/audit", headers=bearer("forged")).status_code == 401
     assert db.exists()
+
+
+def test_app_restart_preserves_pending_actions_and_resumes_interrupted_approvals(env, tmp_path, monkeypatch):
+    from dashboard.web.web_app import create_app
+    from engine.commercial.commercial_controls import ControlledActionStore
+
+    _, recon, controls, audit, db = env
+    monkeypatch.setenv("CSS_COMMERCIAL_DB", db)
+    import dashboard.runtime.commercial_governance_router as router_module
+    monkeypatch.setattr(router_module, "token_store_session_resolver", SESSIONS.get)
+
+    first = TestClient(create_app())
+    exception_id = first.get("/api/v1/commercial/reconciliation/exceptions", headers=bearer("tok-auditor")).json()["open_exceptions"][0]["exception_id"]
+    pending = first.post(f"/api/v1/commercial/reconciliation/exceptions/{exception_id}/resolution-requests",
+                         json={"resolution_reference": "ticket-9", "idempotency_key": "restart-1"}, headers=bearer("tok-maker")).json()["controlled_action"]
+
+    # Process restart: the pending action is still there and still approvable.
+    second = TestClient(create_app())
+    listed = second.get("/api/v1/commercial/controlled-actions?status=PENDING", headers=bearer("tok-auditor")).json()["controlled_actions"]
+    assert [a["action_id"] for a in listed] == [pending["action_id"]]
+
+    # Crash between committing APPROVED and executing it.
+    store = ControlledActionStore(db)
+    assert store.transition(pending["action_id"], expected="PENDING", new="APPROVED", checker_id="head-fincon-01", checker_role="HEAD_FINCON")
+
+    third = TestClient(create_app())  # mount-time resume
+    done = third.get("/api/v1/commercial/controlled-actions?status=EXECUTED", headers=bearer("tok-auditor")).json()["controlled_actions"]
+    assert [a["action_id"] for a in done] == [pending["action_id"]]
+    assert third.get("/api/v1/commercial/reconciliation/exceptions", headers=bearer("tok-auditor")).json()["open_exceptions"] == []
+    TestClient(create_app())  # a further restart must not execute it again
+    executions = [e for e in CommercialAuditLog(db).events(object_id=pending["action_id"]) if e.action == "EXECUTE"]
+    assert len(executions) == 1 and CommercialAuditLog(db).verify().ok
