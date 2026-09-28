@@ -7,6 +7,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Dict, Optional
 
+from engine.commercial.collection_history import RECONCILED, CollectionHistoryRepository
 from engine.domain.collections import CollectionStatus, CollectionTransaction
 from engine.ledger.ledger_models import LedgerEntry, LedgerTransaction
 from engine.ledger.ledger_store import LedgerStore
@@ -33,8 +34,11 @@ _ALLOWED = {
 
 
 class CollectionService:
-    def __init__(self, ledger: LedgerStore):
+    def __init__(self, ledger: LedgerStore, history: Optional[CollectionHistoryRepository] = None):
         self.ledger = ledger
+        # Optional append-only lifecycle history; when provided every state a
+        # collection reaches (and its reconciliation) is recorded exactly once.
+        self.history = history
         self._by_idempotency: Dict[str, CollectionTransaction] = {}
 
     def register(self, collection: CollectionTransaction) -> CollectionTransaction:
@@ -70,6 +74,7 @@ class CollectionService:
         if new_status == CollectionStatus.SETTLED and not settlement_reference:
             raise ValueError("settlement reference required")
 
+        previous = collection.status
         collection.status = new_status
         if provider_reference:
             collection.provider_reference = provider_reference
@@ -78,6 +83,13 @@ class CollectionService:
         if new_status == CollectionStatus.SETTLED:
             collection.settlement_reference = settlement_reference
             collection.settled_at = datetime.utcnow()
+        if self.history is not None:
+            self.history.record(
+                collection.collection_id, from_status=previous.value, to_status=new_status.value,
+                provider_reference=collection.provider_reference,
+                settlement_reference=collection.settlement_reference,
+                ledger_txn_id=collection.ledger_txn_id,
+            )
         return collection
 
     def post_fee_obligation(self, collection: CollectionTransaction) -> LedgerTransaction:
@@ -144,8 +156,18 @@ class CollectionService:
             raise InvalidCollectionTransition("reconciliation requires posted settlement")
         if not reconciliation_reference:
             raise ValueError("reconciliation reference required")
+        if collection.reconciled_at is not None:
+            if collection.meta.get("reconciliation_reference") != reconciliation_reference:
+                raise ValueError("collection is already reconciled under a different reference")
+            return
         collection.reconciled_at = datetime.utcnow()
         collection.meta["reconciliation_reference"] = reconciliation_reference
+        if self.history is not None:
+            self.history.record(
+                collection.collection_id, from_status=collection.status.value, to_status=RECONCILED,
+                settlement_reference=collection.settlement_reference, ledger_txn_id=collection.ledger_txn_id,
+                reconciliation_reference=reconciliation_reference,
+            )
 
     def _post_once_amount(
         self, collection: CollectionTransaction, *, amount: Decimal,
