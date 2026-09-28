@@ -25,8 +25,10 @@ No commit in this package adds collection initiation, customer charging, provide
 |---|---|---|---|
 | `39f81c3` (prior head) | Collections, receipts gate, fee/terminal accounting, reconciliation + durable exception history | 2031 full suite | CI-VERIFIED (5/5) |
 | `b4a126a` COM-008 | RBAC (commercial grants on the existing PermissionEngine roles, fail closed), durable maker-checker, append-only hash-chained audit | +35 | 2066 local; mutation-checked (self-approval, payload hash, approve-time validation, compare-and-set, triggers, role check, unknown action); **CI-VERIFIED 5/5** |
-| `26f7a2c` COM-009 | Append-only collection lifecycle history; deterministic PAID receipts; adjustment receipts; deterministic statements | +9 | 2075 local; failing-before shown (receipt non-determinism); mutation-checked (paid classification, receipt id, history triggers, re-reconcile overwrite, customer scope, original-receipt check). CI: see PR checks for this SHA |
-| `e499446` COM-010 | Authenticated commercial governance API (bearer session, server-side RBAC, maker-checker over HTTP), env-gated mounting | +74 | 2149 local; mutation-checked (session acceptance, role selection, bearer scheme, hash pattern). CI: see PR checks for this SHA |
+| `26f7a2c` COM-009 | Append-only collection lifecycle history; deterministic PAID receipts; adjustment receipts; deterministic statements | +9 | 2075 local; failing-before shown (receipt non-determinism); mutation-checked (paid classification, receipt id, history triggers, re-reconcile overwrite, customer scope, original-receipt check). CI-VERIFIED on `640f4c6d` (5/5) |
+| `e499446` COM-010 | Authenticated commercial governance API (bearer session, server-side RBAC, maker-checker over HTTP), env-gated mounting | +74 | 2149 local; mutation-checked (session acceptance, role selection, bearer scheme, hash pattern). CI failed on this SHA (test harness needed `httpx2` on CI's Starlette 1.7.0); fixed in `640f4c6d`, **CI-VERIFIED 5/5** there |
+| `640f4c6d` | CI fix: dependency-free ASGI test client | 0 | Failure reproduced and fix verified in a clean venv matching CI; **CI-VERIFIED 5/5** |
+| (next) | External audit anchoring: `write_anchor` / `verify_against_anchors` | +3 | Detects consistent chain rebuilds, truncation and in-place rewrites with recomputed hashes; refuses to anchor an invalid chain; mutation-checked |
 
 ## Control evidence
 
@@ -58,7 +60,7 @@ No commit in this package adds collection initiation, customer charging, provide
 2. **No operator web identities.** The only web session is the superuser's (role `superuser`), which maps to no commercial permission. The governance API is therefore unusable until FINCON, HEAD_FINCON, AUDIT and compliance operator identities are provisioned. This is correct fail-closed behaviour.
 3. **Statement scope.** Statement access is operator-scoped (any commercial viewer can read any customer). Customer self-service would additionally need an ownership check.
 4. **Legacy direct resolution path.** `ReconciliationService.resolve_exception` is still callable directly by internal code; only the API path is forced through maker-checker.
-5. **Audit anchoring.** The audit head hash is not anchored outside the database.
+5. **Audit anchoring.** Checkpoint export and verification exist (`write_anchor`, `verify_against_anchors`). They only protect against a database-file writer if the anchor file lives on separate, write-once storage, which is a deployment responsibility, not yet in place.
 6. **Mission Control UI.** It does not yet render the commercial views; the API is ready for it.
 7. **External and owner gates.** UAT with real operators, an external audit, provider integration and any production activation remain outstanding. None is claimed.
 

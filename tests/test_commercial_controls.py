@@ -351,3 +351,84 @@ def test_audit_history_survives_restart_and_chain_continues(db):
     e2 = restarted.append(action="B", object_type="t", outcome=AuditOutcome.SUCCEEDED)
     assert e2.prev_hash == e1.event_hash
     assert [e.action for e in restarted.events()] == ["A", "B"] and restarted.verify().ok
+
+
+# --- external anchoring --------------------------------------------------------
+
+def test_anchor_detects_consistent_chain_rebuild(tmp_path):
+    from engine.commercial.commercial_audit import verify_against_anchors, write_anchor
+
+    db = str(tmp_path / "audit.sqlite3")
+    anchors = str(tmp_path / "anchors" / "audit_anchor.jsonl")
+    log = CommercialAuditLog(db)
+    for i in range(3):
+        log.append(action=f"A{i}", object_type="t", outcome=AuditOutcome.SUCCEEDED, actor_id="alice")
+    anchor = write_anchor(log, anchors)
+    assert anchor.seq == 3 and verify_against_anchors(log, anchors).ok
+    log.append(action="A3", object_type="t", outcome=AuditOutcome.SUCCEEDED)
+    assert verify_against_anchors(log, anchors).ok, "appending after an anchor is legitimate"
+
+    # An attacker with file access rebuilds a perfectly consistent chain.
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TRIGGER commercial_audit_events_no_delete")
+    conn.execute("DELETE FROM commercial_audit_events")
+    conn.commit()
+    conn.close()
+    forged = CommercialAuditLog(db)
+    for i in range(4):
+        forged.append(action=f"A{i}", object_type="t", outcome=AuditOutcome.SUCCEEDED, actor_id="mallory")
+    assert forged.verify().ok, "the rebuilt chain is internally consistent"
+    result = verify_against_anchors(forged, anchors)
+    assert not result.ok and result.anchor_seq == 3
+
+
+def test_anchor_detects_truncation_and_refuses_to_bless_tampering(tmp_path):
+    from engine.commercial.commercial_audit import verify_against_anchors, write_anchor
+
+    db = str(tmp_path / "audit.sqlite3")
+    anchors = str(tmp_path / "audit_anchor.jsonl")
+    log = CommercialAuditLog(db)
+    assert write_anchor(log, anchors) is None
+    for i in range(2):
+        log.append(action=f"A{i}", object_type="t", outcome=AuditOutcome.SUCCEEDED)
+    write_anchor(log, anchors)
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TRIGGER commercial_audit_events_no_update")
+    conn.execute("UPDATE commercial_audit_events SET actor_id='mallory' WHERE seq=1")
+    conn.commit()
+    conn.close()
+    assert not verify_against_anchors(log, anchors).ok
+    with pytest.raises(ValueError, match="refusing to anchor"):
+        write_anchor(log, anchors)
+
+
+def test_anchor_detects_in_place_rewrite_with_recomputed_hashes(tmp_path):
+    from dataclasses import asdict
+    from engine.commercial.commercial_audit import GENESIS_HASH, _event_hash, verify_against_anchors, write_anchor
+
+    db = str(tmp_path / "audit.sqlite3")
+    anchors = str(tmp_path / "audit_anchor.jsonl")
+    log = CommercialAuditLog(db)
+    for i in range(3):
+        log.append(action=f"A{i}", object_type="t", outcome=AuditOutcome.SUCCEEDED, actor_id="alice")
+    write_anchor(log, anchors)
+
+    # Rewrite seq 2's actor and recompute every hash: same seqs, same count,
+    # internally consistent chain. Only the external anchor can tell.
+    conn = sqlite3.connect(db)
+    conn.execute("DROP TRIGGER commercial_audit_events_no_update")
+    prev = GENESIS_HASH
+    for event in log.events():
+        content = asdict(event)
+        if event.seq == 2:
+            content["actor_id"] = "mallory"
+        new_hash = _event_hash(prev, content)
+        conn.execute("UPDATE commercial_audit_events SET actor_id=?, prev_hash=?, event_hash=? WHERE seq=?",
+                     (content["actor_id"], prev, new_hash, event.seq))
+        prev = new_hash
+    conn.commit()
+    conn.close()
+
+    assert log.verify().ok and [e.seq for e in log.events()] == [1, 2, 3]
+    result = verify_against_anchors(log, anchors)
+    assert not result.ok and "rewritten" in result.problem

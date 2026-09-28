@@ -215,3 +215,78 @@ class CommercialAuditLog:
     def head_hash(self) -> str:
         events = self.events()
         return events[-1].event_hash if events else GENESIS_HASH
+
+
+# ---------------------------------------------------------------------------
+# External anchoring
+#
+# The hash chain detects edits, but whoever can write the database file can
+# rebuild a fully consistent chain. Periodically recording (seq, head hash)
+# checkpoints somewhere the database writer cannot rewrite, and verifying
+# the live chain against them, detects that too. This module appends
+# checkpoints to a JSONL file; keeping that file on separate, write-once
+# storage is a deployment responsibility.
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AuditAnchor:
+    seq: int
+    event_hash: str
+    events: int
+    anchored_at: str
+
+
+@dataclass(frozen=True)
+class AnchorVerification:
+    ok: bool
+    anchors_checked: int
+    problem: Optional[str] = None
+    anchor_seq: Optional[int] = None
+
+
+def write_anchor(log: "CommercialAuditLog", anchor_path: str) -> Optional[AuditAnchor]:
+    """Append a checkpoint of the current head to ``anchor_path``.
+
+    Refuses to anchor a chain that does not verify, so a tampered chain can
+    never be blessed by a new checkpoint. Returns None for an empty log.
+    """
+    verification = log.verify()
+    if not verification.ok:
+        raise ValueError(f"refusing to anchor an invalid audit chain (seq {verification.first_invalid_seq}: {verification.problem})")
+    events = log.events()
+    if not events:
+        return None
+    head = events[-1]
+    anchor = AuditAnchor(seq=head.seq, event_hash=head.event_hash, events=len(events),
+                         anchored_at=datetime.now(timezone.utc).isoformat())
+    path = Path(anchor_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(json.dumps(asdict(anchor), sort_keys=True) + "\n")
+    return anchor
+
+
+def read_anchors(anchor_path: str) -> List[AuditAnchor]:
+    path = Path(anchor_path)
+    if not path.exists():
+        return []
+    return [AuditAnchor(**json.loads(line)) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+
+
+def verify_against_anchors(log: "CommercialAuditLog", anchor_path: str) -> AnchorVerification:
+    """Every anchored event must still exist with the same hash, the chain
+    must verify, and no anchored history may have been truncated."""
+    anchors = read_anchors(anchor_path)
+    chain = log.verify()
+    if not chain.ok:
+        return AnchorVerification(False, 0, f"chain invalid at seq {chain.first_invalid_seq}: {chain.problem}")
+    by_seq = {e.seq: e for e in log.events()}
+    for anchor in anchors:
+        event = by_seq.get(anchor.seq)
+        if event is None:
+            return AnchorVerification(False, len(anchors), "anchored event is missing (history truncated or rebuilt)", anchor.seq)
+        if event.event_hash != anchor.event_hash:
+            return AnchorVerification(False, len(anchors), "anchored event hash differs (history rewritten)", anchor.seq)
+        if sum(1 for s in by_seq if s <= anchor.seq) != anchor.events:
+            return AnchorVerification(False, len(anchors), "event count before anchor changed", anchor.seq)
+    return AnchorVerification(True, len(anchors))
