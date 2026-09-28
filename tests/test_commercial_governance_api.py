@@ -5,7 +5,7 @@ from decimal import Decimal
 
 import pytest
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from tests.asgi_test_client import AsgiTestClient as TestClient
 
 from dashboard.runtime.commercial_governance_router import (
     SAFETY_POSTURE,
