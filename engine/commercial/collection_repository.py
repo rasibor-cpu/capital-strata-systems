@@ -8,7 +8,7 @@ import sqlite3
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Optional
+from typing import List, Optional
 
 from engine.domain.collections import CollectionStatus, CollectionTransaction
 
@@ -76,6 +76,14 @@ class CollectionRepository:
                 "SELECT * FROM commercial_collections WHERE idempotency_key=?", (key,)
             ).fetchone()
         return self._hydrate(row) if row else None
+
+    def list_for_customer(self, customer_id: str) -> List[CollectionTransaction]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM commercial_collections WHERE customer_id=? ORDER BY obligation_id, collection_id",
+                (customer_id,),
+            ).fetchall()
+        return [self._hydrate(r) for r in rows]
 
     @staticmethod
     def _dt(value):
