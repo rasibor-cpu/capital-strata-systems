@@ -3,6 +3,48 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 
+# ---------------------------------------------------------------------------
+# Commercial collections permissions
+#
+# Viewing is limited to financial control, audit and compliance. Only financial
+# control may prepare (make) controlled commercial actions; only heads of
+# financial control or compliance may approve (check) them, and maker-checker
+# additionally requires the checker to be a different person. SUPER_USER,
+# ADMIN, TECH and trading roles receive no commercial rights by design.
+# ---------------------------------------------------------------------------
+COMMERCIAL_VIEW_ACTIONS = frozenset({
+    "commercial_view_obligations",
+    "commercial_view_collections",
+    "commercial_view_reconciliation",
+    "commercial_view_exceptions",
+    "commercial_view_receipts",
+    "commercial_view_statements",
+})
+COMMERCIAL_ROLE_GRANTS: dict[str, frozenset[str]] = {
+    "FINCON": COMMERCIAL_VIEW_ACTIONS | {
+        "commercial_prepare_action",
+        "commercial_generate_receipt",
+        "commercial_generate_statement",
+    },
+    "HEAD_FINCON": COMMERCIAL_VIEW_ACTIONS | {
+        "commercial_prepare_action",
+        "commercial_approve_action",
+        "commercial_generate_receipt",
+        "commercial_generate_statement",
+        "commercial_view_audit",
+        "commercial_administer_configuration",
+    },
+    "AUDIT": COMMERCIAL_VIEW_ACTIONS | {"commercial_view_audit"},
+    "HEAD_AUDIT": COMMERCIAL_VIEW_ACTIONS | {"commercial_view_audit"},
+    "COMPLIANCE": COMMERCIAL_VIEW_ACTIONS,
+    "HEAD_COMPLIANCE": COMMERCIAL_VIEW_ACTIONS | {
+        "commercial_approve_action",
+        "commercial_view_audit",
+    },
+}
+COMMERCIAL_ACTIONS = frozenset().union(*COMMERCIAL_ROLE_GRANTS.values())
+
+
 @dataclass
 class PermissionResult:
     allowed: bool
@@ -369,6 +411,9 @@ class PermissionEngine:
                 "view_reports",
             },
         }
+        # Commercial collections controls (least privilege, additive only).
+        for role, actions in COMMERCIAL_ROLE_GRANTS.items():
+            self.permissions[role] = set(self.permissions[role]) | set(actions)
 
     def normalize(self, text: str) -> str:
         text = str(text).strip().lower()
