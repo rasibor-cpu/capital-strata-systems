@@ -22,6 +22,7 @@ from dashboard.runtime.payment_collection_preflight_router import create_payment
 from dashboard.runtime.notification_delivery_preflight_router import create_notification_delivery_preflight_router
 from dashboard.runtime.launch_dossier_router import create_launch_dossier_router
 from dashboard.runtime.report_export_router import create_report_export_router
+from dashboard.runtime.commercial_governance_router import commercial_governance_router_from_env
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -67,6 +68,12 @@ def create_app(
     )
     for runtime_router in runtime_routers:
         app.router.routes.extend(runtime_router.routes)
+    # Authenticated commercial governance API: mounted only when a deployment
+    # configures CSS_COMMERCIAL_DB. Every route requires a bearer session and
+    # server-side commercial RBAC; none can move money or execute trades.
+    commercial_router = commercial_governance_router_from_env()
+    if commercial_router is not None:
+        app.router.routes.extend(commercial_router.routes)
 
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
