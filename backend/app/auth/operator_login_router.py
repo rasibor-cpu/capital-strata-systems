@@ -162,11 +162,21 @@ def create_operator_login_router() -> APIRouter:
     def _set_disabled(request: Request, user_id: str, disabled: bool) -> dict:
         caller = require_operator_session(request)
         if "SUPER_USER" not in caller.roles:
+            from .auth_audit import log_auth_event
+
+            log_auth_event(
+                "AUTHORIZATION_DENIED", actor_id=caller.username,
+                actor_role=(caller.roles[0] if caller.roles else None), outcome="DENIED",
+                reason="not a super user",
+                details={"target_user_id": user_id, "action": "disable" if disabled else "enable"},
+            )
             raise HTTPException(status_code=403, detail="only a super user may disable or enable accounts")
 
         users = load_users()
         try:
-            user_ctx = set_user_disabled(users, {"role": "SUPER_USER"}, user_id, disabled)
+            user_ctx = set_user_disabled(
+                users, {"user_id": caller.username, "role": "SUPER_USER"}, user_id, disabled
+            )
         except AuthFailure as exc:
             raise HTTPException(status_code=404, detail=exc.message) from exc
         save_users(users)

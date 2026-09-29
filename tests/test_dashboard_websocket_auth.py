@@ -115,3 +115,44 @@ def test_session_expiry_mid_stream_closes_the_connection(fresh_token_store, monk
 
     assert ws.accepted is True
     assert ws.closed_code == 4401
+
+
+def test_account_disabled_mid_stream_closes_the_connection(fresh_token_store, monkeypatch):
+    # Mirrors the real admin-disable flow (COM-013's disable endpoint calls
+    # token_store.revoke_all_for_user immediately), rather than a bare
+    # revoke, to prove disable-while-connected specifically closes the
+    # socket, not just revocation in the abstract.
+    token = fresh_token_store.create_session("10001", ["FINCON"], minutes=60)
+    ws = FakeWebSocket(cookies={SESSION_COOKIE_NAME: token})
+
+    async def sleep_and_disable(_seconds):
+        fresh_token_store.revoke_all_for_user("10001")
+
+    monkeypatch.setattr(ws_bridge.asyncio, "sleep", sleep_and_disable)
+
+    asyncio.run(_endpoint()(ws))
+
+    assert ws.accepted is True
+    assert ws.closed_code == 4401
+
+
+def test_revalidation_happens_on_every_tick_not_just_once(fresh_token_store, monkeypatch):
+    # Proves this is bounded-interval revalidation (every loop tick), not a
+    # single post-handshake check that then lets an idle connection run
+    # forever regardless of later revocation.
+    token = fresh_token_store.create_session("10001", ["FINCON"], minutes=60)
+    ws = FakeWebSocket(cookies={SESSION_COOKIE_NAME: token})
+
+    tick_count = {"n": 0}
+
+    async def sleep_three_ticks_then_revoke(_seconds):
+        tick_count["n"] += 1
+        if tick_count["n"] >= 3:
+            fresh_token_store.revoke(token)
+
+    monkeypatch.setattr(ws_bridge.asyncio, "sleep", sleep_three_ticks_then_revoke)
+
+    asyncio.run(_endpoint()(ws))
+
+    assert tick_count["n"] == 3  # stayed open across two clean ticks, closed on the third
+    assert ws.closed_code == 4401

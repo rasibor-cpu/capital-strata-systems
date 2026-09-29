@@ -43,6 +43,15 @@ USER_ADMIN_ROLES = {"SUPER_USER"}
 CSS_AUTH_PANEL_WIDTH = 78
 
 
+def _log_auth(event_type: str, **kwargs: Any) -> None:
+    # Deferred import: css_sign_on stays free of a hard dependency on the
+    # backend/engine layers at import time (it's used from a bare console/Tk
+    # entry point too); auth_audit itself never raises.
+    from backend.app.auth.auth_audit import log_auth_event
+
+    log_auth_event(event_type, **kwargs)
+
+
 class AuthFailure(Exception):
     def __init__(self, code: str, message: str) -> None:
         super().__init__(message)
@@ -252,6 +261,11 @@ def set_user_disabled(
     call ``token_store.revoke_all_for_user`` alongside this when disabling.
     """
     if not can_manage_users(actor_ctx):
+        _log_auth(
+            "AUTHORIZATION_DENIED", actor_id=str(actor_ctx.get("user_id", "")),
+            actor_role=actor_ctx.get("role"), outcome="DENIED",
+            reason="not a super user", details={"target_user_id": normalize_user_id(user_id), "disabled": disabled},
+        )
         raise AuthFailure("USER_ADMIN_DENIED", "Only a CSS super user can disable or enable accounts.")
 
     normalized_user_id = normalize_user_id(user_id)
@@ -260,6 +274,11 @@ def set_user_disabled(
         raise AuthFailure("USER_NOT_FOUND", "User record not found.")
 
     user_record["disabled"] = bool(disabled)
+    _log_auth(
+        "ACCOUNT_DISABLED" if disabled else "ACCOUNT_ENABLED",
+        actor_id=str(actor_ctx.get("user_id", "")), actor_role=actor_ctx.get("role"),
+        outcome="SUCCEEDED", details={"target_user_id": normalized_user_id},
+    )
     return build_user_context(user_record, normalized_user_id)
 
 
@@ -331,20 +350,31 @@ def change_authenticated_password(
 def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
     normalized_user_id = normalize_user_id(user_id)
     if not normalized_user_id:
+        _log_auth("LOGIN_FAILURE", actor_id=str(user_id), outcome="INVALID_USER_ID",
+                   reason="malformed user id")
         raise AuthFailure("INVALID_USER_ID", "Enter a valid five digit user ID.")
 
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
+        # Logged server-side for real visibility into probing attempts; the
+        # HTTP-facing message stays the same generic wording regardless, so
+        # this never becomes a client-observable user-enumeration channel.
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="UNKNOWN_USER",
+                   reason="user id not recognized")
         raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
 
     if bool(user_record.get("disabled", False)):
         # Checked before lockout/password so a disabled account never leaks
         # lockout timing or password-correctness information.
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="ACCOUNT_DISABLED",
+                   reason="account is disabled")
         raise AuthFailure("ACCOUNT_DISABLED", "This account has been disabled.")
 
     now = datetime.now()
     lockout_remaining = active_lockout_remaining_seconds(user_record, now)
     if lockout_remaining > 0:
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="LOCKED_OUT",
+                   reason="active lockout window")
         raise AuthFailure(
             "AUTH_LOCKOUT",
             (
@@ -362,6 +392,9 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
         if failed_attempts >= LOCKOUT_START_ATTEMPT:
             lockout_seconds = lockout_seconds_for_attempt(failed_attempts)
             apply_timed_lockout(user_record, lockout_seconds, now)
+            _log_auth("ACCOUNT_LOCKOUT", actor_id=normalized_user_id, outcome="LOCKED",
+                       reason=f"{failed_attempts} sequential failed attempts",
+                       details={"lockout_seconds": lockout_seconds})
             raise AuthFailure(
                 "AUTH_LOCKOUT",
                 (
@@ -371,6 +404,8 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
             )
 
         remaining = LOCKOUT_START_ATTEMPT - failed_attempts
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="WRONG_PASSWORD",
+                   reason=f"{remaining} attempt(s) remaining before lockout")
         raise AuthFailure(
             "AUTH_FAILED",
             f"Authentication failed. {remaining} attempt(s) remaining.",
@@ -383,8 +418,11 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
         user_record["password_hash"] = hash_password(password)
 
     if password_expired(user_record):
+        _log_auth("LOGIN_SUCCESS", actor_id=normalized_user_id, actor_role=user_record.get("role"),
+                   outcome="PASSWORD_CHANGE_REQUIRED")
         raise PasswordChangeRequired(normalized_user_id)
 
+    _log_auth("LOGIN_SUCCESS", actor_id=normalized_user_id, actor_role=user_record.get("role"), outcome="SUCCEEDED")
     return build_user_context(user_record, normalized_user_id)
 
 
@@ -415,6 +453,7 @@ def change_password(
     user_record["failed_attempts"] = 0
     clear_lockout_state(user_record)
 
+    _log_auth("PASSWORD_CHANGE", actor_id=normalized_user_id, actor_role=user_record.get("role"), outcome="SUCCEEDED")
     return build_user_context(user_record, normalized_user_id)
 
 

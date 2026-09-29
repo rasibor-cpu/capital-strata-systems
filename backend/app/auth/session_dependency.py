@@ -57,15 +57,29 @@ def resolve_operator_session(request: Request) -> Optional[SessionInfo]:
 def revoke_session_from_request(request: Request) -> bool:
     """Revoke whatever session token this request carries (cookie or bearer).
 
-    Shared by every logout entry point so cookie/header precedence and
-    revocation stay in exactly one place.
+    Shared by every logout entry point so cookie/header precedence,
+    revocation, and audit logging all stay in exactly one place.
     """
     token = _token_from_request(request)
     if not token:
         return False
     from .token_store import token_store
 
-    return token_store.revoke(token)
+    session = token_store.validate(token)
+    revoked = token_store.revoke(token)
+    if revoked:
+        try:
+            from .auth_audit import log_auth_event
+
+            log_auth_event(
+                "LOGOUT",
+                actor_id=session.username if session else None,
+                actor_role=(session.roles[0] if session and session.roles else None),
+                outcome="SUCCEEDED",
+            )
+        except Exception:
+            pass
+    return revoked
 
 
 def require_operator_session(request: Request) -> SessionInfo:

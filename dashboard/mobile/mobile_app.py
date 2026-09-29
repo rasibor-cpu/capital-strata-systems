@@ -95,7 +95,7 @@ async def login_submit(request: Request):
     except PasswordChangeRequired as required:
         save_users(users)
         token = _create_password_change_token(required.user_id)
-        response = HTMLResponse(_password_change_page())
+        response = HTMLResponse(_password_change_page(csrf_token=_PASSWORD_CHANGES[token]["csrf_token"]))
         response.set_cookie(
             PASSWORD_CHANGE_COOKIE,
             token,
@@ -116,7 +116,7 @@ async def password_change_screen(request: Request):
     token_record = _get_password_change_record(request)
     if not token_record:
         return RedirectResponse("/login", status_code=303)
-    return HTMLResponse(_password_change_page())
+    return HTMLResponse(_password_change_page(csrf_token=token_record.get("csrf_token", "")))
 
 
 @app.post("/password-change", response_class=HTMLResponse)
@@ -129,6 +129,18 @@ async def password_change_submit(request: Request):
         )
 
     form = await _read_form(request)
+
+    # CSRF: this flow's possession token (PASSWORD_CHANGE_COOKIE) is itself
+    # httponly and unguessable, but a cross-site form submission would still
+    # carry it automatically -- and a forced password change is a full
+    # account-takeover primitive, so it gets the same synchronizer-token
+    # check as the fully-authenticated mutating routes.
+    if not _verify_csrf(token_record.get("csrf_token", ""), form):
+        return HTMLResponse(
+            _password_change_page(message="Security check failed. Reload the page and try again.", status="error"),
+            status_code=403,
+        )
+
     users = load_users()
 
     try:
@@ -140,7 +152,10 @@ async def password_change_submit(request: Request):
         )
         save_users(users)
     except PasswordValidationError as exc:
-        return HTMLResponse(_password_change_page(message=str(exc), status="error"), status_code=400)
+        return HTMLResponse(
+            _password_change_page(message=str(exc), status="error", csrf_token=token_record.get("csrf_token", "")),
+            status_code=400,
+        )
 
     token = request.cookies.get(PASSWORD_CHANGE_COOKIE)
     if token:
@@ -315,7 +330,18 @@ async def audit_screen(request: Request):
 async def logout(request: Request):
     token = request.cookies.get(SESSION_COOKIE)
     if token:
-        _SESSIONS.pop(token, None)
+        session = _SESSIONS.pop(token, None)
+        if session:
+            try:
+                from backend.app.auth.auth_audit import log_auth_event
+
+                user_ctx = session.get("user_ctx", {})
+                log_auth_event(
+                    "LOGOUT", actor_id=str(user_ctx.get("user_id", "")),
+                    actor_role=user_ctx.get("role"), outcome="SUCCEEDED",
+                )
+            except Exception:
+                pass
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(SESSION_COOKIE)
     return response
@@ -390,7 +416,7 @@ async def controls_screen(request: Request):
     if not session:
         return RedirectResponse("/login", status_code=303)
 
-    return HTMLResponse(_controls_page(session["user_ctx"]))
+    return HTMLResponse(_controls_page(session["user_ctx"], csrf_token=session.get("csrf_token", "")))
 
 
 @app.post("/controls", response_class=HTMLResponse)
@@ -400,23 +426,37 @@ async def controls_submit(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     user_ctx = session["user_ctx"]
+    form = await _read_form(request)
+
+    if not _verify_csrf(session.get("csrf_token", ""), form):
+        return HTMLResponse(
+            _controls_page(
+                user_ctx,
+                message="Security check failed. Reload the page and try again.",
+                status="error",
+                csrf_token=session.get("csrf_token", ""),
+            ),
+            status_code=403,
+        )
+
     if not _can_manage_mobile_controls(user_ctx):
         return HTMLResponse(
             _controls_page(
                 user_ctx,
                 message="Your CSS role cannot change system controls.",
                 status="error",
+                csrf_token=session.get("csrf_token", ""),
             ),
             status_code=403,
         )
 
-    form = await _read_form(request)
     if form.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED" and form.get("legal_acceptance") != "on":
         return HTMLResponse(
             _controls_page(
                 user_ctx,
                 message="Live trading blocked. You must explicitly acknowledge the live capital warning.",
                 status="error",
+                csrf_token=session.get("csrf_token", ""),
             ),
             status_code=400,
         )
@@ -442,6 +482,7 @@ async def controls_submit(request: Request):
                 f"engine {controls['engine_mode']}."
             ),
             status="success",
+            csrf_token=session.get("csrf_token", ""),
         )
     )
 
@@ -452,7 +493,7 @@ async def trade_ticket_screen(request: Request):
     if not session:
         return RedirectResponse("/login", status_code=303)
 
-    return HTMLResponse(_trade_ticket_page(session["user_ctx"]))
+    return HTMLResponse(_trade_ticket_page(session["user_ctx"], csrf_token=session.get("csrf_token", "")))
 
 
 @app.post("/trade", response_class=HTMLResponse)
@@ -462,9 +503,22 @@ async def trade_ticket_submit(request: Request):
         return RedirectResponse("/login", status_code=303)
 
     form = await _read_form(request)
+    if not _verify_csrf(session.get("csrf_token", ""), form):
+        return HTMLResponse(
+            _trade_ticket_page(
+                session["user_ctx"],
+                result={"ok": False, "reason": "Security check failed. Reload the page and try again."},
+                status="error",
+                csrf_token=session.get("csrf_token", ""),
+            ),
+            status_code=403,
+        )
+
     result = execute_mobile_trade_ticket(session["user_ctx"], form)
     status = "success" if result.get("ok") else "error"
-    return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status))
+    return HTMLResponse(
+        _trade_ticket_page(session["user_ctx"], result=result, status=status, csrf_token=session.get("csrf_token", ""))
+    )
 
 
 @app.get("/users", response_class=HTMLResponse)
@@ -480,7 +534,7 @@ async def users_screen(request: Request):
             status_code=403,
         )
 
-    return HTMLResponse(_users_page(user_ctx))
+    return HTMLResponse(_users_page(user_ctx, csrf_token=session.get("csrf_token", "")))
 
 
 @app.post("/users", response_class=HTMLResponse)
@@ -497,6 +551,17 @@ async def users_submit(request: Request):
         )
 
     form = await _read_form(request)
+    if not _verify_csrf(session.get("csrf_token", ""), form):
+        return HTMLResponse(
+            _users_page(
+                user_ctx,
+                message="Security check failed. Reload the page and try again.",
+                status="error",
+                csrf_token=session.get("csrf_token", ""),
+            ),
+            status_code=403,
+        )
+
     users = load_users()
     try:
         created = create_user(
@@ -514,7 +579,7 @@ async def users_submit(request: Request):
     except (AuthFailure, PasswordValidationError, ValueError) as exc:
         save_users(users)
         return HTMLResponse(
-            _users_page(user_ctx, message=str(exc), status="error"),
+            _users_page(user_ctx, message=str(exc), status="error", csrf_token=session.get("csrf_token", "")),
             status_code=400,
         )
 
@@ -523,6 +588,7 @@ async def users_submit(request: Request):
             user_ctx,
             message=f"User {created['user_id']} created with role {created['role']}.",
             status="success",
+            csrf_token=session.get("csrf_token", ""),
         )
     )
 
@@ -611,8 +677,23 @@ def _create_session(user_ctx: Dict[str, Any]) -> str:
         "created": now,
         "last_activity": now,
         "user_ctx": dict(user_ctx),
+        # A synchronizer CSRF token bound to this session: it is generated
+        # server-side, rotates with the session (a new login means a new
+        # token), and is destroyed the moment the session is (logout,
+        # password-change revocation, admin disable) -- so a stolen/replayed
+        # CSRF token from a dead session can never validate again.
+        "csrf_token": secrets.token_urlsafe(32),
     }
     return token
+
+
+def _csrf_field(token: str) -> str:
+    return f'<input type="hidden" name="csrf_token" value="{html.escape(token)}">'
+
+
+def _verify_csrf(expected_token: str, form: Dict[str, str]) -> bool:
+    provided = str(form.get("csrf_token", ""))
+    return bool(expected_token) and secrets.compare_digest(str(expected_token), provided)
 
 
 def _get_session(request: Request) -> Optional[Dict[str, Any]]:
@@ -638,6 +719,7 @@ def _create_password_change_token(user_id: str) -> str:
     _PASSWORD_CHANGES[token] = {
         "user_id": user_id,
         "created": time.time(),
+        "csrf_token": secrets.token_urlsafe(32),
     }
     return token
 
@@ -920,7 +1002,7 @@ def _login_page(message: str = "", status: str = "info") -> str:
     )
 
 
-def _password_change_page(message: str = "", status: str = "info") -> str:
+def _password_change_page(message: str = "", status: str = "info", csrf_token: str = "") -> str:
     return _page(
         "Password Update",
         f"""
@@ -931,6 +1013,7 @@ def _password_change_page(message: str = "", status: str = "info") -> str:
             {_status_strip(None)}
             {_status_markup(message, status)}
             <form method="post" action="/password-change" autocomplete="off">
+              {_csrf_field(csrf_token)}
               <label for="new_password">New Password</label>
               <input id="new_password" name="new_password" type="password" required>
 
@@ -1647,6 +1730,7 @@ def _controls_page(
     user_ctx: Dict[str, Any],
     message: str = "",
     status: str = "info",
+    csrf_token: str = "",
 ) -> str:
     controls = load_mobile_controls()
     can_manage = _can_manage_mobile_controls(user_ctx)
@@ -1670,6 +1754,7 @@ def _controls_page(
             <h2>Runtime Controls</h2>
             <p class="muted">Mode and order state apply to all mobile trade tickets for authenticated users.</p>
             <form method="post" action="/controls" autocomplete="off">
+              {_csrf_field(csrf_token)}
               <label for="mobile_trading_mode">Mobile Trading Mode</label>
               <select id="mobile_trading_mode" name="mobile_trading_mode"{disabled}>
                 <option value="MOBILE_READ_ONLY"{_selected("MOBILE_READ_ONLY", mobile_mode)}>READ ONLY</option>
@@ -1727,6 +1812,7 @@ def _users_page(
     user_ctx: Dict[str, Any],
     message: str = "",
     status: str = "info",
+    csrf_token: str = "",
 ) -> str:
     users = load_users()
     rows = "\n".join(_user_row_markup(summary) for summary in list_user_summaries(users))
@@ -1756,6 +1842,7 @@ def _users_page(
             <h2>Create User</h2>
             <p class="muted">New users sign on with their assigned user ID, then change the initial password.</p>
             <form method="post" action="/users" autocomplete="off">
+              {_csrf_field(csrf_token)}
               <label for="user_id">User ID</label>
               <input id="user_id" name="user_id" inputmode="numeric" pattern="[0-9]*" required>
 
@@ -2099,6 +2186,7 @@ def _trade_ticket_page(
     user_ctx: Dict[str, Any],
     result: Optional[Dict[str, Any]] = None,
     status: str = "info",
+    csrf_token: str = "",
 ) -> str:
     result_markup = ""
     if result:
@@ -2115,6 +2203,7 @@ def _trade_ticket_page(
             <h2>Submit Trade Ticket</h2>
             <p class="muted">Paper tickets may be submitted when PAPER TRADING is enabled. Live broker data is observation-only and cannot submit orders.</p>
             <form method="post" action="/trade" autocomplete="off">
+              {_csrf_field(csrf_token)}
               <label for="mode_display">Mobile Mode</label>
               <input id="mode_display" value="{html.escape(system_mode.upper())}" disabled>
               <input name="mode" type="hidden" value="{html.escape(system_mode)}">

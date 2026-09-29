@@ -136,6 +136,14 @@ class TokenStore:
         stale = [tok for tok, info in self._sessions.items() if info.username == username]
         for tok in stale:
             self._sessions.pop(tok, None)
+        if stale:
+            try:
+                from .auth_audit import log_auth_event
+
+                log_auth_event("SESSION_REVOKE_ALL", actor_id=username, outcome="SUCCEEDED",
+                                details={"sessions_revoked": len(stale)})
+            except Exception:
+                pass
         return len(stale)
 
 

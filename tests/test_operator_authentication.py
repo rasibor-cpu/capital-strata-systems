@@ -529,3 +529,59 @@ def test_super_user_can_re_enable_a_disabled_account(operator_env):
     assert resp.status_code == 200
     assert resp.json() == {"user_id": "20001", "disabled": False}
     assert _login(operator_env, "20001", "fincon-pass-1").status_code == 200
+
+
+def test_re_enabled_account_gets_a_fresh_session_not_an_old_one(operator_env):
+    # The pre-disable session must stay dead even after re-enabling --
+    # "enable" must never resurrect a session that existed before it.
+    super_token = _login(operator_env, "20005", "superuser-pass-1").json()["token"]
+    old_fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+
+    operator_env.post(
+        "/auth/operator/admin/users/20001/disable", headers={"Authorization": f"Bearer {super_token}"}
+    )
+    operator_env.post(
+        "/auth/operator/admin/users/20001/enable", headers={"Authorization": f"Bearer {super_token}"}
+    )
+
+    assert operator_env.get(
+        "/auth/operator/me", headers={"Authorization": f"Bearer {old_fincon_token}"}
+    ).status_code == 401
+    # A fresh login works and issues a genuinely new token.
+    new_login = _login(operator_env, "20001", "fincon-pass-1")
+    assert new_login.status_code == 200
+    assert new_login.json()["token"] != old_fincon_token
+
+
+def test_disabling_an_already_disabled_account_is_safely_idempotent(operator_env):
+    super_token = _login(operator_env, "20005", "superuser-pass-1").json()["token"]
+    headers = {"Authorization": f"Bearer {super_token}"}
+    first = operator_env.post("/auth/operator/admin/users/20001/disable", headers=headers)
+    second = operator_env.post("/auth/operator/admin/users/20001/disable", headers=headers)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == {"user_id": "20001", "disabled": True}
+
+
+def test_enabling_an_already_enabled_account_is_safely_idempotent(operator_env):
+    super_token = _login(operator_env, "20005", "superuser-pass-1").json()["token"]
+    headers = {"Authorization": f"Bearer {super_token}"}
+    # 20001 starts enabled; enabling it again should be a harmless no-op.
+    resp = operator_env.post("/auth/operator/admin/users/20001/enable", headers=headers)
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": "20001", "disabled": False}
+    assert _login(operator_env, "20001", "fincon-pass-1").status_code == 200
+
+
+def test_disabling_an_unknown_user_fails_cleanly(operator_env):
+    super_token = _login(operator_env, "20005", "superuser-pass-1").json()["token"]
+    resp = operator_env.post(
+        "/auth/operator/admin/users/69999/disable",
+        headers={"Authorization": f"Bearer {super_token}"},
+    )
+    assert resp.status_code == 404
+
+
+def test_disable_endpoint_rejects_an_unauthenticated_caller(operator_env):
+    resp = operator_env.post("/auth/operator/admin/users/20001/disable")
+    assert resp.status_code == 401
