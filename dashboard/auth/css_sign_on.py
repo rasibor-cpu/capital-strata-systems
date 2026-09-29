@@ -319,50 +319,11 @@ def validate_initial_password(password: str) -> None:
 
 
 
-def change_authenticated_password(
-    users: Dict[str, Any],
-    user_id: str,
-    current_password: str,
-    new_password: str,
-    confirm_password: str,
-) -> Dict[str, Any]:
-    normalized_user_id = normalize_user_id(user_id)
-    user_record = users.get(normalized_user_id)
-    if not user_record:
-        raise AuthFailure("USER_NOT_FOUND", "User record not found.")
-
-    expected_hash = str(user_record.get("password_hash", "")).strip()
-    if not verify_password(current_password, expected_hash):
-        raise AuthFailure("INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
-
-    if new_password != confirm_password:
-        raise PasswordValidationError("New password and confirmation do not match.")
-
-    user_ctx = change_password(users, normalized_user_id, new_password, confirm_password)
-    user_record = users[normalized_user_id]
-    user_record["must_change_password"] = False
-    clear_lockout_state(user_record, preserve_failed_attempts=False)
-    save_users(users)
-    return user_ctx
-
-
-
-def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
-    normalized_user_id = normalize_user_id(user_id)
-    if not normalized_user_id:
-        _log_auth("LOGIN_FAILURE", actor_id=str(user_id), outcome="INVALID_USER_ID",
-                   reason="malformed user id")
-        raise AuthFailure("INVALID_USER_ID", "Enter a valid five digit user ID.")
-
-    user_record = users.get(normalized_user_id)
-    if not isinstance(user_record, dict):
-        # Logged server-side for real visibility into probing attempts; the
-        # HTTP-facing message stays the same generic wording regardless, so
-        # this never becomes a client-observable user-enumeration channel.
-        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="UNKNOWN_USER",
-                   reason="user id not recognized")
-        raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
-
+def _verify_credentials_or_raise(user_record: Dict[str, Any], normalized_user_id: str, password: str) -> None:
+    """Disabled check, active-lockout check, then password verification with
+    failed-attempt counting and timed lockout. Shared by sign-in and by the
+    authenticated password change so both enforce one policy. Raises
+    ``AuthFailure``; mutates the record's counters (callers persist them)."""
     if bool(user_record.get("disabled", False)):
         # Checked before lockout/password so a disabled account never leaks
         # lockout timing or password-correctness information.
@@ -410,6 +371,62 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
             "AUTH_FAILED",
             f"Authentication failed. {remaining} attempt(s) remaining.",
         )
+
+
+def change_authenticated_password(
+    users: Dict[str, Any],
+    user_id: str,
+    current_password: str,
+    new_password: str,
+    confirm_password: str,
+) -> Dict[str, Any]:
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not user_record:
+        raise AuthFailure("USER_NOT_FOUND", "User record not found.")
+
+    # The same disabled / lockout / failed-attempt policy as sign-in: this
+    # path hands the caller a fresh session (operator API change-password),
+    # so it must not let a disabled account back in or offer an unthrottled
+    # password-guessing oracle that sidesteps the sign-in lockout.
+    try:
+        _verify_credentials_or_raise(user_record, normalized_user_id, current_password)
+    except AuthFailure:
+        save_users(users)  # persist the failed-attempt / lockout counters
+        raise
+    user_record["failed_attempts"] = 0
+    clear_lockout_state(user_record)
+
+    if new_password != confirm_password:
+        raise PasswordValidationError("New password and confirmation do not match.")
+
+    user_ctx = change_password(users, normalized_user_id, new_password, confirm_password)
+    user_record = users[normalized_user_id]
+    user_record["must_change_password"] = False
+    clear_lockout_state(user_record, preserve_failed_attempts=False)
+    save_users(users)
+    return user_ctx
+
+
+
+def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
+    normalized_user_id = normalize_user_id(user_id)
+    if not normalized_user_id:
+        _log_auth("LOGIN_FAILURE", actor_id=str(user_id), outcome="INVALID_USER_ID",
+                   reason="malformed user id")
+        raise AuthFailure("INVALID_USER_ID", "Enter a valid five digit user ID.")
+
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        # Logged server-side for real visibility into probing attempts; the
+        # HTTP-facing message stays the same generic wording regardless, so
+        # this never becomes a client-observable user-enumeration channel.
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="UNKNOWN_USER",
+                   reason="user id not recognized")
+        raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
+
+    _verify_credentials_or_raise(user_record, normalized_user_id, password)
+    expected_hash = str(user_record.get("password_hash", "")).strip()
 
     user_record["failed_attempts"] = 0
     clear_lockout_state(user_record)

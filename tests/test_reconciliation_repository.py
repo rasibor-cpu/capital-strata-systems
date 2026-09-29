@@ -3,6 +3,7 @@ from decimal import Decimal
 from engine.commercial.reconciliation_repository import ReconciliationRepository
 from engine.commercial.reconciliation_service import ReconciliationService, SettlementEvidence
 from engine.domain.collections import CollectionStatus, CollectionTransaction
+from tests.test_reconciliation_resolution import approved
 
 
 def settled():
@@ -42,11 +43,7 @@ def test_resolution_survives_restart_and_history_is_retained(tmp_path):
     svc = ReconciliationService(repo)
     svc.reconcile(c, bad_evidence(c))
     item = svc.open_exceptions()[0]
-    svc.resolve_exception(
-        item.exception_id,
-        resolved_by="finance-controller",
-        resolution_reference="ticket-100",
-    )
+    svc.apply_approved_resolution(approved(item.exception_id, "ticket-100"))
 
     restarted_repo = ReconciliationRepository(db)
     restarted = ReconciliationService(restarted_repo)

@@ -128,7 +128,8 @@ def test_logout_clears_the_session_cookie(fresh_token_store):
     token = fresh_token_store.create_session("10001", ["FINCON"], minutes=60)
     app = create_app()
     client = TestClient(app)
-    resp = client.post("/logout", headers=_cookie_header(token))
+    csrf = fresh_token_store.validate(token).csrf_token
+    resp = client.post("/logout", data={"csrf_token": csrf}, headers=_cookie_header(token))
     assert resp.status_code in (200, 303)
     assert fresh_token_store.validate(token) is None
 

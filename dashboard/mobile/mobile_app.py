@@ -101,6 +101,7 @@ async def login_submit(request: Request):
             token,
             httponly=True,
             samesite="lax",
+            secure=_cookie_secure(),
             max_age=PASSWORD_CHANGE_SECONDS,
         )
         return response
@@ -328,6 +329,21 @@ async def audit_screen(request: Request):
 
 @app.post("/logout")
 async def logout(request: Request):
+    # Logout is an authenticated, cookie-backed state change, so it requires
+    # this session's synchronizer CSRF token like /controls, /trade, /users.
+    session = _get_session(request)
+    if session is None:
+        # No live session (missing, expired, revoked): nothing to revoke and
+        # nothing to audit -- just drop the dead cookie.
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE)
+        return response
+    form = await _read_form(request)
+    if not _verify_csrf(session.get("csrf_token", ""), form):
+        return HTMLResponse(
+            _access_denied_page(session["user_ctx"], "Logout request rejected: CSRF token missing or invalid."),
+            status_code=403,
+        )
     token = request.cookies.get(SESSION_COOKIE)
     if token:
         session = _SESSIONS.pop(token, None)
@@ -665,9 +681,20 @@ def _login_success_response(user_ctx: Dict[str, Any]) -> RedirectResponse:
         token,
         httponly=True,
         samesite="lax",
+        secure=_cookie_secure(),
         max_age=SESSION_MAX_SECONDS,
     )
     return response
+
+
+def _cookie_secure() -> bool:
+    """Same rule as the web dashboard's session cookie: Secure everywhere
+    except an explicitly declared local development/UAT run over plain HTTP
+    (``CSS_ENV=development``), which is what launchers/CSS Mobile Server.cmd
+    serves on the LAN."""
+    from backend.app.auth.operator_login_router import cookie_secure_default
+
+    return cookie_secure_default()
 
 
 def _create_session(user_ctx: Dict[str, Any]) -> str:
@@ -691,6 +718,18 @@ def _csrf_field(token: str) -> str:
     return f'<input type="hidden" name="csrf_token" value="{html.escape(token)}">'
 
 
+def _csrf_token_for_user_ctx(user_ctx: Dict[str, Any]) -> str:
+    """The CSRF token of the session whose ``user_ctx`` this page is rendering.
+
+    Every page handler renders ``session["user_ctx"]`` itself, so an identity
+    match finds exactly that session (never another session of the same user).
+    """
+    for session in _SESSIONS.values():
+        if session.get("user_ctx") is user_ctx:
+            return str(session.get("csrf_token", ""))
+    return ""
+
+
 def _verify_csrf(expected_token: str, form: Dict[str, str]) -> bool:
     provided = str(form.get("csrf_token", ""))
     return bool(expected_token) and secrets.compare_digest(str(expected_token), provided)
@@ -710,8 +749,46 @@ def _get_session(request: Request) -> Optional[Dict[str, Any]]:
         _SESSIONS.pop(token, None)
         return None
 
+    if not _session_user_still_valid(session):
+        _SESSIONS.pop(token, None)
+        return None
+
     session["last_activity"] = now
     return session
+
+
+def _session_user_still_valid(session: Dict[str, Any]) -> bool:
+    """Re-check the operator's live user record on every request.
+
+    Mobile keeps its own in-process session store, separate from
+    ``backend.app.auth.token_store``, so an account disable or password change
+    made through the operator API (which revokes token_store sessions) never
+    reached it -- a disabled or re-credentialed operator kept a working mobile
+    session for up to SESSION_MAX_SECONDS. Reading the shared user store here
+    closes that without coupling the two session stores, and works even when
+    the mobile app runs in a different process. Fails closed: an unreadable
+    store, a missing or disabled account, a changed role, or a password change
+    after this session was issued all end the session.
+    """
+    user_ctx = session.get("user_ctx") or {}
+    try:
+        users = load_users()
+    except Exception:
+        return False
+    record = users.get(str(user_ctx.get("user_id", "")))
+    if not isinstance(record, dict) or record.get("disabled"):
+        return False
+    if str(record.get("role", "")) != str(user_ctx.get("role", "")):
+        return False
+    changed_at = record.get("last_password_change")
+    if changed_at:
+        try:
+            changed_ts = datetime.fromisoformat(str(changed_at)).timestamp()
+        except ValueError:
+            return False
+        if changed_ts > float(session.get("created", 0)):
+            return False
+    return True
 
 
 def _create_password_change_token(user_id: str) -> str:
@@ -886,7 +963,9 @@ def _top_nav(user_ctx: Dict[str, Any], active: str) -> str:
     if active != "users" and can_manage_users(user_ctx):
         links.append('<a class="button-link" href="/users">Users</a>')
     links.append(
-        '<form method="post" action="/logout"><button class="ghost" type="submit">Logout</button></form>'
+        '<form method="post" action="/logout">'
+        f'{_csrf_field(_csrf_token_for_user_ctx(user_ctx))}'
+        '<button class="ghost" type="submit">Logout</button></form>'
     )
     return "\n".join(links)
 

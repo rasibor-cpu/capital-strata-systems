@@ -24,7 +24,7 @@ This document categorizes and tracks the primary operational risks facing Capita
 ## 4. Data Risks
 * **Description:** Stale, corrupt, or missing market data feeds and loss of internal ledger accuracy.
 * **Severity Classification:** SEV1 (Critical)
-* **Mitigation Controls:** Stale data detection thresholds, canonical persistence contracts, and immutable audit trails.
+* **Mitigation Controls:** Stale data detection thresholds, canonical persistence contracts, and append-only, hash-chained (tamper-evident) audit trails.
 * **Ownership Assignment:** Data Engineering Lead
 
 ## 5. Security Risks

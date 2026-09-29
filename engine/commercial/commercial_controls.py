@@ -428,11 +428,7 @@ def reconciliation_resolution_action(reconciliation_service) -> ControlledAction
     """
 
     def execute(action: ControlledAction) -> str:
-        reconciliation_service.resolve_exception(
-            action.payload["exception_id"],
-            resolved_by=action.checker_id,
-            resolution_reference=action.payload["resolution_reference"],
-        )
+        reconciliation_service.apply_approved_resolution(action)
         return "RESOLVED"
 
     def validate(object_ref: str, payload: Dict[str, Any]) -> None:

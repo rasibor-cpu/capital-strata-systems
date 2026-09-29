@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from backend.app.persistence.services.trial_contract_enrollment_service import (
@@ -13,6 +13,7 @@ from backend.app.persistence.services.trial_conversion_assessment_service import
     TrialConversionAssessmentService,
 )
 from backend.commercialization.trial_contract import TrialContractError
+from backend.app.auth.session_dependency import authorization_for_commercial_route
 from dashboard.runtime.commercial_governance_router import token_store_session_resolver
 from engine.commercial.commercial_authorization import (
     BearerSessionResolver,
@@ -67,11 +68,11 @@ def create_trial_contract_router(
 
     @router.get("/api/v1/commercial-trial/agreement")
     def read_trial_agreement(
+        http_request: Request,
         agreement_id: str = Query(...),
         agreement_version: str = Query(...),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        actor_for(authorization, "commercial_view_obligations")
+        actor_for(authorization_for_commercial_route(http_request, mutating=False), "commercial_view_obligations")
         try:
             agreement = TrialContractEnrollmentService().load_agreement(
                 agreement_id,
@@ -98,10 +99,10 @@ def create_trial_contract_router(
 
     @router.post("/api/v1/commercial-trial/enroll", status_code=201)
     def enroll_trial(
+        http_request: Request,
         request: TrialEnrollmentRequest,
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        maker = actor_for(authorization, "commercial_trial_enroll")
+        maker = actor_for(authorization_for_commercial_route(http_request, mutating=True), "commercial_trial_enroll")
         if controls is None:
             raise HTTPException(status_code=503, detail="commercial governance not configured")
         object_ref = f"trial_enrollment:{request.customer_id}:{request.account_reference}"
@@ -128,10 +129,10 @@ def create_trial_contract_router(
 
     @router.post("/api/v1/commercial-trial/cancel", status_code=201)
     def cancel_trial(
+        http_request: Request,
         request: TrialCancellationRequest,
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        maker = actor_for(authorization, "commercial_trial_cancel")
+        maker = actor_for(authorization_for_commercial_route(http_request, mutating=True), "commercial_trial_cancel")
         if controls is None:
             raise HTTPException(status_code=503, detail="commercial governance not configured")
         object_ref = f"trial_cancellation:{request.customer_id}:{request.account_reference}"
@@ -158,14 +159,14 @@ def create_trial_contract_router(
 
     @router.get("/api/v1/commercial-trial/status")
     def read_trial_status(
+        http_request: Request,
         customer_id: str = Query(...),
         account_reference: str = Query(...),
         agreement_id: str = Query(...),
         agreement_version: str = Query(...),
         assessed_at: str = Query(...),
-        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        actor_for(authorization, "commercial_view_obligations")
+        actor_for(authorization_for_commercial_route(http_request, mutating=False), "commercial_view_obligations")
         try:
             assessment = TrialConversionAssessmentService().assess(
                 customer_id=customer_id,

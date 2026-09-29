@@ -9,14 +9,13 @@ Audited mutating, cookie-authenticated routes in mobile_app.py:
                                authenticated by a short-lived possession cookie,
                                not the main session, but still a full
                                account-takeover primitive if forgeable)
-  POST /logout              -- revoke the session (state-changing, but the worst
-                               outcome is forcing a logout -- deliberately left
-                               on SameSite=Lax alone, same reasoning already
-                               applied to the web dashboard's /logout in COM-012/013)
+  POST /logout              -- revoke the session; COM-014 left it on
+                               SameSite=Lax alone, COM-015 brought it under the
+                               same token (see tests/test_logout_csrf.py)
   POST /login               -- the auth action itself; no session exists yet to
                                protect, so classic CSRF does not apply
 
-This suite covers the four given a synchronizer CSRF token (session-bound,
+This suite covers the four COM-014 gave a synchronizer CSRF token (session-bound,
 rotates with the session, dies with it): /controls, /trade, /users,
 /password-change.
 """
@@ -64,7 +63,24 @@ def client(monkeypatch, tmp_path):
     real_load, real_save = css_sign_on.load_users, css_sign_on.save_users
     monkeypatch.setattr(mobile_app, "load_users", lambda *_a, **_k: real_load(users_file))
     monkeypatch.setattr(mobile_app, "save_users", lambda users, *_a, **_k: real_save(users, users_file))
+    seed_mobile_users(users_file, SUPER_USER_CTX, VIEWER_CTX)
     return TestClient(mobile_app.app)
+
+
+def seed_mobile_users(users_file, *user_ctxs):
+    """Mobile sessions are re-validated against the live user store on every
+    request (COM-015), so a seeded session's operator must really exist."""
+    import dashboard.auth.css_sign_on as css_sign_on
+
+    users = css_sign_on.load_users(users_file)
+    for ctx in user_ctxs:
+        if ctx["user_id"] not in users:
+            css_sign_on.create_user(
+                users, {"user_id": "00000", "role": "SUPER_USER"}, ctx["user_id"], ctx["display_name"],
+                ctx["role"], "seeded-pass-1", must_change_password=False,
+            )
+        users[ctx["user_id"]]["last_password_change"] = "2026-01-01T00:00:00"
+    css_sign_on.save_users(users, users_file)
 
 
 def _seed_session(user_ctx):
@@ -176,7 +192,7 @@ def test_valid_authorized_session_with_matching_csrf_is_accepted(client, path, b
 
 def test_csrf_token_replay_after_logout_is_rejected(client):
     token, csrf = _seed_session(SUPER_USER_CTX)
-    logout_resp = client.post("/logout", headers=_cookie(token))
+    logout_resp = client.post("/logout", data={"csrf_token": csrf}, headers=_cookie(token))
     assert logout_resp.status_code == 303
     assert token not in mobile_app._SESSIONS
 

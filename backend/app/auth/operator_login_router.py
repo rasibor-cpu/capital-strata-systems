@@ -28,7 +28,7 @@ from dashboard.auth.css_sign_on import (
 
 from .session_dependency import (
     SESSION_COOKIE_NAME,
-    require_operator_session,
+    require_mutation_session,
     revoke_session_from_request,
 )
 from .token_store import token_store
@@ -47,6 +47,10 @@ class OperatorLoginResponse(BaseModel):
     display_name: str
     role: str
     expires_in_minutes: int
+    # The session's synchronizer CSRF token. Only needed when a browser uses
+    # the session *cookie* for a state-changing request (sent back as the
+    # X-CSRF-Token header); a bearer-header client never needs it.
+    csrf_token: str
 
 
 class OperatorPasswordChangeRequest(BaseModel):
@@ -110,6 +114,7 @@ def create_operator_login_router() -> APIRouter:
             display_name=user_ctx["display_name"],
             role=user_ctx["role"],
             expires_in_minutes=OPERATOR_SESSION_MINUTES,
+            csrf_token=token_store.validate(token).csrf_token,
         )
 
     @router.post("/change-password", response_model=OperatorLoginResponse)
@@ -143,10 +148,15 @@ def create_operator_login_router() -> APIRouter:
             display_name=user_ctx["display_name"],
             role=user_ctx["role"],
             expires_in_minutes=OPERATOR_SESSION_MINUTES,
+            csrf_token=token_store.validate(token).csrf_token,
         )
 
     @router.post("/logout")
     def logout(request: Request, response: Response) -> dict:
+        # Logout is an authenticated state change (server-side revocation), so
+        # a cookie-backed logout needs the session's CSRF token like every
+        # other cookie-backed mutation; a missing/expired/revoked session is 401.
+        require_mutation_session(request)
         revoked = revoke_session_from_request(request)
         response.delete_cookie(SESSION_COOKIE_NAME)
         return {"revoked": revoked}
@@ -160,7 +170,7 @@ def create_operator_login_router() -> APIRouter:
         return _set_disabled(request, user_id, False)
 
     def _set_disabled(request: Request, user_id: str, disabled: bool) -> dict:
-        caller = require_operator_session(request)
+        caller = require_mutation_session(request)
         if "SUPER_USER" not in caller.roles:
             from .auth_audit import log_auth_event
 

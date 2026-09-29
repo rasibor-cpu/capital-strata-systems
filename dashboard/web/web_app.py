@@ -30,7 +30,9 @@ from dashboard.runtime.commercial_governance_router import (
 )
 from backend.app.auth.operator_login_router import create_operator_login_router
 from backend.app.auth.session_dependency import (
+    CSRF_FORM_FIELD,
     SESSION_COOKIE_NAME,
+    require_mutation_session,
     resolve_operator_session,
     revoke_session_from_request,
 )
@@ -142,6 +144,25 @@ def create_app(
 
     @app.post("/logout", include_in_schema=False)
     async def logout_submit(request: Request):
+        form = await _read_form(request)
+        try:
+            # Cookie-backed logout is an authenticated state change, so it
+            # needs this session's synchronizer CSRF token like every other
+            # cookie-backed mutation (checked before anything is revoked).
+            require_mutation_session(request, form_token=form.get(CSRF_FORM_FIELD))
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                # No live session (missing, expired, revoked): nothing to
+                # revoke and nothing audited -- just drop the dead cookie.
+                response = RedirectResponse("/login", status_code=303)
+                response.delete_cookie(SESSION_COOKIE_NAME)
+                return response
+            return HTMLResponse(
+                "<!doctype html><html><head><title>Logout rejected</title></head><body>"
+                "<p>Logout request rejected: CSRF token missing or invalid.</p>"
+                '<p><a href="/dashboard">Return to the dashboard</a></p></body></html>',
+                status_code=403,
+            )
         revoke_session_from_request(request)
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(SESSION_COOKIE_NAME)
@@ -149,63 +170,73 @@ def create_app(
 
     @app.get("/dashboard", response_class=HTMLResponse)
     async def dashboard(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_dashboard_page())
+        return _page_response(_dashboard_page(), session)
 
     @app.get("/positions", response_class=HTMLResponse)
     async def positions(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_positions_page())
+        return _page_response(_positions_page(), session)
 
     @app.get("/execution", response_class=HTMLResponse)
     async def execution(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_execution_page())
+        return _page_response(_execution_page(), session)
 
     @app.get("/risk-governance", response_class=HTMLResponse)
     async def risk_governance(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_risk_governance_page())
+        return _page_response(_risk_governance_page(), session)
 
     @app.get("/market-opportunities", response_class=HTMLResponse)
     async def market_opportunities(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_market_opportunities_page())
+        return _page_response(_market_opportunities_page(), session)
 
     @app.get("/broker", response_class=HTMLResponse)
     async def broker(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_broker_page())
+        return _page_response(_broker_page(), session)
 
     @app.get("/margin", response_class=HTMLResponse)
     async def margin_view(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_margin_page())
+        return _page_response(_margin_page(), session)
 
     @app.get("/billing", response_class=HTMLResponse)
     async def billing_view(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_billing_page())
+        return _page_response(_billing_page(), session)
 
     @app.get("/trial-contract", response_class=HTMLResponse)
     async def trial_contract_view(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_trial_contract_page())
+        return _page_response(_trial_contract_page(), session)
 
     @app.get("/commercialization-operations", response_class=HTMLResponse)
     async def commercialization_operations_view(request: Request) -> HTMLResponse:
-        if _require_page_session(request) is None:
+        session = _require_page_session(request)
+        if session is None:
             return RedirectResponse("/login", status_code=303)
-        return HTMLResponse(_commercialization_operations_page())
+        return _page_response(_commercialization_operations_page(), session)
 
     @app.get("/api/v1/margin-snapshot")
     async def margin_api(request: Request) -> dict[str, Any]:
@@ -292,9 +323,30 @@ def _app_nav(active: str) -> str:
                 )
                 for key, href, label in links
             ),
+            _SESSION_CONTROLS_PLACEHOLDER,
             "</nav>",
         )
     )
+
+
+# Replaced per request with the operator's Logout form, which carries the
+# session's synchronizer CSRF token. Page JavaScript reads the same hidden
+# field (id ``css-csrf-token``) to send the X-CSRF-Token header on
+# cookie-backed POSTs.
+_SESSION_CONTROLS_PLACEHOLDER = "<!--css-session-controls-->"
+
+
+def _session_controls(session: Any) -> str:
+    token = html.escape(getattr(session, "csrf_token", "") or "", quote=True)
+    return (
+        '<form method="post" action="/logout" class="session-controls" style="display:inline;margin-left:auto;">'
+        f'<input type="hidden" id="css-csrf-token" name="{CSRF_FORM_FIELD}" value="{token}">'
+        '<button type="submit">Logout</button></form>'
+    )
+
+
+def _page_response(page_html: str, session: Any) -> HTMLResponse:
+    return HTMLResponse(page_html.replace(_SESSION_CONTROLS_PLACEHOLDER, _session_controls(session), 1))
 
 
 async def _read_form(request: Request) -> dict[str, str]:
@@ -2296,6 +2348,20 @@ def _trial_contract_script() -> str:
     return """
 let governingAgreement = null;
 
+// Cookie-backed POSTs must carry this session's synchronizer CSRF token,
+// rendered into the page's Logout form by the server.
+function trialCsrfHeaders() {
+  const field = document.getElementById("css-csrf-token");
+  return {"Content-Type": "application/json", "X-CSRF-Token": field ? field.value : ""};
+}
+
+function trialIdempotencyKey(prefix) {
+  const random = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}:${random}`;
+}
+
 function trialNow() {
   return new Date().toISOString().replace(".000Z", "Z");
 }
@@ -2344,16 +2410,17 @@ async function enrollTrial() {
     acceptance_audit_reference: `web-accept:${Date.now()}`,
     evidence_refs: governingAgreement.evidence_refs,
     affirm_terms_acceptance: true,
-    affirm_automatic_conversion_disclosure: true
+    affirm_automatic_conversion_disclosure: true,
+    idempotency_key: trialIdempotencyKey("web-enroll")
   };
   const response = await fetch("/api/v1/commercial-trial/enroll", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: trialCsrfHeaders(),
     body: JSON.stringify(payload)
   });
   const data = await response.json();
   result.textContent = response.ok
-    ? `Trial accepted. Exact expiry: ${data.trial_expires_at}. No payment has been executed.`
+    ? `Enrollment request ${data.controlled_action.action_id} is ${data.controlled_action.status}: it takes effect only after a second authorized approver approves it. No payment has been executed.`
     : `Enrollment blocked: ${data.detail || "validation failed"}`;
 }
 
@@ -2363,16 +2430,17 @@ async function cancelTrial() {
     account_reference: document.getElementById("trial-account-reference").value.trim(),
     canceled_at: trialNow(),
     cancellation_audit_reference: `web-cancel:${Date.now()}`,
-    evidence_refs: ["customer:web-cancellation"]
+    evidence_refs: ["customer:web-cancellation"],
+    idempotency_key: trialIdempotencyKey("web-cancel")
   };
   const response = await fetch("/api/v1/commercial-trial/cancel", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: trialCsrfHeaders(),
     body: JSON.stringify(payload)
   });
   const data = await response.json();
   document.getElementById("trial-result").textContent = response.ok
-    ? `Cancellation recorded at ${data.canceled_at}. Conversion is blocked if cancellation occurred before expiry.`
+    ? `Cancellation request ${data.controlled_action.action_id} is ${data.controlled_action.status}: it takes effect only after a second authorized approver approves it. Conversion is blocked if cancellation occurred before expiry.`
     : `Cancellation blocked: ${data.detail || "validation failed"}`;
 }
 

@@ -8,7 +8,7 @@ Token + OTP store (in-memory) — REA Capital Trading Engine
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
@@ -27,6 +27,12 @@ class SessionInfo:
     roles: List[str]
     issued_at_utc: datetime
     expires_at_utc: datetime
+    # Synchronizer CSRF token bound to this session (same pattern as
+    # dashboard/mobile/mobile_app.py's session-bound token): generated
+    # server-side, rotates with every new session, and dies the instant the
+    # session is revoked or expires. Only required when the session is
+    # presented as a cookie; excluded from repr and the public dict.
+    csrf_token: str = field(default_factory=lambda: secrets.token_urlsafe(32), repr=False)
 
     def to_public_dict(self) -> Dict[str, Any]:
         return {
