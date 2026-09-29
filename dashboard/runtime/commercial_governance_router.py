@@ -23,6 +23,7 @@ from engine.commercial.commercial_authorization import (
     CommercialActor,
     CommercialAuthorizationError,
     CommercialAuthorizer,
+    actor_from_bearer,
 )
 from engine.commercial.commercial_controls import (
     CommercialControls,
@@ -87,27 +88,16 @@ def create_commercial_governance_router(
     authorizer = authorizer or controls.authorizer
     router = APIRouter()
 
+    def _log_denial(username: str, roles: Sequence[str], permission: str, reason: str) -> None:
+        audit.append(action=f"API:{permission}", object_type="commercial_api", outcome="DENIED",
+                     actor_id=username, actor_role=",".join(roles) or None, reason=reason)
+
     def actor_for(authorization: Optional[str], permission: str) -> CommercialActor:
         """Resolve the session and pick the caller's role that grants ``permission``."""
-        parts = (authorization or "").split()
-        if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1]:
-            raise HTTPException(status_code=401, detail="bearer session token required")
-        session = session_resolver(parts[1])
-        if session is None:
-            raise HTTPException(status_code=401, detail="invalid or expired session")
-        username, roles = session
-        candidates = [CommercialActor(username, r) for r in roles] or [CommercialActor(username, "")]
-        for candidate in candidates:
-            if authorizer.allowed(candidate, permission):
-                return candidate
-        # Fail closed through the authorizer so the denial reason is precise.
-        try:
-            authorizer.require(candidates[0], permission)
-        except CommercialAuthorizationError as exc:
-            audit.append(action=f"API:{permission}", object_type="commercial_api", outcome="DENIED",
-                         actor_id=username, actor_role=",".join(roles) or None, reason=exc.reason)
-            raise HTTPException(status_code=403, detail=exc.reason) from exc
-        raise HTTPException(status_code=403, detail="not permitted")  # pragma: no cover - defensive
+        return actor_from_bearer(
+            authorization, permission,
+            session_resolver=session_resolver, authorizer=authorizer, on_denied=_log_denial,
+        )
 
     def decide(fn, *args, **kwargs):
         try:

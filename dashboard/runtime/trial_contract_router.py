@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from backend.app.persistence.services.trial_contract_enrollment_service import (
@@ -12,6 +12,12 @@ from backend.app.persistence.services.trial_conversion_assessment_service import
     TrialConversionAssessmentService,
 )
 from backend.commercialization.trial_contract import TrialContractError
+from dashboard.runtime.commercial_governance_router import token_store_session_resolver
+from engine.commercial.commercial_authorization import (
+    BearerSessionResolver,
+    CommercialAuthorizer,
+    actor_from_bearer,
+)
 
 
 class TrialEnrollmentRequest(BaseModel):
@@ -36,14 +42,27 @@ class TrialCancellationRequest(BaseModel):
     evidence_refs: list[str] = Field(min_length=1)
 
 
-def create_trial_contract_router() -> APIRouter:
+def create_trial_contract_router(
+    *,
+    session_resolver: BearerSessionResolver = token_store_session_resolver,
+    authorizer: Optional[CommercialAuthorizer] = None,
+) -> APIRouter:
     router = APIRouter()
+    authorizer_ = authorizer or CommercialAuthorizer()
+
+    def actor_for(authorization: Optional[str], permission: str):
+        return actor_from_bearer(
+            authorization, permission,
+            session_resolver=session_resolver, authorizer=authorizer_,
+        )
 
     @router.get("/api/v1/commercial-trial/agreement")
     def read_trial_agreement(
         agreement_id: str = Query(...),
         agreement_version: str = Query(...),
+        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
+        actor_for(authorization, "commercial_view_obligations")
         try:
             agreement = TrialContractEnrollmentService().load_agreement(
                 agreement_id,
@@ -69,7 +88,11 @@ def create_trial_contract_router() -> APIRouter:
         }
 
     @router.post("/api/v1/commercial-trial/enroll")
-    def enroll_trial(request: TrialEnrollmentRequest) -> dict[str, Any]:
+    def enroll_trial(
+        request: TrialEnrollmentRequest,
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        actor_for(authorization, "commercial_trial_enroll")
         try:
             enrollment = TrialContractEnrollmentService().enroll(
                 customer_id=request.customer_id,
@@ -104,7 +127,11 @@ def create_trial_contract_router() -> APIRouter:
         }
 
     @router.post("/api/v1/commercial-trial/cancel")
-    def cancel_trial(request: TrialCancellationRequest) -> dict[str, Any]:
+    def cancel_trial(
+        request: TrialCancellationRequest,
+        authorization: Optional[str] = Header(default=None),
+    ) -> dict[str, Any]:
+        actor_for(authorization, "commercial_trial_cancel")
         try:
             cancellation = TrialContractEnrollmentService().cancel(
                 customer_id=request.customer_id,
@@ -136,7 +163,9 @@ def create_trial_contract_router() -> APIRouter:
         agreement_id: str = Query(...),
         agreement_version: str = Query(...),
         assessed_at: str = Query(...),
+        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
+        actor_for(authorization, "commercial_view_obligations")
         try:
             assessment = TrialConversionAssessmentService().assess(
                 customer_id=customer_id,

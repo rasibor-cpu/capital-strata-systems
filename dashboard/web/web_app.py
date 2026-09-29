@@ -23,6 +23,7 @@ from dashboard.runtime.notification_delivery_preflight_router import create_noti
 from dashboard.runtime.launch_dossier_router import create_launch_dossier_router
 from dashboard.runtime.report_export_router import create_report_export_router
 from dashboard.runtime.commercial_governance_router import commercial_governance_router_from_env
+from backend.app.auth.operator_login_router import create_operator_login_router
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -54,6 +55,7 @@ def create_app(
     # remain read-only except the explicitly governed trial enroll/cancel
     # endpoints.
     runtime_routers = (
+        create_operator_login_router(),
         create_dashboard_state_router(provider),
         create_ws_router(provider),
         create_client_earnings_router(),

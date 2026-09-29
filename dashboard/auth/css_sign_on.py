@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import hmac
 import json
 import os
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -285,8 +287,7 @@ def change_authenticated_password(
         raise AuthFailure("USER_NOT_FOUND", "User record not found.")
 
     expected_hash = str(user_record.get("password_hash", "")).strip()
-    current_hash = hash_password(current_password)
-    if current_hash != expected_hash:
+    if not verify_password(current_password, expected_hash):
         raise AuthFailure("INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
 
     if new_password != confirm_password:
@@ -322,9 +323,8 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
         )
 
     expected_hash = str(user_record.get("password_hash", "")).strip()
-    supplied_hash = hash_password(password)
 
-    if supplied_hash != expected_hash:
+    if not verify_password(password, expected_hash):
         failed_attempts = int(user_record.get("failed_attempts", 0) or 0) + 1
         user_record["failed_attempts"] = failed_attempts
 
@@ -347,6 +347,9 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
 
     user_record["failed_attempts"] = 0
     clear_lockout_state(user_record)
+
+    if needs_password_rehash(expected_hash):
+        user_record["password_hash"] = hash_password(password)
 
     if password_expired(user_record):
         raise PasswordChangeRequired(normalized_user_id)
@@ -405,14 +408,13 @@ def validate_new_password(
     if new_password != confirm_password:
         raise PasswordValidationError("Passwords do not match.")
 
-    new_hash = hash_password(new_password)
     current_hash = str(user_record.get("password_hash", "")).strip()
     history = user_record.get("password_history")
     if not isinstance(history, list):
         history = []
 
     recent_hashes = [current_hash] + [str(value) for value in history[-PASSWORD_HISTORY_LIMIT:]]
-    if new_hash in recent_hashes:
+    if any(verify_password(new_password, recent) for recent in recent_hashes if recent):
         raise PasswordValidationError(
             "New password must differ from the current password and the last two passwords."
         )
@@ -1144,8 +1146,51 @@ def normalize_role(value: Any) -> str:
     return str(value or "").strip().upper().replace(" ", "_").replace("-", "_")
 
 
+_PBKDF2_ALGORITHM = "sha256"
+_PBKDF2_ITERATIONS = 600_000
+_PBKDF2_SALT_BYTES = 16
+_PBKDF2_PREFIX = "pbkdf2_sha256"
+
+
 def hash_password(password: str) -> str:
+    """Salted PBKDF2-HMAC-SHA256 password hash (NIST SP 800-63B-aligned work factor)."""
+    salt = secrets.token_bytes(_PBKDF2_SALT_BYTES)
+    return _pbkdf2_encode(password, salt, _PBKDF2_ITERATIONS)
+
+
+def _pbkdf2_encode(password: str, salt: bytes, iterations: int) -> str:
+    derived = hashlib.pbkdf2_hmac(_PBKDF2_ALGORITHM, str(password).encode("utf-8"), salt, iterations)
+    return f"{_PBKDF2_PREFIX}${iterations}${salt.hex()}${derived.hex()}"
+
+
+def _legacy_sha256(password: str) -> str:
     return hashlib.sha256(str(password).encode("utf-8")).hexdigest()
+
+
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify against a ``pbkdf2_sha256$...`` hash or a legacy unsalted sha256 digest.
+
+    Legacy support exists only so pre-existing user records keep working; every
+    successful verification against a legacy digest is upgraded in place by the
+    caller (see ``needs_password_rehash``).
+    """
+    stored_hash = str(stored_hash or "")
+    if stored_hash.startswith(f"{_PBKDF2_PREFIX}$"):
+        try:
+            _, iterations_raw, salt_hex, digest_hex = stored_hash.split("$", 3)
+            iterations = int(iterations_raw)
+            salt = bytes.fromhex(salt_hex)
+        except (ValueError, TypeError):
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            _PBKDF2_ALGORITHM, str(password).encode("utf-8"), salt, iterations
+        ).hex()
+        return hmac.compare_digest(candidate, digest_hex)
+    return hmac.compare_digest(_legacy_sha256(password), stored_hash)
+
+
+def needs_password_rehash(stored_hash: str) -> bool:
+    return not str(stored_hash or "").startswith(f"{_PBKDF2_PREFIX}$")
 
 
 def _default_admin_record() -> Dict[str, Any]:

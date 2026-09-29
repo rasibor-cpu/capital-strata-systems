@@ -19,10 +19,16 @@ mock_auth.await_login_ready_state.return_value = {
     "unit_code": "test", 
     "home_branch": "test"
 }
+_original_css_sign_on = sys.modules.get("dashboard.auth.css_sign_on")
 sys.modules["dashboard.auth.css_sign_on"] = mock_auth
 sys.modules["builtins"].input = lambda prompt: "1"
 
 import scripts.css_live_dashboard as dashboard
+
+if _original_css_sign_on is not None:
+    sys.modules["dashboard.auth.css_sign_on"] = _original_css_sign_on
+else:
+    sys.modules.pop("dashboard.auth.css_sign_on", None)
 
 @pytest.fixture(autouse=True)
 def reset_state():
