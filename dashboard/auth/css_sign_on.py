@@ -136,6 +136,7 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
             "lockout_until": None,
             "lockout_seconds": 0,
             "lockout_started_at": None,
+            "disabled": False,
         }
         for field, default in defaults.items():
             if field not in record:
@@ -230,10 +231,35 @@ def create_user(
         "lockout_until": None,
         "lockout_seconds": 0,
         "lockout_started_at": None,
+        "disabled": False,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "created_by": str(actor_ctx.get("user_id", "")),
     }
     users[normalized_user_id] = user_record
+    return build_user_context(user_record, normalized_user_id)
+
+
+def set_user_disabled(
+    users: Dict[str, Any],
+    actor_ctx: Dict[str, Any],
+    user_id: str,
+    disabled: bool,
+) -> Dict[str, Any]:
+    """Disable or re-enable an operator account. SUPER_USER only.
+
+    Disabling does not itself revoke existing sessions -- callers that hold a
+    bearer/cookie session store (the web/API layer, not this module) should
+    call ``token_store.revoke_all_for_user`` alongside this when disabling.
+    """
+    if not can_manage_users(actor_ctx):
+        raise AuthFailure("USER_ADMIN_DENIED", "Only a CSS super user can disable or enable accounts.")
+
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        raise AuthFailure("USER_NOT_FOUND", "User record not found.")
+
+    user_record["disabled"] = bool(disabled)
     return build_user_context(user_record, normalized_user_id)
 
 
@@ -310,6 +336,11 @@ def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str)
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
         raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
+
+    if bool(user_record.get("disabled", False)):
+        # Checked before lockout/password so a disabled account never leaks
+        # lockout timing or password-correctness information.
+        raise AuthFailure("ACCOUNT_DISABLED", "This account has been disabled.")
 
     now = datetime.now()
     lockout_remaining = active_lockout_remaining_seconds(user_record, now)

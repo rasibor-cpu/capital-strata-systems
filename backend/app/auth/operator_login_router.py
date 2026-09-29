@@ -23,9 +23,14 @@ from dashboard.auth.css_sign_on import (
     change_authenticated_password,
     load_users,
     save_users,
+    set_user_disabled,
 )
 
-from .session_dependency import SESSION_COOKIE_NAME
+from .session_dependency import (
+    SESSION_COOKIE_NAME,
+    require_operator_session,
+    revoke_session_from_request,
+)
 from .token_store import token_store
 
 OPERATOR_SESSION_MINUTES = 60
@@ -142,14 +147,36 @@ def create_operator_login_router() -> APIRouter:
 
     @router.post("/logout")
     def logout(request: Request, response: Response) -> dict:
-        token = request.cookies.get(SESSION_COOKIE_NAME)
-        if not token:
-            parts = (request.headers.get("authorization") or "").split()
-            if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
-                token = parts[1]
-        revoked = bool(token) and token_store.revoke(token)
+        revoked = revoke_session_from_request(request)
         response.delete_cookie(SESSION_COOKIE_NAME)
         return {"revoked": revoked}
+
+    @router.post("/admin/users/{user_id}/disable")
+    def disable_user(user_id: str, request: Request) -> dict:
+        return _set_disabled(request, user_id, True)
+
+    @router.post("/admin/users/{user_id}/enable")
+    def enable_user(user_id: str, request: Request) -> dict:
+        return _set_disabled(request, user_id, False)
+
+    def _set_disabled(request: Request, user_id: str, disabled: bool) -> dict:
+        caller = require_operator_session(request)
+        if "SUPER_USER" not in caller.roles:
+            raise HTTPException(status_code=403, detail="only a super user may disable or enable accounts")
+
+        users = load_users()
+        try:
+            user_ctx = set_user_disabled(users, {"role": "SUPER_USER"}, user_id, disabled)
+        except AuthFailure as exc:
+            raise HTTPException(status_code=404, detail=exc.message) from exc
+        save_users(users)
+
+        if disabled:
+            # A disabled account must not keep using sessions issued before
+            # it was disabled.
+            token_store.revoke_all_for_user(user_ctx["user_id"])
+
+        return {"user_id": user_ctx["user_id"], "disabled": disabled}
 
     @router.get("/me")
     def me(authorization: Optional[str] = Header(default=None)) -> dict:

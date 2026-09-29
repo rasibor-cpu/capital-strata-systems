@@ -166,6 +166,10 @@ def operator_env(tmp_path, monkeypatch):
         users, SUPER_USER_CTX, "20002", "Test Head FinCon", "HEAD_FINCON", "headfincon-pass-1", must_change_password=False
     )
     users["20002"]["last_password_change"] = now
+    css_sign_on.create_user(
+        users, SUPER_USER_CTX, "20005", "Test Super User", "SUPER_USER", "superuser-pass-1", must_change_password=False
+    )
+    users["20005"]["last_password_change"] = now
     _real_save(users, users_file)
 
     commercial_env = {"CSS_COMMERCIAL_DB": str(tmp_path / "commercial.sqlite3")}
@@ -454,3 +458,74 @@ def test_restart_preserves_pending_trial_action_for_approval(tmp_path, operator_
     reloaded = rebuilt.store.get(action["action_id"])
     assert reloaded is not None
     assert reloaded.status == "PENDING"
+
+
+# ---------------------------------------------------------------------------
+# Disabled accounts and admin disable/enable
+# ---------------------------------------------------------------------------
+
+
+def test_disabled_account_cannot_log_in_even_with_correct_password(operator_env):
+    users = css_sign_on.load_users()
+    users["20001"]["disabled"] = True
+    css_sign_on.save_users(users)
+
+    resp = _login(operator_env, "20001", "fincon-pass-1")
+    assert resp.status_code == 401
+
+
+def test_disabled_check_precedes_lockout_and_password_verification():
+    # Exercise css_sign_on directly: a disabled account is rejected before
+    # either the lockout window or the password itself is even evaluated.
+    users = {"20001": _legacy_user_record("fincon-pass-1")}
+    users["20001"]["disabled"] = True
+    users["20001"]["role"] = "FINCON"
+    with pytest.raises(css_sign_on.AuthFailure) as exc_info:
+        authenticate_credentials(users, "20001", "totally-wrong-password")
+    assert exc_info.value.code == "ACCOUNT_DISABLED"
+
+
+def test_only_super_user_can_disable_an_account(operator_env):
+    audit_token = _login(operator_env, "20003", "audit-pass-1").json()["token"]
+    resp = operator_env.post(
+        "/auth/operator/admin/users/20001/disable",
+        headers={"Authorization": f"Bearer {audit_token}"},
+    )
+    assert resp.status_code == 403
+
+
+def test_super_user_disabling_an_account_revokes_its_sessions_immediately(operator_env):
+    super_token = _login(operator_env, "20005", "superuser-pass-1").json()["token"]
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    assert operator_env.get(
+        "/auth/operator/me", headers={"Authorization": f"Bearer {fincon_token}"}
+    ).status_code == 200
+
+    resp = operator_env.post(
+        "/auth/operator/admin/users/20001/disable",
+        headers={"Authorization": f"Bearer {super_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": "20001", "disabled": True}
+
+    # The FINCON operator's already-issued session is dead immediately...
+    assert operator_env.get(
+        "/auth/operator/me", headers={"Authorization": f"Bearer {fincon_token}"}
+    ).status_code == 401
+    # ...and they cannot obtain a new one either.
+    assert _login(operator_env, "20001", "fincon-pass-1").status_code == 401
+
+
+def test_super_user_can_re_enable_a_disabled_account(operator_env):
+    super_token = _login(operator_env, "20005", "superuser-pass-1").json()["token"]
+    operator_env.post(
+        "/auth/operator/admin/users/20001/disable",
+        headers={"Authorization": f"Bearer {super_token}"},
+    )
+    resp = operator_env.post(
+        "/auth/operator/admin/users/20001/enable",
+        headers={"Authorization": f"Bearer {super_token}"},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"user_id": "20001", "disabled": False}
+    assert _login(operator_env, "20001", "fincon-pass-1").status_code == 200

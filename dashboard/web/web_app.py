@@ -29,7 +29,11 @@ from dashboard.runtime.commercial_governance_router import (
     commercial_governance_router_from_env,
 )
 from backend.app.auth.operator_login_router import create_operator_login_router
-from backend.app.auth.session_dependency import SESSION_COOKIE_NAME, resolve_operator_session
+from backend.app.auth.session_dependency import (
+    SESSION_COOKIE_NAME,
+    resolve_operator_session,
+    revoke_session_from_request,
+)
 from dashboard.auth.css_sign_on import AuthFailure, PasswordChangeRequired, authenticate_credentials, load_users, save_users
 from backend.app.auth.operator_login_router import OPERATOR_SESSION_MINUTES, set_session_cookie
 from dashboard.runtime.dashboard_state import DashboardState
@@ -138,11 +142,7 @@ def create_app(
 
     @app.post("/logout", include_in_schema=False)
     async def logout_submit(request: Request):
-        token = request.cookies.get(SESSION_COOKIE_NAME)
-        if token:
-            from backend.app.auth.token_store import token_store as _token_store
-
-            _token_store.revoke(token)
+        revoke_session_from_request(request)
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie(SESSION_COOKIE_NAME)
         return response

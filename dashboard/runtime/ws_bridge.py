@@ -158,6 +158,14 @@ def create_ws_router(
 
             while True:
                 await asyncio.sleep(interval_seconds)
+
+                # Re-validate on every tick: a session revoked (logout,
+                # password change) or expired after the handshake must not
+                # leave a live broker/PnL stream open indefinitely.
+                if resolve_operator_session_ws(websocket) is None:
+                    await websocket.close(code=4401)
+                    return
+
                 sequence += 1
                 state = _state_from_provider(provider)
                 messages = build_delta_ws_messages(

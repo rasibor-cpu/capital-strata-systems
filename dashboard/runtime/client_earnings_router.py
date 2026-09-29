@@ -21,7 +21,10 @@ from backend.app.persistence.services.advice_profitability_history_service impor
 from backend.app.persistence.services.customer_profitability_summary_service import (
     CustomerProfitabilitySummaryService,
 )
-from backend.commercialization.advice_profitability import AdviceProfitability
+from backend.commercialization.advice_profitability import (
+    AdviceProfitability,
+    AdviceProfitabilityError,
+)
 from backend.commercialization.client_earnings_summary import (
     ClientEarningsSummaryUnavailableError,
     CommercialClientEarningsSummary,
@@ -226,7 +229,15 @@ def create_client_earnings_router(
         authorization: Optional[str] = Header(default=None),
     ) -> list[dict[str, Any]]:
         actor_for(authorization)
-        history = AdviceProfitabilityHistoryService().list_by_terms_id(terms_id)
+        try:
+            history = AdviceProfitabilityHistoryService().list_by_terms_id(terms_id)
+        except AdviceProfitabilityError as exc:
+            # Unknown/malformed terms_id and a broken canonical chain both
+            # surface as a plain 404 -- the caller is already authorized to
+            # view compensation terms in general, so the underlying reason
+            # (not found vs. reconciliation failure) is legitimate
+            # troubleshooting detail, not an enumeration aid to an outsider.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return [build_advice_profitability_payload(item) for item in history]
 
     @router.get("/api/v1/withdrawable-funds-summary")
