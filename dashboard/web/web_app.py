@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import html
 import json
+import urllib.parse
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from dashboard.runtime.api_bridge import (
@@ -22,8 +24,14 @@ from dashboard.runtime.payment_collection_preflight_router import create_payment
 from dashboard.runtime.notification_delivery_preflight_router import create_notification_delivery_preflight_router
 from dashboard.runtime.launch_dossier_router import create_launch_dossier_router
 from dashboard.runtime.report_export_router import create_report_export_router
-from dashboard.runtime.commercial_governance_router import commercial_governance_router_from_env
+from dashboard.runtime.commercial_governance_router import (
+    commercial_controls_from_env,
+    commercial_governance_router_from_env,
+)
 from backend.app.auth.operator_login_router import create_operator_login_router
+from backend.app.auth.session_dependency import SESSION_COOKIE_NAME, resolve_operator_session
+from dashboard.auth.css_sign_on import AuthFailure, PasswordChangeRequired, authenticate_credentials, load_users, save_users
+from backend.app.auth.operator_login_router import OPERATOR_SESSION_MINUTES, set_session_cookie
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -54,12 +62,17 @@ def create_app(
     # the same compatibility pattern. All mounted commercialization routers
     # remain read-only except the explicitly governed trial enroll/cancel
     # endpoints.
+    # Shared maker-checker engine for the commercial governance API and the
+    # trial contract router's enroll/cancel actions -- one action-type
+    # registry, not a separate instance per router (see
+    # commercial_controls_from_env's docstring).
+    trial_controls = commercial_controls_from_env()
     runtime_routers = (
         create_operator_login_router(),
         create_dashboard_state_router(provider),
         create_ws_router(provider),
         create_client_earnings_router(),
-        create_trial_contract_router(),
+        create_trial_contract_router(controls=trial_controls),
         create_production_charging_router(),
         create_commercialization_release_router(),
         create_commercialization_operations_router(),
@@ -77,52 +90,127 @@ def create_app(
     if commercial_router is not None:
         app.router.routes.extend(commercial_router.routes)
 
+    def _require_page_session(request: Request):
+        """Any valid operator session (cookie or bearer) -- no specific role.
+
+        This gate closes anonymous access to the operational dashboard; it does
+        not replace the finer-grained commercial-permission checks used by the
+        commercial-collections routers (client earnings, trial contracts, the
+        governance API), which remain gated separately.
+        """
+        return resolve_operator_session(request)
+
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
         return RedirectResponse("/dashboard", status_code=303)
 
+    @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+    async def login_page(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is not None:
+            return RedirectResponse("/dashboard", status_code=303)
+        return HTMLResponse(_login_page())
+
+    @app.post("/login", include_in_schema=False)
+    async def login_submit(request: Request):
+        form = await _read_form(request)
+        user_id = form.get("user_id", "")
+        password = form.get("password", "")
+        users = load_users()
+        try:
+            user_ctx = authenticate_credentials(users, user_id, password)
+        except PasswordChangeRequired:
+            save_users(users)
+            return HTMLResponse(
+                _login_page(message="Password change required. Use the operator API to change your password before signing in."),
+                status_code=401,
+            )
+        except AuthFailure as exc:
+            save_users(users)
+            return HTMLResponse(_login_page(message=exc.message), status_code=401)
+
+        save_users(users)
+        from backend.app.auth.token_store import token_store as _token_store
+
+        token = _token_store.create_session(user_ctx["user_id"], [user_ctx["role"]], minutes=OPERATOR_SESSION_MINUTES)
+        response = RedirectResponse("/dashboard", status_code=303)
+        set_session_cookie(response, token)
+        return response
+
+    @app.post("/logout", include_in_schema=False)
+    async def logout_submit(request: Request):
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        if token:
+            from backend.app.auth.token_store import token_store as _token_store
+
+            _token_store.revoke(token)
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE_NAME)
+        return response
+
     @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard() -> HTMLResponse:
+    async def dashboard(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_dashboard_page())
 
     @app.get("/positions", response_class=HTMLResponse)
-    async def positions() -> HTMLResponse:
+    async def positions(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_positions_page())
 
     @app.get("/execution", response_class=HTMLResponse)
-    async def execution() -> HTMLResponse:
+    async def execution(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_execution_page())
 
     @app.get("/risk-governance", response_class=HTMLResponse)
-    async def risk_governance() -> HTMLResponse:
+    async def risk_governance(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_risk_governance_page())
 
     @app.get("/market-opportunities", response_class=HTMLResponse)
-    async def market_opportunities() -> HTMLResponse:
+    async def market_opportunities(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_market_opportunities_page())
 
     @app.get("/broker", response_class=HTMLResponse)
-    async def broker() -> HTMLResponse:
+    async def broker(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_broker_page())
 
     @app.get("/margin", response_class=HTMLResponse)
-    async def margin_view() -> HTMLResponse:
+    async def margin_view(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_margin_page())
 
     @app.get("/billing", response_class=HTMLResponse)
-    async def billing_view() -> HTMLResponse:
+    async def billing_view(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_billing_page())
 
     @app.get("/trial-contract", response_class=HTMLResponse)
-    async def trial_contract_view() -> HTMLResponse:
+    async def trial_contract_view(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_trial_contract_page())
 
     @app.get("/commercialization-operations", response_class=HTMLResponse)
-    async def commercialization_operations_view() -> HTMLResponse:
+    async def commercialization_operations_view(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is None:
+            return RedirectResponse("/login", status_code=303)
         return HTMLResponse(_commercialization_operations_page())
 
     @app.get("/api/v1/margin-snapshot")
-    async def margin_api() -> dict[str, Any]:
+    async def margin_api(request: Request) -> dict[str, Any]:
+        if _require_page_session(request) is None:
+            raise HTTPException(status_code=401, detail="authentication required")
         state = provider()
         summary = state.last_scan_results.get("account_summary", {})
         broker = str(summary.get("broker", "NONE")).upper()
@@ -206,6 +294,44 @@ def _app_nav(active: str) -> str:
             ),
             "</nav>",
         )
+    )
+
+
+async def _read_form(request: Request) -> dict[str, str]:
+    """Parse an ``application/x-www-form-urlencoded`` body without needing
+    python-multipart (Starlette's ``Request.form()`` requires it even for
+    urlencoded bodies). Mirrors ``dashboard.mobile.mobile_app._read_form``."""
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    parsed = urllib.parse.parse_qs(raw, keep_blank_values=True)
+    return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+
+def _login_page(message: str = "") -> str:
+    banner = (
+        f'<p style="color:#b91c1c;font-weight:600;">{html.escape(message)}</p>'
+        if message
+        else ""
+    )
+    return (
+        "<!doctype html><html><head><title>CSS Operator Sign-In</title>"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<style>body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;"
+        "display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}"
+        "form{background:#1e293b;padding:2rem;border-radius:8px;min-width:280px;}"
+        "input{display:block;width:100%;padding:0.5rem;margin:0.4rem 0 1rem;"
+        "border-radius:4px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;}"
+        "button{width:100%;padding:0.6rem;border-radius:4px;border:none;"
+        "background:#2563eb;color:#fff;font-weight:600;cursor:pointer;}"
+        "label{font-size:0.85rem;color:#94a3b8;}</style></head><body>"
+        f'<form method="post" action="/login">'
+        "<h2>Capital Strata Systems</h2><p>Operator sign-in</p>"
+        f"{banner}"
+        '<label for="user_id">Operator ID</label>'
+        '<input id="user_id" name="user_id" maxlength="5" autocomplete="username" required>'
+        '<label for="password">Password</label>'
+        '<input id="password" name="password" type="password" autocomplete="current-password" required>'
+        "<button type=\"submit\">Sign in</button>"
+        "</form></body></html>"
     )
 
 

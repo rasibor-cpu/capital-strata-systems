@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
+from backend.app.auth.session_dependency import require_operator_session
 from backend.app.reporting.export_service import export_payload
 from dashboard.runtime.api_bridge import (
     DashboardStateProvider,
@@ -12,7 +13,10 @@ from dashboard.runtime.api_bridge import (
 def create_report_export_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
-    router = APIRouter()
+    # Same operator-session gate as the dashboard-state/Mission Control feeds
+    # this exports -- any valid session, no specific commercial permission.
+    # Previously unauthenticated.
+    router = APIRouter(dependencies=[Depends(require_operator_session)])
 
     @router.get("/api/v1/report-export")
     def export_dashboard_report(

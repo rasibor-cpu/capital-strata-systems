@@ -26,6 +26,10 @@ from dashboard.auth.css_sign_on import (
     needs_password_rehash,
     verify_password,
 )
+from dashboard.runtime.commercial_governance_router import (
+    commercial_controls_from_env,
+    commercial_governance_router_from_env,
+)
 from dashboard.runtime.trial_contract_router import create_trial_contract_router
 
 SUPER_USER_CTX = {"user_id": "00000", "role": "SUPER_USER"}
@@ -42,12 +46,14 @@ ENROLL_BODY = {
     "evidence_refs": ["ev-1"],
     "affirm_terms_acceptance": True,
     "affirm_automatic_conversion_disclosure": True,
+    "idempotency_key": "enroll-key-1",
 }
 CANCEL_BODY = {
     "customer_id": "cust-1",
     "account_reference": "acct-1",
     "canceled_at": "2026-01-01T00:00:00Z",
     "cancellation_audit_reference": "audit-ref",
+    "idempotency_key": "cancel-key-1",
     "evidence_refs": ["ev-1"],
 }
 
@@ -156,12 +162,23 @@ def operator_env(tmp_path, monkeypatch):
     now = datetime.now().isoformat(timespec="seconds")
     users["20001"]["last_password_change"] = now
     users["20003"]["last_password_change"] = now
+    css_sign_on.create_user(
+        users, SUPER_USER_CTX, "20002", "Test Head FinCon", "HEAD_FINCON", "headfincon-pass-1", must_change_password=False
+    )
+    users["20002"]["last_password_change"] = now
     _real_save(users, users_file)
+
+    commercial_env = {"CSS_COMMERCIAL_DB": str(tmp_path / "commercial.sqlite3")}
+    controls = commercial_controls_from_env(commercial_env)
+    governance_router = commercial_governance_router_from_env(commercial_env)
 
     app = FastAPI()
     app.router.routes.extend(operator_login_router.create_operator_login_router().routes)
-    app.router.routes.extend(create_trial_contract_router().routes)
-    return TestClient(app)
+    app.router.routes.extend(create_trial_contract_router(controls=controls).routes)
+    app.router.routes.extend(governance_router.routes)
+    client = TestClient(app)
+    client.controls = controls
+    return client
 
 
 def _login(client, user_id, password):
@@ -320,6 +337,120 @@ def test_trial_enroll_is_reachable_for_a_role_actually_granted_it(operator_env):
     fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
     headers = {"Authorization": f"Bearer {fincon_token}"}
     resp = operator_env.post("/api/v1/commercial-trial/enroll", json=ENROLL_BODY, headers=headers)
-    # Authorization must pass; whatever the underlying trial service does next
-    # (e.g. 404/409 because no agreement was seeded) is not an auth failure.
-    assert resp.status_code not in (401, 403)
+    assert resp.status_code == 201
+    action = resp.json()["controlled_action"]
+    assert action["status"] == "PENDING"
+    assert action["maker_id"] == "20001"
+    assert action["maker_role"] == "FINCON"
+
+
+# ---------------------------------------------------------------------------
+# Trial maker-checker: enroll/cancel are proposed by one operator and executed
+# only once a different, separately authorized operator approves -- reusing
+# the same CommercialControls engine and the same generic
+# /api/v1/commercial/controlled-actions/{id}/approve endpoint the
+# reconciliation-exception flow already uses (no parallel subsystem).
+# ---------------------------------------------------------------------------
+
+
+def _bearer(token):
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _prepare_enrollment(client, fincon_token, idempotency_key="enroll-key-1"):
+    body = dict(ENROLL_BODY, idempotency_key=idempotency_key)
+    resp = client.post("/api/v1/commercial-trial/enroll", json=body, headers=_bearer(fincon_token))
+    assert resp.status_code == 201
+    return resp.json()["controlled_action"]
+
+
+def test_maker_cannot_approve_their_own_trial_enrollment(operator_env):
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    action = _prepare_enrollment(operator_env, fincon_token)
+
+    resp = operator_env.post(
+        f"/api/v1/commercial/controlled-actions/{action['action_id']}/approve",
+        json={"expected_payload_hash": action["payload_hash"]},
+        headers=_bearer(fincon_token),
+    )
+    assert resp.status_code == 403
+
+
+def test_wrong_role_cannot_approve_trial_enrollment(operator_env):
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    audit_token = _login(operator_env, "20003", "audit-pass-1").json()["token"]
+    action = _prepare_enrollment(operator_env, fincon_token)
+
+    resp = operator_env.post(
+        f"/api/v1/commercial/controlled-actions/{action['action_id']}/approve",
+        json={"expected_payload_hash": action["payload_hash"]},
+        headers=_bearer(audit_token),
+    )
+    assert resp.status_code == 403
+
+
+def test_head_fincon_approval_transitions_the_action_exactly_once(operator_env):
+    # This proves the maker-checker plumbing (approval authority, one-time
+    # transition, checker recorded, no re-execution on replay). Whether the
+    # underlying TrialContractEnrollmentService itself succeeds depends on a
+    # real agreement being seeded there, which is that service's own concern
+    # (and its own test coverage) -- EXECUTED and FAILED are both legitimate
+    # terminal outcomes here; getting stuck at PENDING/APPROVED is not.
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    head_fincon_token = _login(operator_env, "20002", "headfincon-pass-1").json()["token"]
+    action = _prepare_enrollment(operator_env, fincon_token)
+
+    resp = operator_env.post(
+        f"/api/v1/commercial/controlled-actions/{action['action_id']}/approve",
+        json={"expected_payload_hash": action["payload_hash"]},
+        headers=_bearer(head_fincon_token),
+    )
+    assert resp.status_code == 200
+    approved = resp.json()["controlled_action"]
+    assert approved["status"] in ("EXECUTED", "FAILED")
+    assert approved["checker_id"] == "20002"
+    assert approved["checker_role"] == "HEAD_FINCON"
+
+    # A second approval attempt on the now-terminal action is rejected, not re-executed.
+    replay = operator_env.post(
+        f"/api/v1/commercial/controlled-actions/{action['action_id']}/approve",
+        json={"expected_payload_hash": action["payload_hash"]},
+        headers=_bearer(head_fincon_token),
+    )
+    assert replay.status_code == 409
+
+
+def test_tampered_payload_hash_is_rejected_on_approval(operator_env):
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    head_fincon_token = _login(operator_env, "20002", "headfincon-pass-1").json()["token"]
+    action = _prepare_enrollment(operator_env, fincon_token)
+
+    resp = operator_env.post(
+        f"/api/v1/commercial/controlled-actions/{action['action_id']}/approve",
+        json={"expected_payload_hash": "0" * 64},
+        headers=_bearer(head_fincon_token),
+    )
+    # Not an authorization failure (the checker IS permitted to approve) --
+    # a stale/manipulated payload hash is a 422 per the shared ControlledActionError mapping.
+    assert resp.status_code == 422
+
+
+def test_duplicate_idempotency_key_replays_the_same_pending_action(operator_env):
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    first = _prepare_enrollment(operator_env, fincon_token, idempotency_key="same-key")
+    second = _prepare_enrollment(operator_env, fincon_token, idempotency_key="same-key")
+    assert first["action_id"] == second["action_id"]
+
+
+def test_restart_preserves_pending_trial_action_for_approval(tmp_path, operator_env):
+    fincon_token = _login(operator_env, "20001", "fincon-pass-1").json()["token"]
+    action = _prepare_enrollment(operator_env, fincon_token, idempotency_key="restart-key")
+
+    # Simulate a process restart: rebuild the controls engine from the same db.
+    from dashboard.runtime.commercial_governance_router import commercial_controls_from_env
+
+    commercial_env = {"CSS_COMMERCIAL_DB": operator_env.controls.store.db_path}
+    rebuilt = commercial_controls_from_env(commercial_env)
+    reloaded = rebuilt.store.get(action["action_id"])
+    assert reloaded is not None
+    assert reloaded.status == "PENDING"

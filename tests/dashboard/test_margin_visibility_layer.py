@@ -53,9 +53,10 @@ def test_web_margin_visibility_renders():
 
 
 def test_web_margin_snapshot_api_returns_data(monkeypatch):
+    monkeypatch.setattr(web_app, "resolve_operator_session", lambda request: object())
     app = web_app.create_app(MockDashboardStateProvider())
     margin_api = find_endpoint(app.routes, "/api/v1/margin-snapshot")
-    
+
     def mock_get_snapshot(self):
         return MarginSnapshot(
             broker="OANDA",
@@ -72,8 +73,8 @@ def test_web_margin_snapshot_api_returns_data(monkeypatch):
             margin_state=MarginState.NORMAL
         )
     monkeypatch.setattr(OandaMarginAdapter, "get_margin_snapshot", mock_get_snapshot)
-    
-    data = asyncio.run(margin_api())
+
+    data = asyncio.run(margin_api(None))
     assert data["ok"] is True
     assert data["broker"] == "OANDA"
     assert data["margin_state"] == "NORMAL"
@@ -81,12 +82,26 @@ def test_web_margin_snapshot_api_returns_data(monkeypatch):
 
 
 def test_web_margin_snapshot_api_unavailable(monkeypatch):
+    monkeypatch.setattr(web_app, "resolve_operator_session", lambda request: object())
     app = web_app.create_app(UnavailableMockDashboardStateProvider())
     margin_api = find_endpoint(app.routes, "/api/v1/margin-snapshot")
-    
-    data = asyncio.run(margin_api())
+
+    data = asyncio.run(margin_api(None))
     assert data["ok"] is False
     assert data["status"] == "DATA_UNAVAILABLE"
+
+
+def test_web_margin_snapshot_api_requires_session():
+    app = web_app.create_app(MockDashboardStateProvider())
+    margin_api = find_endpoint(app.routes, "/api/v1/margin-snapshot")
+
+    class _FakeRequest:
+        cookies: dict = {}
+        headers: dict = {}
+
+    with pytest.raises(Exception) as exc_info:
+        asyncio.run(margin_api(_FakeRequest()))
+    assert getattr(exc_info.value, "status_code", None) == 401
 
 
 def test_mobile_margin_visibility_renders():

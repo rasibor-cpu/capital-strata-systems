@@ -1,9 +1,16 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query
+
+from dashboard.runtime.commercial_governance_router import token_store_session_resolver
+from engine.commercial.commercial_authorization import (
+    BearerSessionResolver,
+    CommercialAuthorizer,
+    actor_from_bearer,
+)
 
 from backend.app.persistence.services.client_earnings_summary_service import (
     ClientEarningsSummaryService,
@@ -158,18 +165,37 @@ def build_withdrawable_funds_summary_payload(
 
 def create_client_earnings_router(
     service_factory: type[ClientEarningsSummaryService] | None = None,
+    *,
+    session_resolver: BearerSessionResolver = token_store_session_resolver,
+    authorizer: Optional[CommercialAuthorizer] = None,
 ) -> APIRouter:
-    """Read-only router for client earnings, charges, and advisory withdrawal views."""
+    """Read-only router for client earnings, charges, and advisory withdrawal views.
+
+    Every route requires a bearer session with commercial view rights
+    (``commercial_view_obligations`` -- granted to FINCON, HEAD_FINCON, AUDIT,
+    HEAD_AUDIT, COMPLIANCE and HEAD_COMPLIANCE). Previously these routes had
+    no authentication at all and returned real customer financial data for
+    any guessed policy_id/account_reference/terms_id.
+    """
 
     router = APIRouter()
     factory = service_factory or ClientEarningsSummaryService
+    authorizer_ = authorizer or CommercialAuthorizer()
+
+    def actor_for(authorization: Optional[str]) -> None:
+        actor_from_bearer(
+            authorization, "commercial_view_obligations",
+            session_resolver=session_resolver, authorizer=authorizer_,
+        )
 
     @router.get("/api/v1/client-earnings-summary")
     def read_client_earnings_summary(
         policy_id: str = Query(...),
         period_start: str = Query(...),
         period_end: str = Query(...),
+        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
+        actor_for(authorization)
         try:
             summary = factory().build_summary(policy_id, period_start, period_end)
         except ClientEarningsSummaryUnavailableError as exc:
@@ -181,7 +207,9 @@ def create_client_earnings_router(
         policy_id: str = Query(...),
         period_start: str = Query(...),
         period_end: str = Query(...),
+        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
+        actor_for(authorization)
         try:
             summary = CustomerProfitabilitySummaryService().build_summary(
                 policy_id=policy_id,
@@ -195,7 +223,9 @@ def create_client_earnings_router(
     @router.get("/api/v1/advice-profitability-history")
     def read_advice_profitability_history(
         terms_id: str = Query(...),
+        authorization: Optional[str] = Header(default=None),
     ) -> list[dict[str, Any]]:
+        actor_for(authorization)
         history = AdviceProfitabilityHistoryService().list_by_terms_id(terms_id)
         return [build_advice_profitability_payload(item) for item in history]
 
@@ -213,7 +243,9 @@ def create_client_earnings_router(
         other_restricted_amount: str | None = Query(default=None),
         data_freshness: str = Query(default="UNKNOWN"),
         is_complete: bool = Query(default=False),
+        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
+        actor_for(authorization)
         summary = build_withdrawable_funds_summary(
             account_reference=account_reference,
             account_currency=account_currency,
@@ -236,7 +268,9 @@ def create_client_earnings_router(
         policy_id: str | None = Query(default=None),
         period_start: str | None = Query(default=None),
         period_end: str | None = Query(default=None),
+        authorization: Optional[str] = Header(default=None),
     ) -> list[dict[str, Any]]:
+        actor_for(authorization)
         try:
             summaries = factory().list_summaries(
                 account_reference=account_reference,

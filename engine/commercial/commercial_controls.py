@@ -458,3 +458,49 @@ def request_exception_resolution(controls: CommercialControls, actor, *, excepti
         payload={"exception_id": exception_id, "resolution_reference": resolution_reference},
         idempotency_key=idempotency_key, evidence_ref=evidence_ref, correlation_id=correlation_id,
     )
+
+
+# ---------------------------------------------------------------------------
+# Controlled actions: trial enrollment / cancellation
+#
+# Enrolling or canceling a customer's trial carries automatic-conversion
+# billing risk, so it is proposed by one authorized operator (maker) and
+# executed only once a different, separately authorized operator (checker)
+# approves it -- the same maker-checker machinery used for reconciliation
+# exception resolution above, not a parallel subsystem.
+# ---------------------------------------------------------------------------
+
+ENROLL_TRIAL = "ENROLL_TRIAL"
+CANCEL_TRIAL = "CANCEL_TRIAL"
+
+
+def trial_enrollment_action(trial_service) -> ControlledActionType:
+    def execute(action: ControlledAction) -> str:
+        enrollment = trial_service.enroll(
+            customer_id=action.payload["customer_id"],
+            account_reference=action.payload["account_reference"],
+            agreement_id=action.payload["agreement_id"],
+            agreement_version=action.payload["agreement_version"],
+            accepted_at=action.payload["accepted_at"],
+            displayed_pricing_summary=action.payload["displayed_pricing_summary"],
+            displayed_conversion_disclosure=action.payload["displayed_conversion_disclosure"],
+            acceptance_audit_reference=action.payload["acceptance_audit_reference"],
+            evidence_refs=tuple(action.payload["evidence_refs"]),
+        )
+        return f"ENROLLED:{enrollment.trial_expires_at}"
+
+    return ControlledActionType(name=ENROLL_TRIAL, execute=execute, maker_permission="commercial_trial_enroll")
+
+
+def trial_cancellation_action(trial_service) -> ControlledActionType:
+    def execute(action: ControlledAction) -> str:
+        trial_service.cancel(
+            customer_id=action.payload["customer_id"],
+            account_reference=action.payload["account_reference"],
+            canceled_at=action.payload["canceled_at"],
+            cancellation_audit_reference=action.payload["cancellation_audit_reference"],
+            evidence_refs=tuple(action.payload["evidence_refs"]),
+        )
+        return "CANCELED"
+
+    return ControlledActionType(name=CANCEL_TRIAL, execute=execute, maker_permission="commercial_trial_cancel")

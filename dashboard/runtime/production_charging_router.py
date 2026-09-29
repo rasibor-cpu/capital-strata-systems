@@ -1,16 +1,32 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 
 from backend.app.persistence.services.production_charging_assessment_service import (
     ProductionChargingAssessmentService,
 )
+from dashboard.runtime.commercial_governance_router import token_store_session_resolver
+from engine.commercial.commercial_authorization import (
+    BearerSessionResolver,
+    CommercialAuthorizer,
+    actor_from_bearer,
+)
 
 
-def create_production_charging_router() -> APIRouter:
+def create_production_charging_router(
+    *,
+    session_resolver: BearerSessionResolver = token_store_session_resolver,
+    authorizer: Optional[CommercialAuthorizer] = None,
+) -> APIRouter:
+    """Every route requires a bearer session with commercial view rights.
+
+    Previously unauthenticated: leaked per-customer legal-review/certification/
+    payment-authority readiness for any guessed customer_id/account_reference.
+    """
     router = APIRouter()
+    authorizer_ = authorizer or CommercialAuthorizer()
 
     @router.get("/api/v1/production-charging/readiness")
     def read_production_charging_readiness(
@@ -20,7 +36,12 @@ def create_production_charging_router() -> APIRouter:
         agreement_version: str = Query(...),
         jurisdiction_code: str = Query(...),
         assessed_at: str = Query(...),
+        authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
+        actor_from_bearer(
+            authorization, "commercial_view_obligations",
+            session_resolver=session_resolver, authorizer=authorizer_,
+        )
         assessment = ProductionChargingAssessmentService().assess(
             customer_id=customer_id,
             account_reference=account_reference,

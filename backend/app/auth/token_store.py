@@ -128,5 +128,15 @@ class TokenStore:
         token = (token or "").strip()
         return self._sessions.pop(token, None) is not None
 
+    def revoke_all_for_user(self, username: str) -> int:
+        """Revoke every session for ``username`` (e.g. on password change). Returns the count revoked."""
+        username = (username or "").strip().lower()
+        if not username:
+            return 0
+        stale = [tok for tok, info in self._sessions.items() if info.username == username]
+        for tok in stale:
+            self._sessions.pop(tok, None)
+        return len(stale)
+
 
 token_store = TokenStore()

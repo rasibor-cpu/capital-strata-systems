@@ -178,25 +178,60 @@ def create_commercial_governance_router(
     return router
 
 
+def _commercial_db_path(env=None) -> str:
+    import os
+
+    return (env if env is not None else os.environ).get("CSS_COMMERCIAL_DB", "").strip()
+
+
+def commercial_controls_from_env(env=None) -> Optional[CommercialControls]:
+    """Build (and register all known action types onto) the shared maker-checker
+    engine when ``CSS_COMMERCIAL_DB`` names the commercial database, else None.
+
+    Any caller building its own ``CommercialControls`` for the same db_path
+    (e.g. the trial contract router) should go through this function instead
+    of registering action types itself, so approving an action through the
+    governance API's generic endpoints always finds the right executor --
+    one action-type registry, reused, not duplicated per router.
+    """
+    db_path = _commercial_db_path(env)
+    if not db_path:
+        return None
+    from engine.commercial.commercial_controls import (
+        ControlledActionStore,
+        reconciliation_resolution_action,
+        trial_cancellation_action,
+        trial_enrollment_action,
+    )
+    from engine.commercial.reconciliation_repository import ReconciliationRepository
+    from backend.app.persistence.services.trial_contract_enrollment_service import (
+        TrialContractEnrollmentService,
+    )
+
+    reconciliation = ReconciliationService(ReconciliationRepository(db_path))
+    audit = CommercialAuditLog(db_path)
+    controls = CommercialControls(ControlledActionStore(db_path), audit)
+    controls.register(reconciliation_resolution_action(reconciliation))
+    trial_service = TrialContractEnrollmentService()
+    controls.register(trial_enrollment_action(trial_service))
+    controls.register(trial_cancellation_action(trial_service))
+    controls.resume_approved()
+    return controls
+
+
 def commercial_governance_router_from_env(env=None) -> Optional[APIRouter]:
     """Build the router when ``CSS_COMMERCIAL_DB`` names the commercial database.
 
     Returns None when unset, so the governance API is only exposed by explicit
     deployment configuration and never creates a database implicitly.
     """
-    import os
-
-    db_path = (env if env is not None else os.environ).get("CSS_COMMERCIAL_DB", "").strip()
+    db_path = _commercial_db_path(env)
     if not db_path:
         return None
-    from engine.commercial.commercial_controls import ControlledActionStore, reconciliation_resolution_action
+    controls = commercial_controls_from_env(env)
+    audit = controls.audit
     from engine.commercial.reconciliation_repository import ReconciliationRepository
-
     reconciliation = ReconciliationService(ReconciliationRepository(db_path))
-    audit = CommercialAuditLog(db_path)
-    controls = CommercialControls(ControlledActionStore(db_path), audit)
-    controls.register(reconciliation_resolution_action(reconciliation))
-    controls.resume_approved()
     return create_commercial_governance_router(
         controls=controls, reconciliation=reconciliation, collections=CollectionRepository(db_path),
         history=CollectionHistoryRepository(db_path), audit=audit,

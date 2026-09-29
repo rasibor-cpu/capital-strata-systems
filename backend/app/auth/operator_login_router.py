@@ -9,9 +9,10 @@ user record; neither is ever accepted from the request body.
 """
 from __future__ import annotations
 
+import os
 from typing import Optional
 
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from dashboard.auth.css_sign_on import (
@@ -24,6 +25,7 @@ from dashboard.auth.css_sign_on import (
     save_users,
 )
 
+from .session_dependency import SESSION_COOKIE_NAME
 from .token_store import token_store
 
 OPERATOR_SESSION_MINUTES = 60
@@ -56,11 +58,27 @@ def _bearer_token(authorization: Optional[str]) -> str:
     return parts[1]
 
 
+def cookie_secure_default() -> bool:
+    # Allow local HTTP development; default to secure cookies everywhere else.
+    return os.environ.get("CSS_ENV", "").strip().lower() not in {"development", "dev", "local"}
+
+
+def set_session_cookie(response: Response, token: str) -> None:
+    response.set_cookie(
+        SESSION_COOKIE_NAME,
+        token,
+        httponly=True,
+        samesite="lax",
+        secure=cookie_secure_default(),
+        max_age=OPERATOR_SESSION_MINUTES * 60,
+    )
+
+
 def create_operator_login_router() -> APIRouter:
     router = APIRouter(prefix="/auth/operator", tags=["operator-auth"])
 
     @router.post("/login", response_model=OperatorLoginResponse)
-    def login(body: OperatorLoginRequest) -> OperatorLoginResponse:
+    def login(body: OperatorLoginRequest, response: Response) -> OperatorLoginResponse:
         users = load_users()
         try:
             user_ctx = authenticate_credentials(users, body.user_id, body.password)
@@ -80,6 +98,7 @@ def create_operator_login_router() -> APIRouter:
             [user_ctx["role"]],
             minutes=OPERATOR_SESSION_MINUTES,
         )
+        set_session_cookie(response, token)
         return OperatorLoginResponse(
             token=token,
             user_id=user_ctx["user_id"],
@@ -89,7 +108,7 @@ def create_operator_login_router() -> APIRouter:
         )
 
     @router.post("/change-password", response_model=OperatorLoginResponse)
-    def change_password(body: OperatorPasswordChangeRequest) -> OperatorLoginResponse:
+    def change_password(body: OperatorPasswordChangeRequest, response: Response) -> OperatorLoginResponse:
         users = load_users()
         try:
             user_ctx = change_authenticated_password(
@@ -104,11 +123,15 @@ def create_operator_login_router() -> APIRouter:
         except PasswordValidationError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
 
+        # A password change invalidates every other session for this operator
+        # (e.g. a compromised password should not leave old sessions usable).
+        token_store.revoke_all_for_user(user_ctx["user_id"])
         token = token_store.create_session(
             user_ctx["user_id"],
             [user_ctx["role"]],
             minutes=OPERATOR_SESSION_MINUTES,
         )
+        set_session_cookie(response, token)
         return OperatorLoginResponse(
             token=token,
             user_id=user_ctx["user_id"],
@@ -118,10 +141,15 @@ def create_operator_login_router() -> APIRouter:
         )
 
     @router.post("/logout")
-    def logout(authorization: Optional[str] = Header(default=None)) -> dict:
-        token = _bearer_token(authorization)
-        token_store.revoke(token)
-        return {"revoked": True}
+    def logout(request: Request, response: Response) -> dict:
+        token = request.cookies.get(SESSION_COOKIE_NAME)
+        if not token:
+            parts = (request.headers.get("authorization") or "").split()
+            if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1]:
+                token = parts[1]
+        revoked = bool(token) and token_store.revoke(token)
+        response.delete_cookie(SESSION_COOKIE_NAME)
+        return {"revoked": revoked}
 
     @router.get("/me")
     def me(authorization: Optional[str] = Header(default=None)) -> dict:

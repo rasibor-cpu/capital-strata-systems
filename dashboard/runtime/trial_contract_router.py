@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import Any, Literal, Optional
 
 from fastapi import APIRouter, Header, HTTPException, Query
@@ -18,6 +19,11 @@ from engine.commercial.commercial_authorization import (
     CommercialAuthorizer,
     actor_from_bearer,
 )
+from engine.commercial.commercial_controls import (
+    CommercialControls,
+    ControlledActionConflict,
+    ControlledActionError,
+)
 
 
 class TrialEnrollmentRequest(BaseModel):
@@ -32,6 +38,7 @@ class TrialEnrollmentRequest(BaseModel):
     evidence_refs: list[str] = Field(min_length=1)
     affirm_terms_acceptance: Literal[True]
     affirm_automatic_conversion_disclosure: Literal[True]
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 class TrialCancellationRequest(BaseModel):
@@ -40,12 +47,14 @@ class TrialCancellationRequest(BaseModel):
     canceled_at: str = Field(min_length=1)
     cancellation_audit_reference: str = Field(min_length=1)
     evidence_refs: list[str] = Field(min_length=1)
+    idempotency_key: str = Field(min_length=1, max_length=200)
 
 
 def create_trial_contract_router(
     *,
     session_resolver: BearerSessionResolver = token_store_session_resolver,
     authorizer: Optional[CommercialAuthorizer] = None,
+    controls: Optional[CommercialControls] = None,
 ) -> APIRouter:
     router = APIRouter()
     authorizer_ = authorizer or CommercialAuthorizer()
@@ -87,69 +96,60 @@ def create_trial_contract_router(
             "execution_authority": False,
         }
 
-    @router.post("/api/v1/commercial-trial/enroll")
+    @router.post("/api/v1/commercial-trial/enroll", status_code=201)
     def enroll_trial(
         request: TrialEnrollmentRequest,
         authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        actor_for(authorization, "commercial_trial_enroll")
+        maker = actor_for(authorization, "commercial_trial_enroll")
+        if controls is None:
+            raise HTTPException(status_code=503, detail="commercial governance not configured")
+        object_ref = f"trial_enrollment:{request.customer_id}:{request.account_reference}"
         try:
-            enrollment = TrialContractEnrollmentService().enroll(
-                customer_id=request.customer_id,
-                account_reference=request.account_reference,
-                agreement_id=request.agreement_id,
-                agreement_version=request.agreement_version,
-                accepted_at=request.accepted_at,
-                displayed_pricing_summary=request.displayed_pricing_summary,
-                displayed_conversion_disclosure=(
-                    request.displayed_conversion_disclosure
-                ),
-                acceptance_audit_reference=request.acceptance_audit_reference,
-                evidence_refs=tuple(request.evidence_refs),
+            action = controls.request(
+                maker,
+                action_type="ENROLL_TRIAL",
+                object_ref=object_ref,
+                payload=request.model_dump(exclude={"idempotency_key"}),
+                idempotency_key=request.idempotency_key,
             )
-        except (TrialContractError, ValueError) as exc:
+        except ControlledActionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ControlledActionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         return {
-            "customer_id": enrollment.customer_id,
-            "account_reference": enrollment.account_reference,
-            "agreement_id": enrollment.agreement_id,
-            "agreement_version": enrollment.agreement_version,
-            "pricing_plan_id": enrollment.pricing_plan_id,
-            "accepted_at": enrollment.accepted_at,
-            "trial_start_at": enrollment.trial_start_at,
-            "trial_expires_at": enrollment.trial_expires_at,
-            "acceptance_audit_reference": enrollment.acceptance_audit_reference,
+            "controlled_action": asdict(action),
             "automatic_payment_started": False,
             "payment_execution_allowed": False,
             "money_movement_allowed": False,
             "execution_authority": False,
         }
 
-    @router.post("/api/v1/commercial-trial/cancel")
+    @router.post("/api/v1/commercial-trial/cancel", status_code=201)
     def cancel_trial(
         request: TrialCancellationRequest,
         authorization: Optional[str] = Header(default=None),
     ) -> dict[str, Any]:
-        actor_for(authorization, "commercial_trial_cancel")
+        maker = actor_for(authorization, "commercial_trial_cancel")
+        if controls is None:
+            raise HTTPException(status_code=503, detail="commercial governance not configured")
+        object_ref = f"trial_cancellation:{request.customer_id}:{request.account_reference}"
         try:
-            cancellation = TrialContractEnrollmentService().cancel(
-                customer_id=request.customer_id,
-                account_reference=request.account_reference,
-                canceled_at=request.canceled_at,
-                cancellation_audit_reference=request.cancellation_audit_reference,
-                evidence_refs=tuple(request.evidence_refs),
+            action = controls.request(
+                maker,
+                action_type="CANCEL_TRIAL",
+                object_ref=object_ref,
+                payload=request.model_dump(exclude={"idempotency_key"}),
+                idempotency_key=request.idempotency_key,
             )
-        except (TrialContractError, ValueError) as exc:
+        except ControlledActionConflict as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ControlledActionError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         return {
-            "customer_id": cancellation.customer_id,
-            "account_reference": cancellation.account_reference,
-            "canceled_at": cancellation.canceled_at,
-            "cancellation_audit_reference": (
-                cancellation.cancellation_audit_reference
-            ),
+            "controlled_action": asdict(action),
             "automatic_conversion_blocked_if_pre_expiry": True,
             "payment_execution_allowed": False,
             "money_movement_allowed": False,
