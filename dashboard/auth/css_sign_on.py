@@ -17,7 +17,17 @@ ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 SESSION_AUTH_FILE = ARTIFACTS_DIR / "css_auth_session.json"
 
 INITIAL_ADMIN_ID = "00000"
+# The historically published bootstrap password. It is no longer ever issued:
+# it stays only as a deny-list value (it can never be chosen as a password) and
+# to detect and neutralize unclaimed legacy stores (see _migrate_bootstrap_admin).
 INITIAL_ADMIN_PASSWORD = "123456"
+# Bootstrap-administrator lifecycle. A fresh store's 00000 record is
+# BOOTSTRAP_REQUIRED with no usable password: nothing -- sign-in, the operator
+# API, mobile -- can authenticate as it until a local operator runs
+# ``python -m scripts.bootstrap_css_admin`` (bootstrap_initial_admin), exactly
+# once. There is no network path to bootstrap, so no first-claim race.
+BOOTSTRAP_REQUIRED = "required"
+BOOTSTRAP_INITIALIZED = "initialized"
 INITIAL_DISPLAY_NAME = "CSS Administrator"
 INITIAL_ROLE = "SUPER_USER"
 MIN_PASSWORD_LENGTH = 6
@@ -105,7 +115,7 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
 
     changed = False
     if not users_file.exists():
-        users = {INITIAL_ADMIN_ID: _default_admin_record()}
+        users = {INITIAL_ADMIN_ID: _uninitialized_admin_record()}
         save_users(users, users_file)
         return users
 
@@ -119,7 +129,9 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
         raise RuntimeError("CSS_USER_STORE_INVALID")
 
     if INITIAL_ADMIN_ID not in users:
-        users[INITIAL_ADMIN_ID] = _default_admin_record()
+        users[INITIAL_ADMIN_ID] = _uninitialized_admin_record()
+        changed = True
+    elif isinstance(users[INITIAL_ADMIN_ID], dict) and _migrate_bootstrap_admin(users[INITIAL_ADMIN_ID]):
         changed = True
 
     for key, record in list(users.items()):
@@ -331,6 +343,11 @@ def _verify_credentials_or_raise(user_record: Dict[str, Any], normalized_user_id
                    reason="account is disabled")
         raise AuthFailure("ACCOUNT_DISABLED", "This account has been disabled.")
 
+    if user_record.get("bootstrap_state") == BOOTSTRAP_REQUIRED:
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="BOOTSTRAP_REQUIRED",
+                   reason="administrator not initialized; local bootstrap required")
+        raise AuthFailure("ACCOUNT_NOT_INITIALIZED", "This account has not been initialized.")
+
     now = datetime.now()
     lockout_remaining = active_lockout_remaining_seconds(user_record, now)
     if lockout_remaining > 0:
@@ -453,6 +470,10 @@ def change_password(
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
         raise PasswordValidationError("User ID not recognized.")
+    if user_record.get("bootstrap_state") == BOOTSTRAP_REQUIRED:
+        # The only way to set the first administrator password is the local
+        # one-time bootstrap (bootstrap_initial_admin), never this path.
+        raise PasswordValidationError("This account has not been initialized.")
 
     validate_new_password(user_record, new_password, confirm_password)
 
@@ -1168,6 +1189,11 @@ def render_console_sign_in_screen() -> None:
     print(_panel_border("-"))
     print(_panel_line("Authentication", "required"))
     print(_panel_line("Initial Admin ID", INITIAL_ADMIN_ID))
+    try:
+        if admin_bootstrap_required(load_users()):
+            print(_panel_line("Admin Setup", "run: python -m scripts.bootstrap_css_admin"))
+    except Exception:
+        pass
     print(_panel_line("Password Age", f"{PASSWORD_MAX_AGE_DAYS} calendar days"))
     print(_panel_line("Password History", f"last {PASSWORD_HISTORY_LIMIT} blocked"))
     print(_panel_line("Failed Attempts", f"timed lockouts from attempt {LOCKOUT_START_ATTEMPT}"))
@@ -1280,15 +1306,70 @@ def needs_password_rehash(stored_hash: str) -> bool:
     return not str(stored_hash or "").startswith(f"{_PBKDF2_PREFIX}$")
 
 
-def _default_admin_record() -> Dict[str, Any]:
+def admin_bootstrap_required(users: Dict[str, Any]) -> bool:
+    record = users.get(INITIAL_ADMIN_ID)
+    return isinstance(record, dict) and record.get("bootstrap_state") == BOOTSTRAP_REQUIRED
+
+
+def bootstrap_initial_admin(users: Dict[str, Any], new_password: str, confirm_password: str) -> Dict[str, Any]:
+    """Set the bootstrap administrator's first password -- once, locally.
+
+    Called only by the local ``scripts/bootstrap_css_admin.py`` console
+    command (and the local desktop sign-on); no web, operator-API or mobile
+    route calls it. The operator chooses the password at the console; it is
+    never generated into a file, printed, or logged. Refused once the
+    administrator is initialized, so it cannot be replayed to take over an
+    existing account. The caller persists ``users``.
+    """
+    record = users.get(INITIAL_ADMIN_ID)
+    if not isinstance(record, dict) or record.get("bootstrap_state") != BOOTSTRAP_REQUIRED:
+        _log_auth("ADMIN_BOOTSTRAP", actor_id=INITIAL_ADMIN_ID, outcome="DENIED",
+                   reason="administrator already initialized")
+        raise AuthFailure("BOOTSTRAP_ALREADY_COMPLETE", "The administrator has already been initialized.")
+
+    validate_new_password(record, new_password, confirm_password)
+    record["password_hash"] = hash_password(new_password)
+    record["bootstrap_state"] = BOOTSTRAP_INITIALIZED
+    record["must_change_password"] = False
+    record["last_password_change"] = datetime.now().isoformat(timespec="seconds")
+    record["failed_attempts"] = 0
+    clear_lockout_state(record)
+    _log_auth("ADMIN_BOOTSTRAP", actor_id=INITIAL_ADMIN_ID, actor_role=record.get("role"), outcome="SUCCEEDED")
+    return build_user_context(record, INITIAL_ADMIN_ID)
+
+
+def _migrate_bootstrap_admin(record: Dict[str, Any]) -> bool:
+    """One-time classification of a pre-existing 00000 record. Returns True if changed.
+
+    A record still carrying the published default password (never claimed) is
+    neutralized to BOOTSTRAP_REQUIRED with no usable password; one whose
+    password was already changed is marked initialized and left untouched.
+    Runs the (slow) hash check only once per store, not on every load.
+    """
+    if "bootstrap_state" in record:
+        return False
+    stored = str(record.get("password_hash", "") or "")
+    if not stored or verify_password(INITIAL_ADMIN_PASSWORD, stored):
+        record["password_hash"] = ""
+        record["bootstrap_state"] = BOOTSTRAP_REQUIRED
+        record["must_change_password"] = False
+        record["last_password_change"] = None
+    else:
+        record["bootstrap_state"] = BOOTSTRAP_INITIALIZED
+    return True
+
+
+def _uninitialized_admin_record() -> Dict[str, Any]:
     return {
         "user_id": INITIAL_ADMIN_ID,
         "display_name": INITIAL_DISPLAY_NAME,
         "role": INITIAL_ROLE,
         "unit_code": "CORE",
         "home_branch": "HQ",
-        "password_hash": hash_password(INITIAL_ADMIN_PASSWORD),
-        "must_change_password": True,
+        # No usable password: an empty hash never verifies (verify_password).
+        "password_hash": "",
+        "bootstrap_state": BOOTSTRAP_REQUIRED,
+        "must_change_password": False,
         "last_password_change": None,
         "password_history": [],
         "failed_attempts": 0,

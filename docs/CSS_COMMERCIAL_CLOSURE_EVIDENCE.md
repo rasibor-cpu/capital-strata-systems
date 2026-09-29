@@ -176,6 +176,21 @@ Wired into the actual chokepoints so every caller gets coverage automatically, n
 
 **Commercial model.** No change to commission, loss-recovery, attribution or provenance code in COM-015; the existing commercial-model suites (client earnings, customer/advice profitability, performance accounting, collections, receipts, statements) are part of the 2474 and pass unchanged.
 
+## Release-candidate closure (after COM-015; no new security scope)
+
+**Exact-head CI for `d5129cf6`.** `CSS Governance Validation` / `css-validation`, run `36626167789`, SUCCESS. That workflow is the only one that triggers for PR #101 (the full-regression, release-candidate, commercialization-UAT and readiness-drill workflows trigger only for PRs into `css-v1-completion-2026-09-13`), and it runs `compileall` only — no tests. The full suite is therefore also run in CI by manually dispatching `css_full_regression_remote.yml` on the release-candidate head (see "Release evidence").
+
+**Bootstrap first-claim race — closed.** Before: a fresh or never-claimed `css_sign_on` store created `00000` (SUPER_USER) with the published password `123456` and a forced change, so the first network caller to `POST /auth/operator/change-password` (or the LAN mobile login) owned SUPER_USER — reproduced on the pre-fix code (one anonymous request → 200, `role: SUPER_USER`). Now:
+- A fresh store (or one missing `00000`) creates it with an empty password hash (never verifies) and `bootstrap_state: required`. Sign-in, the operator API, change-password and the `change_password` primitive all refuse it (`ACCOUNT_NOT_INITIALIZED`, audited as `LOGIN_FAILURE/BOOTSTRAP_REQUIRED`).
+- `bootstrap_initial_admin` — called only by the local console command `scripts/bootstrap_css_admin.py` (no web/API/mobile route; an architecture test pins this) — sets the first password once, from a password typed without echo (or piped on stdin); never a command-line argument, never printed, stored only as the salted PBKDF2 hash, audited as `ADMIN_BOOTSTRAP` without the secret. A second run is refused and changes nothing. The password policy (including a deny-list of the old default) applies.
+- Existing installations: on first load, a `00000` still holding the old default (salted or legacy unsalted hash) is neutralized to `required`; one whose password was already changed is marked `initialized` and keeps working unchanged. Other operators are untouched. The (slow) hash check runs once per store, not per request.
+- After initialization, normal authentication, lockout and disable rules apply to `00000` unchanged.
+**Tests: `tests/test_admin_bootstrap.py` (21).**
+
+**UAT agreement seed.** `scripts/seed_uat_trial_agreement.py` inserts exactly one deterministic agreement, `UAT-AGR-001`/`v1` (clearly "UAT ONLY" terms), through the product's own append-only `TrialContractRepository.create_agreement`; refuses unless `CSS_ENV` is development/dev/local/uat; idempotent; refuses to rewrite a conflicting agreement. Agreement validation is unchanged (unknown agreement and mismatched displayed terms still fail closed). **Tests: `tests/test_uat_trial_enrollment.py` (14)** — seed guards and idempotency; the full governed path through the real web app (FINCON maker with cookie + CSRF → PENDING → idempotent re-submit returns the same action → HEAD_FINCON approves → EXECUTED → persisted enrollment with the agreement's 30-day expiry → approval replay 409 → commercial audit REQUEST/APPROVE/EXECUTE with a valid chain); governed cancellation (→ `CANCELED`, automatic conversion blocked); second enrollment for the same customer fails closed; self-approval, wrong role and payload tamper leave nothing enrolled; unknown agreement and mismatched displayed pricing fail closed.
+
+**Operator UAT package.** `docs/CSS_OPERATOR_UAT_PACKAGE.md` (configuration, one-time setup: admin bootstrap, identity provisioning, agreement seed; start/stop; forced first-login change; 18-step checklist with expected results; rollback; evidence capture) and `launchers/CSS Web UAT Server.cmd` (serves the web dashboard on `127.0.0.1:8000` with `CSS_ENV=development` and UAT database paths). No credential appears in either.
+
 ## Known limitations and findings — reconciled status
 
 1. ~~Unauthenticated existing web routers~~ — **VERIFIED (COM-011 + COM-012; reconfirmed COM-015).**
@@ -198,7 +213,7 @@ Wired into the actual chokepoints so every caller gets coverage automatically, n
 18. Web trial page script sent no idempotency key or CSRF header and misread the maker-checker response — **FIXED (COM-015).**
 19. Change-password bypassed account disable and sign-in lockout — **FIXED (COM-015, found in UAT).**
 20. Tests wrote synthetic events into the checkout's real auth audit database — **FIXED (COM-015).**
-21. Bootstrap SUPER_USER `00000` has a published default password (`123456`) with a forced change on first use. On a fresh user store, whoever reaches the operator API change-password or the LAN-exposed mobile login first can set its password and hold SUPER_USER. **OPEN — PRE-RELEASE DEPLOYMENT CONTROL.** Required before any shared/UAT deployment: claim `00000` at the local console before starting network services (or have the owner choose a different bootstrap procedure).
+21. ~~Bootstrap SUPER_USER `00000` shipped with the published default password `123456` (network first-claim race)~~ — **FIXED (release-candidate closure).** `00000` now starts with no usable password (`bootstrap_state: required`); only the local one-time `python -m scripts.bootstrap_css_admin` can set it; unclaimed legacy stores are neutralized on load; see the section below.
 22. CSRF rejections are refused but not written to the audit trail — **OPEN (low).** Logged denials cover authorization; recording CSRF failures would be additional signal, not a missing control.
 23. Operator sessions (`token_store`) are in memory and do not survive a restart — **OPEN (known, `CSS_IMPLEMENTATION_TRACKER_2026.md` Priority "restart-safe sessions: Planned").** Fail-safe: operators sign in again; pending maker-checker actions persist (verified live in UAT).
 
