@@ -13,9 +13,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Callable, Optional, Sequence
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from backend.app.auth.session_dependency import authorization_for_commercial_route
 from engine.commercial.collection_history import CollectionHistoryRepository
 from engine.commercial.collection_repository import CollectionRepository
 from engine.commercial.commercial_audit import CommercialAuditLog
@@ -130,9 +131,15 @@ def create_commercial_governance_router(
         )
         return _with_posture({"controlled_action": _action_view(action)})
 
+    # The three controlled-action routes below back the operator web
+    # Approvals page, so -- like the other page-called commercial routes --
+    # they also accept the session cookie, with the session's CSRF token
+    # required on approve/reject. Identity, role and permission still come
+    # only from the server-side session; maker != checker, payload-hash
+    # binding and compare-and-set remain enforced by CommercialControls.
     @router.get("/api/v1/commercial/controlled-actions")
-    def list_actions(status: Optional[str] = Query(default=None), authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
-        actor_for(authorization, "commercial_view_exceptions")
+    def list_actions(http_request: Request, status: Optional[str] = Query(default=None)) -> dict[str, Any]:
+        actor_for(authorization_for_commercial_route(http_request, mutating=False), "commercial_view_exceptions")
         allowed = {ControlledActionStatus.PENDING, ControlledActionStatus.APPROVED, ControlledActionStatus.REJECTED,
                    ControlledActionStatus.EXECUTED, ControlledActionStatus.FAILED}
         if status is not None and status not in allowed:
@@ -140,15 +147,15 @@ def create_commercial_governance_router(
         return _with_posture({"controlled_actions": [_action_view(a) for a in controls.store.list(status)]})
 
     @router.post("/api/v1/commercial/controlled-actions/{action_id}/approve")
-    def approve(action_id: str, body: Decision, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
-        checker = actor_for(authorization, "commercial_approve_action")
+    def approve(action_id: str, body: Decision, http_request: Request) -> dict[str, Any]:
+        checker = actor_for(authorization_for_commercial_route(http_request, mutating=True), "commercial_approve_action")
         action = decide(controls.approve, checker, action_id, expected_payload_hash=body.expected_payload_hash,
                         evidence_ref=body.evidence_ref, reason=body.reason)
         return _with_posture({"controlled_action": _action_view(action)})
 
     @router.post("/api/v1/commercial/controlled-actions/{action_id}/reject")
-    def reject(action_id: str, body: Decision, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
-        checker = actor_for(authorization, "commercial_approve_action")
+    def reject(action_id: str, body: Decision, http_request: Request) -> dict[str, Any]:
+        checker = actor_for(authorization_for_commercial_route(http_request, mutating=True), "commercial_approve_action")
         action = decide(controls.reject, checker, action_id, expected_payload_hash=body.expected_payload_hash,
                         reason=body.reason or "")
         return _with_posture({"controlled_action": _action_view(action)})

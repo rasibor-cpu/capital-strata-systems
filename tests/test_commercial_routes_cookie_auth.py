@@ -9,7 +9,8 @@ permission are still resolved entirely server-side by ``actor_from_bearer``,
 and a cookie-backed POST (trial enroll/cancel) additionally needs the
 session's CSRF token.
 
-Commercial routes with no browser caller (governance API, production
+Commercial routes with no browser caller (governance API other than the
+controlled-action list/approve/reject used by the Approvals page, production
 charging, release readiness, payment/notification preflight, launch-dossier
 export) deliberately stay bearer-only.
 """
@@ -152,7 +153,6 @@ API_ONLY_PATHS = [
     "/api/v1/customer-notifications/preflight",
     "/api/v1/launch-dossier/export",
     "/api/v1/commercial/safety-posture",
-    "/api/v1/commercial/controlled-actions",
 ]
 
 

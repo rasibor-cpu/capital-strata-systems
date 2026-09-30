@@ -70,7 +70,7 @@ Record each result (Pass / Fail + note) in the evidence sheet (section 8). "Role
 
 | # | Area | Role | Steps | Expected result |
 |---|---|---|---|---|
-| 1 | Sign in | each | Sign in at `/login` with the changed password | Lands on `/dashboard`; header shows the navigation bar with a **Logout** button |
+| 1 | Sign in | each | Sign in at `/login` with the changed password | Lands on `/dashboard`; the navigation bar ends with **Signed in: `<id>` · `<ROLE>`** and a **Logout** button, showing that operator's own id and role |
 | 2 | Wrong password / lockout | any | Enter a wrong password 3 times for one identity | 3rd attempt reports a timed pause; correct password is refused until it expires |
 | 3 | Admin bootstrap closed | engineering | Try signing in as `00000` with the old default `123456` | Refused |
 | 4 | Mission Control | each | Open Dashboard; check status panels | Data or "unavailable" states load; nothing indicates execution allowed or armed |
@@ -79,9 +79,9 @@ Record each result (Pass / Fail + note) in the evidence sheet (section 8). "Role
 | 7 | Advice attribution / profitability / loss recovery | FINCON / AUDIT | On Billing, open advice-profitability history for a terms id | Same as 6: presentation loads; with no seeded history, a not-found message. See section 9 for the data caveat |
 | 8 | Trial contract — load terms | FINCON | Trial & Contract → Agreement ID `UAT-AGR-001`, Version `v1` → Load Agreement | Shows the "UAT ONLY" pricing and conversion disclosure, 30-day trial, jurisdiction CA-ON |
 | 9 | Trial enrollment — maker | FINCON | Enter a new Customer ID + Account Reference, tick both confirmations, **Enroll** | Message: enrollment request `<id>` is **PENDING** and takes effect only after a second approver; no payment executed |
-| 10 | Maker cannot approve own request | FINCON | Try to approve the action from step 9 via the governance API with FINCON's session | Refused |
-| 11 | Checker approval | HEAD_FINCON (or HEAD_COMPLIANCE) | Approve the action from step 9 (governance API: `POST /api/v1/commercial/controlled-actions/<id>/approve` with its `expected_payload_hash`) | Status **EXECUTED**; Trial & Contract → Check Status for that customer shows **TRIAL_ACTIVE** |
-| 12 | Replay / tamper | HEAD_FINCON | Approve the same action again; approve another with a wrong payload hash | Replay refused (already decided); wrong hash refused |
+| 10 | Maker cannot approve own request | FINCON | Open **Approvals** (nav bar); find the request from step 9 | Listed as PENDING with maker `10001 (FINCON)`; no Approve/Reject buttons ("Needs HEAD_FINCON or HEAD_COMPLIANCE") |
+| 11 | Checker approval | HEAD_FINCON (or HEAD_COMPLIANCE) | Sign in as the checker; open **Approvals**; on the request from step 9 click **Approve** and confirm the dialog (request id, customer/account, agreement, maker) | Status **EXECUTED**; Trial & Contract → Check Status for that customer shows **TRIAL_ACTIVE** |
+| 12 | Replay / tamper | HEAD_FINCON | After step 11, switch the Approvals status filter to EXECUTED | The request shows EXECUTED with checker id; it no longer has Approve/Reject buttons (a second decision is impossible; replay/tamper refusal is also covered by automated tests) |
 | 13 | Cancellation | FINCON → HEAD_FINCON | **Cancel** for the enrolled customer, then approve | PENDING, then EXECUTED after approval; Check Status shows **CANCELED** and automatic conversion not allowed |
 | 14 | Commercialization operations | FINCON / AUDIT | Open Launch Ops; enter identifiers | Page loads and its status call is accepted while signed in (no sign-in error). Whatever status is shown for UAT identifiers, nothing indicates payment or charging is enabled |
 | 15 | Audit visibility | AUDIT / HEAD_COMPLIANCE | Governance API `GET /api/v1/commercial/audit` | REQUEST / APPROVE / EXECUTE events for steps 9–13 with maker and checker ids; no passwords or tokens |
@@ -89,7 +89,7 @@ Record each result (Pass / Fail + note) in the evidence sheet (section 8). "Role
 | 17 | Logout / session revocation | each | Click **Logout**; press Back and reload | Returns to sign-in; the old session cannot load any page |
 | 18 | Disable (session revocation) | SUPER_USER `00000` | Disable one UAT identity via `POST /auth/operator/admin/users/<id>/disable`; that operator reloads | Operator is signed out and cannot sign in; re-enable restores sign-in with a fresh session |
 
-Governance-API steps (10–12, 15, 18) need a bearer token: `POST /auth/operator/login` returns `token`; send it as `Authorization: Bearer <token>`. Never share or record tokens.
+Steps 10–12 use the **Approvals** page. Governance-API steps (15, 18) need a bearer token: `POST /auth/operator/login` returns `token`; send it as `Authorization: Bearer <token>`. Never share or record tokens.
 
 ## 7. Rollback / recovery
 

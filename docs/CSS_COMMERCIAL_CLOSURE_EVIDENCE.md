@@ -192,6 +192,16 @@ Wired into the actual chokepoints so every caller gets coverage automatically, n
 
 **Operator UAT package.** `docs/CSS_OPERATOR_UAT_PACKAGE.md` (configuration, one-time setup: admin bootstrap, identity provisioning, agreement seed; start/stop; forced first-login change; 18-step checklist with expected results; rollback; evidence capture) and `launchers/CSS Web UAT Server.cmd` (serves the web dashboard on `127.0.0.1:8000` with `CSS_ENV=development` and UAT database paths). No credential appears in either.
 
+## Owner-UAT follow-ups (2026-09-29, during human UAT; RC `9335e866` was the starting point)
+
+Owner UAT observed three presentation/workflow gaps; each was fixed narrowly, with no change to economics, execution or authorization rules.
+
+- **No visible signed-in identity.** Pages showed a Logout button but not who was signed in. `_session_controls` now renders `Signed in: <user id> · <role>` beside Logout on every authenticated page, taken only from the server-side `token_store` session (never from request data) and HTML-escaped.
+- **No web checker workflow.** A FINCON enrollment request (`2e99307a-d071-4be1-98d7-d197c2048de2`) was correctly PENDING, but its checker could approve it only through the bearer-token governance API — there was no page listing pending requests. New `/approvals` page (nav **Approvals**) lists controlled actions (id, type, maker id/role, customer/account, agreement/version, time, status, checker) and offers Approve/Reject only to HEAD_FINCON/HEAD_COMPLIANCE on requests they did not make, each behind an explicit confirm/reason dialog. Because a page now calls them, `GET /api/v1/commercial/controlled-actions` and `POST …/{id}/approve|reject` accept the session cookie (CSRF required on POST) as well as bearer — updating register item 5; every other governance route stays bearer-only. Maker ≠ checker, permission checks, payload-hash binding, compare-and-set and denial auditing remain enforced server-side by the unchanged `CommercialControls`/governance router.
+- **Dashboard tiles showed `[object Object]`.** The dashboard page's `get(path)` resolved only two path segments, so `opportunities.scoring_overview.top_ranked_symbols.0` returned the parent object. It now resolves the full path; any remaining object renders as `N/A`. Reproduced on `9335e866` by executing the page's own helper in Node (all five tiles `[object Object]`); fixed code renders the values. No ranking/scoring code changed.
+
+**Tests: `tests/test_owner_uat_followups.py` (34)** — identity for all four roles on five pages, client-supplied identity ignored, escaping; approvals page linked, listing by cookie, commercial role required, CSRF required with no state change without it, maker self-approval refused, FINCON/AUDIT refused and audited once, reject final and attributed, bearer clients unaffected, script decides only on explicit click; dashboard helper executed in Node.
+
 ## Release evidence — engineering release candidate
 
 ```

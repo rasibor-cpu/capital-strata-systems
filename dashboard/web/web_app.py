@@ -238,6 +238,13 @@ def create_app(
             return RedirectResponse("/login", status_code=303)
         return _page_response(_commercialization_operations_page(), session)
 
+    @app.get("/approvals", response_class=HTMLResponse)
+    async def approvals_view(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_approvals_page(), session)
+
     @app.get("/api/v1/margin-snapshot")
     async def margin_api(request: Request) -> dict[str, Any]:
         if _require_page_session(request) is None:
@@ -310,6 +317,7 @@ def _app_nav(active: str) -> str:
         ("billing", "/billing", "Billing"),
         ("trial_contract", "/trial-contract", "Trial & Contract"),
         ("commercialization_operations", "/commercialization-operations", "Launch Ops"),
+        ("approvals", "/approvals", "Approvals"),
         ("report_export", "/api/v1/report-export?format=html", "Export"),
     ]
 
@@ -337,11 +345,24 @@ _SESSION_CONTROLS_PLACEHOLDER = "<!--css-session-controls-->"
 
 
 def _session_controls(session: Any) -> str:
+    """Signed-in identity + Logout, rendered from the server-side session only.
+
+    ``username``/``roles`` come from the token_store session resolved for this
+    request -- never from anything the browser sent. The same values are
+    exposed as data attributes so page scripts can hide controls that cannot
+    apply (e.g. approving one's own request); the server still enforces every
+    rule regardless.
+    """
     token = html.escape(getattr(session, "csrf_token", "") or "", quote=True)
+    user_id = html.escape(str(getattr(session, "username", "") or ""), quote=True)
+    roles = html.escape(", ".join(getattr(session, "roles", None) or []) or "NO ROLE", quote=True)
     return (
-        '<form method="post" action="/logout" class="session-controls" style="display:inline;margin-left:auto;">'
+        '<span class="session-controls" style="display:inline-flex;align-items:center;gap:0.6rem;margin-left:auto;">'
+        f'<span id="css-session-identity" data-user-id="{user_id}" data-roles="{roles}">'
+        f'Signed in: {user_id} &middot; {roles}</span>'
+        '<form method="post" action="/logout" style="display:inline;">'
         f'<input type="hidden" id="css-csrf-token" name="{CSRF_FORM_FIELD}" value="{token}">'
-        '<button type="submit">Logout</button></form>'
+        '<button type="submit">Logout</button></form></span>'
     )
 
 
@@ -675,11 +696,14 @@ def _dashboard_page() -> str:
     }}
 
     function get(path) {{
-      const [section, key] = path.split(".");
-      return state.sections?.[section]?.[key];
+      // Resolve the whole dotted path (object keys and array indexes), e.g.
+      // "opportunities.scoring_overview.top_ranked_symbols.0". Stopping after
+      // two segments returned the parent object, rendered as "[object Object]".
+      return path.split(".").reduce((node, part) => node?.[part], state.sections);
     }}
 
     function formatField(path, value) {{
+      if (value !== null && typeof value === "object") return "N/A";
       if (["cash_balance", "total_equity", "buying_power", "margin_used", "available_margin", "net_pnl", "total_exposure", "daily_loss_limit", "total_execution_cost"].some((key) => path.endsWith(key))) {{
         return money(value);
       }}
@@ -2420,7 +2444,7 @@ async function enrollTrial() {
   });
   const data = await response.json();
   result.textContent = response.ok
-    ? `Enrollment request ${data.controlled_action.action_id} is ${data.controlled_action.status}: it takes effect only after a second authorized approver approves it. No payment has been executed.`
+    ? `Enrollment request ${data.controlled_action.action_id} is ${data.controlled_action.status}: it takes effect only after a second authorized approver approves it on the Approvals page. No payment has been executed.`
     : `Enrollment blocked: ${data.detail || "validation failed"}`;
 }
 
@@ -2619,6 +2643,199 @@ async function refreshCommercializationOperations() {
 
 document.getElementById("ops-refresh").addEventListener("click", refreshCommercializationOperations);
 """
+
+def _approvals_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Maker-Checker Approvals</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Maker-Checker Approvals</h1>
+        </div>
+      </div>
+      <section class="status-strip">
+        <span>Second-approver governance</span>
+        <span>No payment execution</span>
+        <span>No trading authority</span>
+      </section>
+    </header>
+    {_app_nav("approvals")}
+
+    <section class="control-row">
+      <label>Status
+        <select id="approvals-status">
+          <option value="PENDING" selected>PENDING</option>
+          <option value="EXECUTED">EXECUTED</option>
+          <option value="FAILED">FAILED</option>
+          <option value="REJECTED">REJECTED</option>
+          <option value="">ALL</option>
+        </select>
+      </label>
+      <button type="button" id="approvals-refresh">Refresh</button>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel wide">
+        <div class="panel-head">
+          <h2>Controlled Actions</h2>
+          <span id="approvals-count">Loading</span>
+        </div>
+        <p class="panel-note">A request takes effect only when an authorized checker other than its maker approves it
+          (HEAD_FINCON or HEAD_COMPLIANCE). The server enforces this for every request; the buttons are only a convenience.</p>
+        <div id="approvals-list" class="empty-state">Loading...</div>
+        <p class="panel-note" id="approvals-result" role="status"></p>
+      </article>
+    </section>
+  </main>
+  <script>{_approvals_script()}</script>
+</body>
+</html>"""
+
+
+def _approvals_script() -> str:
+    return """
+const APPROVER_ROLES = ["HEAD_FINCON", "HEAD_COMPLIANCE"];
+
+function approvalsIdentity() {
+  const node = document.getElementById("css-session-identity");
+  return {
+    userId: node ? node.dataset.userId : "",
+    roles: node ? node.dataset.roles.split(",").map((r) => r.trim()) : []
+  };
+}
+
+function approvalsHeaders() {
+  const field = document.getElementById("css-csrf-token");
+  return {"Content-Type": "application/json", "X-CSRF-Token": field ? field.value : ""};
+}
+
+function cell(row, text) {
+  const td = document.createElement("td");
+  td.textContent = text == null || text === "" ? "-" : String(text);
+  row.appendChild(td);
+  return td;
+}
+
+function describe(action) {
+  const p = action.payload || {};
+  return action.action_type + " " + action.action_id +
+    "\\ncustomer " + (p.customer_id || "-") + " / account " + (p.account_reference || "-") +
+    "\\nagreement " + (p.agreement_id || "-") + " " + (p.agreement_version || "") +
+    "\\nmaker " + action.maker_id + " (" + action.maker_role + ")";
+}
+
+async function decide(action, verb) {
+  let reason = null;
+  if (verb === "reject") {
+    reason = window.prompt("Reason for rejecting:\\n\\n" + describe(action));
+    if (!reason || !reason.trim()) return;
+  } else if (!window.confirm("Approve this request?\\n\\n" + describe(action))) {
+    return;
+  }
+  const result = document.getElementById("approvals-result");
+  const response = await fetch(
+    "/api/v1/commercial/controlled-actions/" + encodeURIComponent(action.action_id) + "/" + verb,
+    {method: "POST", headers: approvalsHeaders(),
+     body: JSON.stringify({expected_payload_hash: action.payload_hash, reason: reason})}
+  );
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) {
+    const done = data.controlled_action || {};
+    result.textContent = "Request " + done.action_id + " is now " + done.status +
+      (done.resulting_state ? " (" + done.resulting_state + ")" : "") +
+      (done.failure_reason ? " - " + done.failure_reason : "") + ". No payment has been executed.";
+  } else {
+    result.textContent = "Decision refused (" + response.status + "): " + (data.detail || "not permitted");
+  }
+  await loadApprovals();
+}
+
+async function loadApprovals() {
+  const list = document.getElementById("approvals-list");
+  const count = document.getElementById("approvals-count");
+  const status = document.getElementById("approvals-status").value;
+  const response = await fetch(
+    "/api/v1/commercial/controlled-actions" + (status ? "?status=" + encodeURIComponent(status) : ""),
+    {cache: "no-store"}
+  );
+  const data = await response.json().catch(() => ({}));
+  list.replaceChildren();
+  if (!response.ok) {
+    list.className = "empty-state";
+    list.textContent = response.status === 404
+      ? "Commercial governance is not configured on this server."
+      : "Unavailable (" + response.status + "): " + (data.detail || "not permitted");
+    count.textContent = "-";
+    return;
+  }
+  const actions = data.controlled_actions || [];
+  count.textContent = actions.length + " " + (status || "total");
+  if (!actions.length) {
+    list.className = "empty-state";
+    list.textContent = "No controlled actions with this status.";
+    return;
+  }
+  const me = approvalsIdentity();
+  const canApprove = me.roles.some((r) => APPROVER_ROLES.includes(r));
+  const table = document.createElement("table");
+  table.id = "approvals-table";
+  const head = table.createTHead().insertRow();
+  ["Request ID", "Type", "Maker", "Customer / Account", "Agreement", "Requested", "Status", "Checker", "Decision"]
+    .forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  const body = table.createTBody();
+  actions.forEach((action) => {
+    const p = action.payload || {};
+    const row = body.insertRow();
+    row.dataset.actionId = action.action_id;
+    cell(row, action.action_id);
+    cell(row, action.action_type);
+    cell(row, action.maker_id + " (" + action.maker_role + ")");
+    cell(row, (p.customer_id || "-") + " / " + (p.account_reference || "-"));
+    cell(row, (p.agreement_id || "-") + " " + (p.agreement_version || ""));
+    cell(row, action.requested_at);
+    cell(row, action.status + (action.resulting_state ? " (" + action.resulting_state + ")" : "") +
+              (action.failure_reason ? " - " + action.failure_reason : ""));
+    cell(row, action.checker_id ? action.checker_id + " (" + action.checker_role + ")" : "");
+    const decision = cell(row, "");
+    decision.textContent = "";
+    if (action.status !== "PENDING") {
+      decision.textContent = "-";
+    } else if (!canApprove) {
+      decision.textContent = "Needs HEAD_FINCON or HEAD_COMPLIANCE";
+    } else if (action.maker_id === me.userId) {
+      decision.textContent = "Your own request - another approver must decide";
+    } else {
+      [["approve", "Approve"], ["reject", "Reject"]].forEach(([verb, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.dataset.verb = verb;
+        button.addEventListener("click", () => decide(action, verb));
+        decision.appendChild(button);
+      });
+    }
+  });
+  list.className = "";
+  list.appendChild(table);
+}
+
+document.getElementById("approvals-refresh").addEventListener("click", loadApprovals);
+document.getElementById("approvals-status").addEventListener("change", loadApprovals);
+loadApprovals();
+"""
+
+
 def _css() -> str:
     return """
 :root {
