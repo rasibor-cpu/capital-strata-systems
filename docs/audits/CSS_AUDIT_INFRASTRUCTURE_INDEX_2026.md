@@ -156,7 +156,7 @@ Current focus:
 ## Institutional Audit Governance
 
 Audit systems must preserve:
-- immutable audit visibility
+- tamper-evident (hash-chained) audit visibility
 - replay-safe sequencing
 - governance traceability
 - broker-state traceability

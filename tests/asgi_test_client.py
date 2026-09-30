@@ -9,7 +9,7 @@ identically on every Starlette version.
 import asyncio
 import json as _json
 from typing import Any, Dict, Optional
-from urllib.parse import urlsplit
+from urllib.parse import urlencode, urlsplit
 
 
 class AsgiResponse:
@@ -26,11 +26,26 @@ class AsgiTestClient:
     def __init__(self, app):
         self.app = app
 
-    def request(self, method: str, url: str, *, headers: Optional[Dict[str, str]] = None, json: Any = None) -> AsgiResponse:
+    def request(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: Optional[Dict[str, str]] = None,
+        json: Any = None,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> AsgiResponse:
         parts = urlsplit(url)
-        body = b"" if json is None else _json.dumps(json).encode("utf-8")
+        if data is not None:
+            body = urlencode(data).encode("utf-8")
+        elif json is not None:
+            body = _json.dumps(json).encode("utf-8")
+        else:
+            body = b""
         raw_headers = [(k.lower().encode("latin-1"), v.encode("latin-1")) for k, v in (headers or {}).items()]
-        if json is not None:
+        if data is not None:
+            raw_headers.append((b"content-type", b"application/x-www-form-urlencoded"))
+        elif json is not None:
             raw_headers.append((b"content-type", b"application/json"))
         raw_headers.append((b"content-length", str(len(body)).encode("latin-1")))
         scope = {

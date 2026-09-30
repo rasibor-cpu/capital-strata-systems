@@ -8,7 +8,7 @@ Token + OTP store (in-memory) — REA Capital Trading Engine
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 import secrets
 import uuid
@@ -27,6 +27,12 @@ class SessionInfo:
     roles: List[str]
     issued_at_utc: datetime
     expires_at_utc: datetime
+    # Synchronizer CSRF token bound to this session (same pattern as
+    # dashboard/mobile/mobile_app.py's session-bound token): generated
+    # server-side, rotates with every new session, and dies the instant the
+    # session is revoked or expires. Only required when the session is
+    # presented as a cookie; excluded from repr and the public dict.
+    csrf_token: str = field(default_factory=lambda: secrets.token_urlsafe(32), repr=False)
 
     def to_public_dict(self) -> Dict[str, Any]:
         return {
@@ -127,6 +133,24 @@ class TokenStore:
     def revoke(self, token: str) -> bool:
         token = (token or "").strip()
         return self._sessions.pop(token, None) is not None
+
+    def revoke_all_for_user(self, username: str) -> int:
+        """Revoke every session for ``username`` (e.g. on password change). Returns the count revoked."""
+        username = (username or "").strip().lower()
+        if not username:
+            return 0
+        stale = [tok for tok, info in self._sessions.items() if info.username == username]
+        for tok in stale:
+            self._sessions.pop(tok, None)
+        if stale:
+            try:
+                from .auth_audit import log_auth_event
+
+                log_auth_event("SESSION_REVOKE_ALL", actor_id=username, outcome="SUCCEEDED",
+                                details={"sessions_revoked": len(stale)})
+            except Exception:
+                pass
+        return len(stale)
 
 
 token_store = TokenStore()

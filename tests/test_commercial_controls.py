@@ -31,6 +31,7 @@ from engine.commercial.commercial_controls import (
 from engine.commercial.reconciliation_repository import ReconciliationRepository
 from engine.commercial.reconciliation_service import ReconciliationService, SettlementEvidence
 from engine.domain.collections import CollectionStatus, CollectionTransaction
+from tests.test_reconciliation_resolution import approved
 
 MAKER = CommercialActor("fincon-01", "FINCON")
 CHECKER = CommercialActor("head-fincon-01", "HEAD_FINCON")
@@ -199,7 +200,8 @@ def test_approval_after_incompatible_state_change_is_rejected(db):
     recon, exc = _exception_setup(db)
     controls = _controls(db, recon)
     action = _request(controls, exc.exception_id)
-    recon.resolve_exception(exc.exception_id, resolved_by="someone-else", resolution_reference="other")
+    # A different, already-approved governed resolution lands first.
+    recon.apply_approved_resolution(approved(exc.exception_id, "other", maker="fincon-02", checker="someone-else"))
     with pytest.raises(ControlledActionConflict, match="no longer in an approvable state"):
         controls.approve(CHECKER, action.action_id, expected_payload_hash=action.payload_hash)
     assert controls.store.get(action.action_id).status == ControlledActionStatus.PENDING

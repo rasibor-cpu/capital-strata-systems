@@ -13,9 +13,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any, Callable, Optional, Sequence
 
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
+from backend.app.auth.session_dependency import authorization_for_commercial_route
 from engine.commercial.collection_history import CollectionHistoryRepository
 from engine.commercial.collection_repository import CollectionRepository
 from engine.commercial.commercial_audit import CommercialAuditLog
@@ -23,6 +24,7 @@ from engine.commercial.commercial_authorization import (
     CommercialActor,
     CommercialAuthorizationError,
     CommercialAuthorizer,
+    actor_from_bearer,
 )
 from engine.commercial.commercial_controls import (
     CommercialControls,
@@ -87,27 +89,16 @@ def create_commercial_governance_router(
     authorizer = authorizer or controls.authorizer
     router = APIRouter()
 
+    def _log_denial(username: str, roles: Sequence[str], permission: str, reason: str) -> None:
+        audit.append(action=f"API:{permission}", object_type="commercial_api", outcome="DENIED",
+                     actor_id=username, actor_role=",".join(roles) or None, reason=reason)
+
     def actor_for(authorization: Optional[str], permission: str) -> CommercialActor:
         """Resolve the session and pick the caller's role that grants ``permission``."""
-        parts = (authorization or "").split()
-        if len(parts) != 2 or parts[0].lower() != "bearer" or not parts[1]:
-            raise HTTPException(status_code=401, detail="bearer session token required")
-        session = session_resolver(parts[1])
-        if session is None:
-            raise HTTPException(status_code=401, detail="invalid or expired session")
-        username, roles = session
-        candidates = [CommercialActor(username, r) for r in roles] or [CommercialActor(username, "")]
-        for candidate in candidates:
-            if authorizer.allowed(candidate, permission):
-                return candidate
-        # Fail closed through the authorizer so the denial reason is precise.
-        try:
-            authorizer.require(candidates[0], permission)
-        except CommercialAuthorizationError as exc:
-            audit.append(action=f"API:{permission}", object_type="commercial_api", outcome="DENIED",
-                         actor_id=username, actor_role=",".join(roles) or None, reason=exc.reason)
-            raise HTTPException(status_code=403, detail=exc.reason) from exc
-        raise HTTPException(status_code=403, detail="not permitted")  # pragma: no cover - defensive
+        return actor_from_bearer(
+            authorization, permission,
+            session_resolver=session_resolver, authorizer=authorizer, on_denied=_log_denial,
+        )
 
     def decide(fn, *args, **kwargs):
         try:
@@ -140,9 +131,15 @@ def create_commercial_governance_router(
         )
         return _with_posture({"controlled_action": _action_view(action)})
 
+    # The three controlled-action routes below back the operator web
+    # Approvals page, so -- like the other page-called commercial routes --
+    # they also accept the session cookie, with the session's CSRF token
+    # required on approve/reject. Identity, role and permission still come
+    # only from the server-side session; maker != checker, payload-hash
+    # binding and compare-and-set remain enforced by CommercialControls.
     @router.get("/api/v1/commercial/controlled-actions")
-    def list_actions(status: Optional[str] = Query(default=None), authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
-        actor_for(authorization, "commercial_view_exceptions")
+    def list_actions(http_request: Request, status: Optional[str] = Query(default=None)) -> dict[str, Any]:
+        actor_for(authorization_for_commercial_route(http_request, mutating=False), "commercial_view_exceptions")
         allowed = {ControlledActionStatus.PENDING, ControlledActionStatus.APPROVED, ControlledActionStatus.REJECTED,
                    ControlledActionStatus.EXECUTED, ControlledActionStatus.FAILED}
         if status is not None and status not in allowed:
@@ -150,15 +147,15 @@ def create_commercial_governance_router(
         return _with_posture({"controlled_actions": [_action_view(a) for a in controls.store.list(status)]})
 
     @router.post("/api/v1/commercial/controlled-actions/{action_id}/approve")
-    def approve(action_id: str, body: Decision, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
-        checker = actor_for(authorization, "commercial_approve_action")
+    def approve(action_id: str, body: Decision, http_request: Request) -> dict[str, Any]:
+        checker = actor_for(authorization_for_commercial_route(http_request, mutating=True), "commercial_approve_action")
         action = decide(controls.approve, checker, action_id, expected_payload_hash=body.expected_payload_hash,
                         evidence_ref=body.evidence_ref, reason=body.reason)
         return _with_posture({"controlled_action": _action_view(action)})
 
     @router.post("/api/v1/commercial/controlled-actions/{action_id}/reject")
-    def reject(action_id: str, body: Decision, authorization: Optional[str] = Header(default=None)) -> dict[str, Any]:
-        checker = actor_for(authorization, "commercial_approve_action")
+    def reject(action_id: str, body: Decision, http_request: Request) -> dict[str, Any]:
+        checker = actor_for(authorization_for_commercial_route(http_request, mutating=True), "commercial_approve_action")
         action = decide(controls.reject, checker, action_id, expected_payload_hash=body.expected_payload_hash,
                         reason=body.reason or "")
         return _with_posture({"controlled_action": _action_view(action)})
@@ -188,25 +185,60 @@ def create_commercial_governance_router(
     return router
 
 
+def _commercial_db_path(env=None) -> str:
+    import os
+
+    return (env if env is not None else os.environ).get("CSS_COMMERCIAL_DB", "").strip()
+
+
+def commercial_controls_from_env(env=None) -> Optional[CommercialControls]:
+    """Build (and register all known action types onto) the shared maker-checker
+    engine when ``CSS_COMMERCIAL_DB`` names the commercial database, else None.
+
+    Any caller building its own ``CommercialControls`` for the same db_path
+    (e.g. the trial contract router) should go through this function instead
+    of registering action types itself, so approving an action through the
+    governance API's generic endpoints always finds the right executor --
+    one action-type registry, reused, not duplicated per router.
+    """
+    db_path = _commercial_db_path(env)
+    if not db_path:
+        return None
+    from engine.commercial.commercial_controls import (
+        ControlledActionStore,
+        reconciliation_resolution_action,
+        trial_cancellation_action,
+        trial_enrollment_action,
+    )
+    from engine.commercial.reconciliation_repository import ReconciliationRepository
+    from backend.app.persistence.services.trial_contract_enrollment_service import (
+        TrialContractEnrollmentService,
+    )
+
+    reconciliation = ReconciliationService(ReconciliationRepository(db_path))
+    audit = CommercialAuditLog(db_path)
+    controls = CommercialControls(ControlledActionStore(db_path), audit)
+    controls.register(reconciliation_resolution_action(reconciliation))
+    trial_service = TrialContractEnrollmentService()
+    controls.register(trial_enrollment_action(trial_service))
+    controls.register(trial_cancellation_action(trial_service))
+    controls.resume_approved()
+    return controls
+
+
 def commercial_governance_router_from_env(env=None) -> Optional[APIRouter]:
     """Build the router when ``CSS_COMMERCIAL_DB`` names the commercial database.
 
     Returns None when unset, so the governance API is only exposed by explicit
     deployment configuration and never creates a database implicitly.
     """
-    import os
-
-    db_path = (env if env is not None else os.environ).get("CSS_COMMERCIAL_DB", "").strip()
+    db_path = _commercial_db_path(env)
     if not db_path:
         return None
-    from engine.commercial.commercial_controls import ControlledActionStore, reconciliation_resolution_action
+    controls = commercial_controls_from_env(env)
+    audit = controls.audit
     from engine.commercial.reconciliation_repository import ReconciliationRepository
-
     reconciliation = ReconciliationService(ReconciliationRepository(db_path))
-    audit = CommercialAuditLog(db_path)
-    controls = CommercialControls(ControlledActionStore(db_path), audit)
-    controls.register(reconciliation_resolution_action(reconciliation))
-    controls.resume_approved()
     return create_commercial_governance_router(
         controls=controls, reconciliation=reconciliation, collections=CollectionRepository(db_path),
         history=CollectionHistoryRepository(db_path), audit=audit,

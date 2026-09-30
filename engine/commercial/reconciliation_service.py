@@ -62,7 +62,33 @@ class ReconciliationService:
             return ReconciliationState.EXCEPTION
         return ReconciliationState.MATCHED
 
-    def resolve_exception(self, exception_id: str, *, resolved_by: str, resolution_reference: str) -> ReconciliationException:
+    def apply_approved_resolution(self, action) -> ReconciliationException:
+        """Resolve an exception -- only by executing an approved maker-checker action.
+
+        This is the single way to resolve a reconciliation exception. It is
+        called by ``engine.commercial.commercial_controls``'s
+        ``RESOLVE_RECONCILIATION_EXCEPTION`` executor after ``CommercialControls``
+        has enforced RBAC, maker != checker, payload-hash binding and
+        compare-and-set approval. The former public, unchecked
+        ``resolve_exception(exception_id, resolved_by=..., ...)`` let any caller
+        resolve an exception under any name with no second approver; it has
+        been removed rather than kept as an undocumented privileged bypass.
+        """
+        if getattr(action, "action_type", None) != "RESOLVE_RECONCILIATION_EXCEPTION":
+            raise PermissionError("not a reconciliation-resolution controlled action")
+        if getattr(action, "status", None) != "APPROVED":
+            raise PermissionError("reconciliation exceptions are resolved only by an approved controlled action")
+        maker_id, checker_id = getattr(action, "maker_id", None), getattr(action, "checker_id", None)
+        if not maker_id or not checker_id or maker_id == checker_id:
+            raise PermissionError("resolution requires a distinct maker and checker")
+        payload = getattr(action, "payload", None) or {}
+        return self._resolve(
+            payload.get("exception_id"),
+            resolved_by=checker_id,
+            resolution_reference=payload.get("resolution_reference"),
+        )
+
+    def _resolve(self, exception_id: str, *, resolved_by: str, resolution_reference: str) -> ReconciliationException:
         if not resolved_by or not resolution_reference:
             raise ValueError("resolver and resolution reference required")
         matches = [item for item in self.exceptions.values() if item.exception_id == exception_id]

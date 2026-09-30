@@ -3,6 +3,10 @@ setlocal
 
 title Capital Strata Systems Mobile Server
 set "CSS_ROOT=%~dp0.."
+rem This launcher serves plain HTTP on the local network (development/UAT).
+rem Session cookies are marked Secure everywhere except CSS_ENV=development;
+rem a real deployment must terminate TLS and must not set this.
+set "CSS_ENV=development"
 cd /d "%CSS_ROOT%"
 
 echo Capital Strata Systems mobile server
