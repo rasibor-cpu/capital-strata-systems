@@ -2468,20 +2468,65 @@ async function cancelTrial() {
     : `Cancellation blocked: ${data.detail || "validation failed"}`;
 }
 
+const TRIAL_STATUS_READ_ONLY_NOTE =
+  "Checking status is read-only: it executes no payment and grants no trading authority.";
+
+// Read-only status check. Uses the Agreement ID / Version fields directly (the
+// enrollment is keyed by agreement, so the server needs them) -- it does not
+// require Load Agreement or the acceptance checkboxes. Every outcome, including
+// missing input, not-found, expired sign-in and network failure, is shown.
 async function checkTrialStatus() {
-  if (!governingAgreement) return;
-  const params = new URLSearchParams({
+  const result = document.getElementById("trial-result");
+  result.style.whiteSpace = "pre-line";
+  const fields = {
     customer_id: document.getElementById("trial-customer-id").value.trim(),
     account_reference: document.getElementById("trial-account-reference").value.trim(),
-    agreement_id: governingAgreement.agreement_id,
-    agreement_version: governingAgreement.agreement_version,
-    assessed_at: trialNow()
-  });
-  const response = await fetch(`/api/v1/commercial-trial/status?${params.toString()}`, {cache: "no-store"});
-  const data = await response.json();
-  document.getElementById("trial-result").textContent = response.ok
-    ? `Status: ${data.status}. ${data.reason}. Payment execution remains disabled.`
-    : `Status unavailable: ${data.detail || "validation failed"}`;
+    agreement_id: document.getElementById("trial-agreement-id").value.trim(),
+    agreement_version: document.getElementById("trial-agreement-version").value.trim()
+  };
+  const missing = Object.entries({
+    "Customer ID": fields.customer_id, "Account Reference": fields.account_reference,
+    "Agreement ID": fields.agreement_id, "Version": fields.agreement_version
+  }).filter(([, value]) => !value).map(([label]) => label);
+  if (missing.length) {
+    result.textContent = `Check Status needs: ${missing.join(", ")}.`;
+    return;
+  }
+  result.textContent = "Checking status...";
+  const params = new URLSearchParams({...fields, assessed_at: trialNow()});
+  let response;
+  let data = {};
+  try {
+    response = await fetch(`/api/v1/commercial-trial/status?${params.toString()}`, {cache: "no-store"});
+    data = await response.json().catch(() => ({}));
+  } catch (error) {
+    result.textContent = `Status check failed: the server could not be reached.\n${TRIAL_STATUS_READ_ONLY_NOTE}`;
+    return;
+  }
+  if (response.ok) {
+    result.textContent = [
+      `Status: ${data.status}`,
+      `Customer ID: ${data.customer_id}`,
+      `Account Reference: ${data.account_reference}`,
+      `Agreement: ${data.agreement_id} ${data.agreement_version}`,
+      `Trial start: ${data.trial_start_at || "not recorded"}`,
+      `Trial expiry: ${data.trial_expires_at || "not recorded"}`,
+      `Cancellation recorded: ${data.cancellation_recorded ? `YES (${data.canceled_at})` : "NO"}`,
+      `Reason: ${data.reason}`,
+      TRIAL_STATUS_READ_ONLY_NOTE
+    ].join("\\n");
+  } else if (response.status === 404) {
+    result.textContent = `Not found: no enrollment for customer ${fields.customer_id} / account ` +
+      `${fields.account_reference} under agreement ${fields.agreement_id} ${fields.agreement_version}` +
+      ` (${data.detail || "not found"}).\n${TRIAL_STATUS_READ_ONLY_NOTE}`;
+  } else if (response.status === 401) {
+    result.textContent = "Your session has ended. Sign in again to check status.";
+  } else if (response.status === 403) {
+    result.textContent = `Not permitted: ${data.detail || "your role cannot view trial status"}.`;
+  } else {
+    result.textContent = `Status unavailable (${response.status}): ${data.detail || "request rejected"}.\n` +
+      TRIAL_STATUS_READ_ONLY_NOTE;
+  }
 }
 
 document.getElementById("trial-load-agreement").addEventListener("click", loadTrialAgreement);

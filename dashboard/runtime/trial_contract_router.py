@@ -167,8 +167,9 @@ def create_trial_contract_router(
         assessed_at: str = Query(...),
     ) -> dict[str, Any]:
         actor_for(authorization_for_commercial_route(http_request, mutating=False), "commercial_view_obligations")
+        service = TrialConversionAssessmentService()
         try:
-            assessment = TrialConversionAssessmentService().assess(
+            assessment = service.assess(
                 customer_id=customer_id,
                 account_reference=account_reference,
                 agreement_id=agreement_id,
@@ -177,8 +178,24 @@ def create_trial_contract_router(
             )
         except TrialContractError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except ValueError as exc:
+            # e.g. a malformed assessed_at: a client input error, never a 500.
+            raise HTTPException(status_code=422, detail=f"invalid status request: {exc}") from exc
+        enrollment = service.enrollment_details(
+            customer_id=customer_id,
+            account_reference=account_reference,
+            agreement_id=agreement_id,
+            agreement_version=agreement_version,
+        ) or {}
 
         return {
+            # Read-only: assessing status never executes, enrolls, cancels or charges anything.
+            "customer_id": customer_id,
+            "account_reference": account_reference,
+            "trial_start_at": enrollment.get("trial_start_at"),
+            "trial_expires_at": enrollment.get("trial_expires_at"),
+            "cancellation_recorded": bool(enrollment.get("cancellation_recorded")),
+            "canceled_at": enrollment.get("canceled_at"),
             "status": assessment.status.value,
             "assessed_at": assessment.assessed_at,
             "agreement_id": assessment.agreement_id,

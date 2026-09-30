@@ -20,6 +20,38 @@ class TrialConversionAssessmentService:
     def __init__(self, persistence_service: Optional[PersistenceService] = None) -> None:
         self._service = persistence_service or PersistenceService()
 
+    def enrollment_details(
+        self,
+        *,
+        customer_id: str,
+        account_reference: str,
+        agreement_id: str,
+        agreement_version: str,
+    ) -> Optional[dict]:
+        """Read-only enrollment facts for status display (None when not enrolled)."""
+        repo = self._service.trial_contracts
+        row = repo.get_enrollment(
+            customer_id=customer_id,
+            account_reference=account_reference,
+            agreement_id=agreement_id,
+            agreement_version=agreement_version,
+        )
+        if row is None:
+            return None
+        cancellation = repo.latest_cancellation(
+            customer_id=customer_id,
+            account_reference=account_reference,
+        )
+        return {
+            "customer_id": row["customer_id"],
+            "account_reference": row["account_reference"],
+            "accepted_at": row["accepted_at"],
+            "trial_start_at": row["trial_start_at"],
+            "trial_expires_at": row["trial_expires_at"],
+            "cancellation_recorded": cancellation is not None,
+            "canceled_at": cancellation["canceled_at"] if cancellation is not None else None,
+        }
+
     def assess(
         self,
         *,
