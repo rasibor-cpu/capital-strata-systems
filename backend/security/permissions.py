@@ -25,6 +25,8 @@ COMMERCIAL_ROLE_GRANTS: dict[str, frozenset[str]] = {
         "commercial_prepare_action",
         "commercial_generate_receipt",
         "commercial_generate_statement",
+        "commercial_trial_enroll",
+        "commercial_trial_cancel",
     },
     "HEAD_FINCON": COMMERCIAL_VIEW_ACTIONS | {
         "commercial_prepare_action",
@@ -33,6 +35,8 @@ COMMERCIAL_ROLE_GRANTS: dict[str, frozenset[str]] = {
         "commercial_generate_statement",
         "commercial_view_audit",
         "commercial_administer_configuration",
+        "commercial_trial_enroll",
+        "commercial_trial_cancel",
     },
     "AUDIT": COMMERCIAL_VIEW_ACTIONS | {"commercial_view_audit"},
     "HEAD_AUDIT": COMMERCIAL_VIEW_ACTIONS | {"commercial_view_audit"},

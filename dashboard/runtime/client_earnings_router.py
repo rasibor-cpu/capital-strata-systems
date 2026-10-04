@@ -1,9 +1,17 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
+
+from backend.app.auth.session_dependency import authorization_for_commercial_route
+from dashboard.runtime.commercial_governance_router import token_store_session_resolver
+from engine.commercial.commercial_authorization import (
+    BearerSessionResolver,
+    CommercialAuthorizer,
+    actor_from_bearer,
+)
 
 from backend.app.persistence.services.client_earnings_summary_service import (
     ClientEarningsSummaryService,
@@ -14,7 +22,10 @@ from backend.app.persistence.services.advice_profitability_history_service impor
 from backend.app.persistence.services.customer_profitability_summary_service import (
     CustomerProfitabilitySummaryService,
 )
-from backend.commercialization.advice_profitability import AdviceProfitability
+from backend.commercialization.advice_profitability import (
+    AdviceProfitability,
+    AdviceProfitabilityError,
+)
 from backend.commercialization.client_earnings_summary import (
     ClientEarningsSummaryUnavailableError,
     CommercialClientEarningsSummary,
@@ -158,18 +169,37 @@ def build_withdrawable_funds_summary_payload(
 
 def create_client_earnings_router(
     service_factory: type[ClientEarningsSummaryService] | None = None,
+    *,
+    session_resolver: BearerSessionResolver = token_store_session_resolver,
+    authorizer: Optional[CommercialAuthorizer] = None,
 ) -> APIRouter:
-    """Read-only router for client earnings, charges, and advisory withdrawal views."""
+    """Read-only router for client earnings, charges, and advisory withdrawal views.
+
+    Every route requires a bearer session with commercial view rights
+    (``commercial_view_obligations`` -- granted to FINCON, HEAD_FINCON, AUDIT,
+    HEAD_AUDIT, COMPLIANCE and HEAD_COMPLIANCE). Previously these routes had
+    no authentication at all and returned real customer financial data for
+    any guessed policy_id/account_reference/terms_id.
+    """
 
     router = APIRouter()
     factory = service_factory or ClientEarningsSummaryService
+    authorizer_ = authorizer or CommercialAuthorizer()
+
+    def actor_for(authorization: Optional[str]) -> None:
+        actor_from_bearer(
+            authorization, "commercial_view_obligations",
+            session_resolver=session_resolver, authorizer=authorizer_,
+        )
 
     @router.get("/api/v1/client-earnings-summary")
     def read_client_earnings_summary(
+        http_request: Request,
         policy_id: str = Query(...),
         period_start: str = Query(...),
         period_end: str = Query(...),
     ) -> dict[str, Any]:
+        actor_for(authorization_for_commercial_route(http_request, mutating=False))
         try:
             summary = factory().build_summary(policy_id, period_start, period_end)
         except ClientEarningsSummaryUnavailableError as exc:
@@ -178,10 +208,12 @@ def create_client_earnings_router(
 
     @router.get("/api/v1/customer-profitability-summary")
     def read_customer_profitability_summary(
+        http_request: Request,
         policy_id: str = Query(...),
         period_start: str = Query(...),
         period_end: str = Query(...),
     ) -> dict[str, Any]:
+        actor_for(authorization_for_commercial_route(http_request, mutating=False))
         try:
             summary = CustomerProfitabilitySummaryService().build_summary(
                 policy_id=policy_id,
@@ -194,13 +226,24 @@ def create_client_earnings_router(
 
     @router.get("/api/v1/advice-profitability-history")
     def read_advice_profitability_history(
+        http_request: Request,
         terms_id: str = Query(...),
     ) -> list[dict[str, Any]]:
-        history = AdviceProfitabilityHistoryService().list_by_terms_id(terms_id)
+        actor_for(authorization_for_commercial_route(http_request, mutating=False))
+        try:
+            history = AdviceProfitabilityHistoryService().list_by_terms_id(terms_id)
+        except AdviceProfitabilityError as exc:
+            # Unknown/malformed terms_id and a broken canonical chain both
+            # surface as a plain 404 -- the caller is already authorized to
+            # view compensation terms in general, so the underlying reason
+            # (not found vs. reconciliation failure) is legitimate
+            # troubleshooting detail, not an enumeration aid to an outsider.
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return [build_advice_profitability_payload(item) for item in history]
 
     @router.get("/api/v1/withdrawable-funds-summary")
     def read_withdrawable_funds_summary(
+        http_request: Request,
         account_reference: str = Query(...),
         account_currency: str = Query(...),
         as_of: str = Query(...),
@@ -214,29 +257,59 @@ def create_client_earnings_router(
         data_freshness: str = Query(default="UNKNOWN"),
         is_complete: bool = Query(default=False),
     ) -> dict[str, Any]:
-        summary = build_withdrawable_funds_summary(
-            account_reference=account_reference,
-            account_currency=account_currency,
-            as_of=as_of,
-            total_cash=Decimal(total_cash) if total_cash is not None else None,
-            settled_cash=Decimal(settled_cash) if settled_cash is not None else None,
-            unsettled_proceeds=Decimal(unsettled_proceeds) if unsettled_proceeds is not None else None,
-            reserved_for_open_orders=Decimal(reserved_for_open_orders) if reserved_for_open_orders is not None else None,
-            reserved_for_margin_or_positions=Decimal(reserved_for_margin_or_positions) if reserved_for_margin_or_positions is not None else None,
-            pending_css_charge=Decimal(pending_css_charge) if pending_css_charge is not None else None,
-            other_restricted_amount=Decimal(other_restricted_amount) if other_restricted_amount is not None else None,
-            data_freshness=data_freshness,
-            is_complete=is_complete,
-        )
-        return build_withdrawable_funds_summary_payload(summary)
+        """Advisory *what-if* calculator over caller-supplied figures.
+
+        Every amount (and ``is_complete``/``data_freshness``) comes from the
+        query string, not from broker, ledger or reconciliation state, so the
+        result is never authoritative: nothing is read from or written to any
+        store, no withdrawal or transfer can be initiated from it, and the
+        response says so explicitly (``input_provenance``/``authoritative``).
+        Client-supplied values never become financial authority.
+        """
+        actor_for(authorization_for_commercial_route(http_request, mutating=False))
+        try:
+            summary = build_withdrawable_funds_summary(
+                account_reference=account_reference,
+                account_currency=account_currency,
+                as_of=as_of,
+                total_cash=Decimal(total_cash) if total_cash is not None else None,
+                settled_cash=Decimal(settled_cash) if settled_cash is not None else None,
+                unsettled_proceeds=Decimal(unsettled_proceeds) if unsettled_proceeds is not None else None,
+                reserved_for_open_orders=Decimal(reserved_for_open_orders) if reserved_for_open_orders is not None else None,
+                reserved_for_margin_or_positions=Decimal(reserved_for_margin_or_positions) if reserved_for_margin_or_positions is not None else None,
+                pending_css_charge=Decimal(pending_css_charge) if pending_css_charge is not None else None,
+                other_restricted_amount=Decimal(other_restricted_amount) if other_restricted_amount is not None else None,
+                data_freshness=data_freshness,
+                is_complete=is_complete,
+            )
+        except (ArithmeticError, TypeError, ValueError) as exc:
+            # Malformed, non-finite or negative amounts are a client input
+            # error (422), never an unhandled 500.
+            raise HTTPException(status_code=422, detail=f"invalid amount: {exc.__class__.__name__}") from exc
+        payload = build_withdrawable_funds_summary_payload(summary)
+        payload.update({
+            "input_provenance": "CLIENT_SUPPLIED",
+            "authoritative": False,
+            "advisory_note": (
+                "Available to Withdraw — advisory what-if estimate computed from the "
+                "figures supplied in this request, not from authoritative broker or "
+                "ledger state. It cannot authorize a withdrawal or move money."
+            ),
+            "money_movement_allowed": summary.money_movement_allowed,
+            "broker_withdrawal_allowed": summary.broker_withdrawal_allowed,
+            "execution_authority": summary.execution_authority,
+        })
+        return payload
 
     @router.get("/api/v1/client-earnings-history")
     def read_client_earnings_history(
+        http_request: Request,
         account_reference: str | None = Query(default=None),
         policy_id: str | None = Query(default=None),
         period_start: str | None = Query(default=None),
         period_end: str | None = Query(default=None),
     ) -> list[dict[str, Any]]:
+        actor_for(authorization_for_commercial_route(http_request, mutating=False))
         try:
             summaries = factory().list_summaries(
                 account_reference=account_reference,

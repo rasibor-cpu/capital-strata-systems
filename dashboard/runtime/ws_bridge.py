@@ -7,6 +7,8 @@ from typing import Any
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from backend.app.auth.session_dependency import resolve_operator_session_ws
+
 from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
 )
@@ -134,6 +136,13 @@ def create_ws_router(
 
     @router.websocket("/ws/v1/dashboard-state")
     async def dashboard_state_socket(websocket: WebSocket) -> None:
+        # Same operator-session gate as the REST dashboard-state routes --
+        # cookie or bearer token, checked before accepting the handshake so
+        # an anonymous caller never gets a stream of live broker/PnL data.
+        if resolve_operator_session_ws(websocket) is None:
+            await websocket.close(code=4401)
+            return
+
         await websocket.accept()
         sequence = 0
         previous_payload: dict[str, Any] | None = None
@@ -149,6 +158,14 @@ def create_ws_router(
 
             while True:
                 await asyncio.sleep(interval_seconds)
+
+                # Re-validate on every tick: a session revoked (logout,
+                # password change) or expired after the handshake must not
+                # leave a live broker/PnL stream open indefinitely.
+                if resolve_operator_session_ws(websocket) is None:
+                    await websocket.close(code=4401)
+                    return
+
                 sequence += 1
                 state = _state_from_provider(provider)
                 messages = build_delta_ws_messages(

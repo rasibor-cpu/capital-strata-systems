@@ -1,9 +1,15 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import html
 import json
+import os
+import urllib.parse
+from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from dashboard.runtime.api_bridge import (
@@ -22,7 +28,20 @@ from dashboard.runtime.payment_collection_preflight_router import create_payment
 from dashboard.runtime.notification_delivery_preflight_router import create_notification_delivery_preflight_router
 from dashboard.runtime.launch_dossier_router import create_launch_dossier_router
 from dashboard.runtime.report_export_router import create_report_export_router
-from dashboard.runtime.commercial_governance_router import commercial_governance_router_from_env
+from dashboard.runtime.commercial_governance_router import (
+    commercial_controls_from_env,
+    commercial_governance_router_from_env,
+)
+from backend.app.auth.operator_login_router import create_operator_login_router
+from backend.app.auth.session_dependency import (
+    CSRF_FORM_FIELD,
+    SESSION_COOKIE_NAME,
+    require_mutation_session,
+    resolve_operator_session,
+    revoke_session_from_request,
+)
+from dashboard.auth.css_sign_on import AuthFailure, PasswordChangeRequired, authenticate_credentials, load_users, save_users
+from backend.app.auth.operator_login_router import OPERATOR_SESSION_MINUTES, api_docs_kwargs, set_session_cookie
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -39,6 +58,69 @@ def demo_dashboard_state_provider() -> DashboardState:
     return DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
 
 
+def endurance_safety_posture(provider: DashboardStateProvider) -> dict[str, Any]:
+    """Read-only safety posture as the running server sees it, for the
+    endurance heartbeat. Values come from the same builders the API serves."""
+    from dashboard.runtime.api_bridge import get_mission_control_payload
+    from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
+
+    mission = get_mission_control_payload(provider)
+    state = provider()
+    controls_path = Path(__file__).resolve().parents[2] / "artifacts" / "css_mobile_controls.json"
+    try:
+        controls = json.loads(controls_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        controls = {}
+    kill = evaluate_live_order_kill_switch(controls if isinstance(controls, dict) else {})
+    return {
+        "execution_allowed": mission.get("execution_allowed"),
+        "live_trading_blocked": mission.get("live_trading_blocked"),
+        "advisory_only": mission.get("advisory_only"),
+        "broker_execution_armed": mission.get("broker_execution_armed"),
+        "broker_name": mission.get("broker_name"),
+        "broker_connected": mission.get("broker_connected"),
+        "account_mode": mission.get("account_mode"),
+        "data_freshness": mission.get("data_freshness"),
+        "r7_unified_trade_gate_active": state.governance_state.unified_trade_gate_active,
+        "resolved_mode": state.resolved_mode(),
+        "engine_mode": state.engine_mode,
+        "live_order_kill_switch_blocked": kill.blocked,
+        "live_order_kill_switch_reason": kill.reason,
+    }
+
+
+def _endurance_heartbeat_lifespan(provider: DashboardStateProvider):
+    """Publish the endurance heartbeat only when a supervisor asks for it
+    (``CSS_RUNTIME_HEARTBEAT_FILE``). Ordinary runs are unchanged."""
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        path = os.environ.get("CSS_RUNTIME_HEARTBEAT_FILE")
+        probe = None
+        if path:
+            from dashboard.runtime.runtime_heartbeat import (
+                event_loop_probe,
+                register_stack_dump,
+                start_heartbeat_publisher,
+                stop_heartbeat_publisher,
+            )
+
+            stack_file = os.environ.get("CSS_RUNTIME_STACK_DUMP_FILE")
+            if stack_file:
+                register_stack_dump(stack_file)
+            interval = float(os.environ.get("CSS_RUNTIME_HEARTBEAT_SECONDS", "5"))
+            start_heartbeat_publisher(path, interval_seconds=interval, posture_fn=lambda: endurance_safety_posture(provider))
+            probe = asyncio.create_task(event_loop_probe(interval))
+        try:
+            yield
+        finally:
+            if probe is not None:
+                probe.cancel()
+                stop_heartbeat_publisher()
+
+    return lifespan
+
+
 def create_app(
     state_provider: DashboardStateProvider | None = None,
 ) -> FastAPI:
@@ -46,6 +128,8 @@ def create_app(
     app = FastAPI(
         title="Capital Strata Systems Institutional Web Dashboard",
         version="0.1.0",
+        lifespan=_endurance_heartbeat_lifespan(provider),
+        **api_docs_kwargs(),
     )
     # Materialize routes directly from the constructed routers.
     # Current FastAPI/Starlette cloud-CI versions can leave nested
@@ -53,11 +137,17 @@ def create_app(
     # the same compatibility pattern. All mounted commercialization routers
     # remain read-only except the explicitly governed trial enroll/cancel
     # endpoints.
+    # Shared maker-checker engine for the commercial governance API and the
+    # trial contract router's enroll/cancel actions -- one action-type
+    # registry, not a separate instance per router (see
+    # commercial_controls_from_env's docstring).
+    trial_controls = commercial_controls_from_env()
     runtime_routers = (
+        create_operator_login_router(),
         create_dashboard_state_router(provider),
         create_ws_router(provider),
         create_client_earnings_router(),
-        create_trial_contract_router(),
+        create_trial_contract_router(controls=trial_controls),
         create_production_charging_router(),
         create_commercialization_release_router(),
         create_commercialization_operations_router(),
@@ -75,52 +165,159 @@ def create_app(
     if commercial_router is not None:
         app.router.routes.extend(commercial_router.routes)
 
+    def _require_page_session(request: Request):
+        """Any valid operator session (cookie or bearer) -- no specific role.
+
+        This gate closes anonymous access to the operational dashboard; it does
+        not replace the finer-grained commercial-permission checks used by the
+        commercial-collections routers (client earnings, trial contracts, the
+        governance API), which remain gated separately.
+        """
+        return resolve_operator_session(request)
+
     @app.get("/", include_in_schema=False)
     async def index() -> RedirectResponse:
         return RedirectResponse("/dashboard", status_code=303)
 
+    @app.get("/login", response_class=HTMLResponse, include_in_schema=False)
+    async def login_page(request: Request) -> HTMLResponse:
+        if _require_page_session(request) is not None:
+            return RedirectResponse("/dashboard", status_code=303)
+        return HTMLResponse(_login_page())
+
+    @app.post("/login", include_in_schema=False)
+    async def login_submit(request: Request):
+        form = await _read_form(request)
+        user_id = form.get("user_id", "")
+        password = form.get("password", "")
+        users = load_users()
+        try:
+            user_ctx = authenticate_credentials(users, user_id, password)
+        except PasswordChangeRequired:
+            save_users(users)
+            return HTMLResponse(
+                _login_page(message="Password change required. Use the operator API to change your password before signing in."),
+                status_code=401,
+            )
+        except AuthFailure as exc:
+            save_users(users)
+            return HTMLResponse(_login_page(message=exc.message), status_code=401)
+
+        save_users(users)
+        from backend.app.auth.token_store import token_store as _token_store
+
+        token = _token_store.create_session(user_ctx["user_id"], [user_ctx["role"]], minutes=OPERATOR_SESSION_MINUTES)
+        response = RedirectResponse("/dashboard", status_code=303)
+        set_session_cookie(response, token)
+        return response
+
+    @app.post("/logout", include_in_schema=False)
+    async def logout_submit(request: Request):
+        form = await _read_form(request)
+        try:
+            # Cookie-backed logout is an authenticated state change, so it
+            # needs this session's synchronizer CSRF token like every other
+            # cookie-backed mutation (checked before anything is revoked).
+            require_mutation_session(request, form_token=form.get(CSRF_FORM_FIELD))
+        except HTTPException as exc:
+            if exc.status_code == 401:
+                # No live session (missing, expired, revoked): nothing to
+                # revoke and nothing audited -- just drop the dead cookie.
+                response = RedirectResponse("/login", status_code=303)
+                response.delete_cookie(SESSION_COOKIE_NAME)
+                return response
+            return HTMLResponse(
+                "<!doctype html><html><head><title>Logout rejected</title></head><body>"
+                "<p>Logout request rejected: CSRF token missing or invalid.</p>"
+                '<p><a href="/dashboard">Return to the dashboard</a></p></body></html>',
+                status_code=403,
+            )
+        revoke_session_from_request(request)
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie(SESSION_COOKIE_NAME)
+        return response
+
     @app.get("/dashboard", response_class=HTMLResponse)
-    async def dashboard() -> HTMLResponse:
-        return HTMLResponse(_dashboard_page())
+    async def dashboard(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_dashboard_page(), session)
 
     @app.get("/positions", response_class=HTMLResponse)
-    async def positions() -> HTMLResponse:
-        return HTMLResponse(_positions_page())
+    async def positions(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_positions_page(), session)
 
     @app.get("/execution", response_class=HTMLResponse)
-    async def execution() -> HTMLResponse:
-        return HTMLResponse(_execution_page())
+    async def execution(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_execution_page(), session)
 
     @app.get("/risk-governance", response_class=HTMLResponse)
-    async def risk_governance() -> HTMLResponse:
-        return HTMLResponse(_risk_governance_page())
+    async def risk_governance(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_risk_governance_page(), session)
 
     @app.get("/market-opportunities", response_class=HTMLResponse)
-    async def market_opportunities() -> HTMLResponse:
-        return HTMLResponse(_market_opportunities_page())
+    async def market_opportunities(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_market_opportunities_page(), session)
 
     @app.get("/broker", response_class=HTMLResponse)
-    async def broker() -> HTMLResponse:
-        return HTMLResponse(_broker_page())
+    async def broker(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_broker_page(), session)
 
     @app.get("/margin", response_class=HTMLResponse)
-    async def margin_view() -> HTMLResponse:
-        return HTMLResponse(_margin_page())
+    async def margin_view(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_margin_page(), session)
 
     @app.get("/billing", response_class=HTMLResponse)
-    async def billing_view() -> HTMLResponse:
-        return HTMLResponse(_billing_page())
+    async def billing_view(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_billing_page(), session)
 
     @app.get("/trial-contract", response_class=HTMLResponse)
-    async def trial_contract_view() -> HTMLResponse:
-        return HTMLResponse(_trial_contract_page())
+    async def trial_contract_view(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_trial_contract_page(), session)
 
     @app.get("/commercialization-operations", response_class=HTMLResponse)
-    async def commercialization_operations_view() -> HTMLResponse:
-        return HTMLResponse(_commercialization_operations_page())
+    async def commercialization_operations_view(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_commercialization_operations_page(), session)
+
+    @app.get("/approvals", response_class=HTMLResponse)
+    async def approvals_view(request: Request) -> HTMLResponse:
+        session = _require_page_session(request)
+        if session is None:
+            return RedirectResponse("/login", status_code=303)
+        return _page_response(_approvals_page(), session)
 
     @app.get("/api/v1/margin-snapshot")
-    async def margin_api() -> dict[str, Any]:
+    async def margin_api(request: Request) -> dict[str, Any]:
+        if _require_page_session(request) is None:
+            raise HTTPException(status_code=401, detail="authentication required")
         state = provider()
         summary = state.last_scan_results.get("account_summary", {})
         broker = str(summary.get("broker", "NONE")).upper()
@@ -189,6 +386,7 @@ def _app_nav(active: str) -> str:
         ("billing", "/billing", "Billing"),
         ("trial_contract", "/trial-contract", "Trial & Contract"),
         ("commercialization_operations", "/commercialization-operations", "Launch Ops"),
+        ("approvals", "/approvals", "Approvals"),
         ("report_export", "/api/v1/report-export?format=html", "Export"),
     ]
 
@@ -202,8 +400,80 @@ def _app_nav(active: str) -> str:
                 )
                 for key, href, label in links
             ),
+            _SESSION_CONTROLS_PLACEHOLDER,
             "</nav>",
         )
+    )
+
+
+# Replaced per request with the operator's Logout form, which carries the
+# session's synchronizer CSRF token. Page JavaScript reads the same hidden
+# field (id ``css-csrf-token``) to send the X-CSRF-Token header on
+# cookie-backed POSTs.
+_SESSION_CONTROLS_PLACEHOLDER = "<!--css-session-controls-->"
+
+
+def _session_controls(session: Any) -> str:
+    """Signed-in identity + Logout, rendered from the server-side session only.
+
+    ``username``/``roles`` come from the token_store session resolved for this
+    request -- never from anything the browser sent. The same values are
+    exposed as data attributes so page scripts can hide controls that cannot
+    apply (e.g. approving one's own request); the server still enforces every
+    rule regardless.
+    """
+    token = html.escape(getattr(session, "csrf_token", "") or "", quote=True)
+    user_id = html.escape(str(getattr(session, "username", "") or ""), quote=True)
+    roles = html.escape(", ".join(getattr(session, "roles", None) or []) or "NO ROLE", quote=True)
+    return (
+        '<span class="session-controls" style="display:inline-flex;align-items:center;gap:0.6rem;margin-left:auto;">'
+        f'<span id="css-session-identity" data-user-id="{user_id}" data-roles="{roles}">'
+        f'Signed in: {user_id} &middot; {roles}</span>'
+        '<form method="post" action="/logout" style="display:inline;">'
+        f'<input type="hidden" id="css-csrf-token" name="{CSRF_FORM_FIELD}" value="{token}">'
+        '<button type="submit">Logout</button></form></span>'
+    )
+
+
+def _page_response(page_html: str, session: Any) -> HTMLResponse:
+    return HTMLResponse(page_html.replace(_SESSION_CONTROLS_PLACEHOLDER, _session_controls(session), 1))
+
+
+async def _read_form(request: Request) -> dict[str, str]:
+    """Parse an ``application/x-www-form-urlencoded`` body without needing
+    python-multipart (Starlette's ``Request.form()`` requires it even for
+    urlencoded bodies). Mirrors ``dashboard.mobile.mobile_app._read_form``."""
+    raw = (await request.body()).decode("utf-8", errors="replace")
+    parsed = urllib.parse.parse_qs(raw, keep_blank_values=True)
+    return {key: values[-1] if values else "" for key, values in parsed.items()}
+
+
+def _login_page(message: str = "") -> str:
+    banner = (
+        f'<p style="color:#b91c1c;font-weight:600;">{html.escape(message)}</p>'
+        if message
+        else ""
+    )
+    return (
+        "<!doctype html><html><head><title>CSS Operator Sign-In</title>"
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">"
+        "<style>body{font-family:system-ui,sans-serif;background:#0f172a;color:#e2e8f0;"
+        "display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}"
+        "form{background:#1e293b;padding:2rem;border-radius:8px;min-width:280px;}"
+        "input{display:block;width:100%;padding:0.5rem;margin:0.4rem 0 1rem;"
+        "border-radius:4px;border:1px solid #334155;background:#0f172a;color:#e2e8f0;}"
+        "button{width:100%;padding:0.6rem;border-radius:4px;border:none;"
+        "background:#2563eb;color:#fff;font-weight:600;cursor:pointer;}"
+        "label{font-size:0.85rem;color:#94a3b8;}</style></head><body>"
+        f'<form method="post" action="/login">'
+        "<h2>Capital Strata Systems</h2><p>Operator sign-in</p>"
+        f"{banner}"
+        '<label for="user_id">Operator ID</label>'
+        '<input id="user_id" name="user_id" maxlength="5" autocomplete="username" required>'
+        '<label for="password">Password</label>'
+        '<input id="password" name="password" type="password" autocomplete="current-password" required>'
+        "<button type=\"submit\">Sign in</button>"
+        "</form></body></html>"
     )
 
 
@@ -495,11 +765,14 @@ def _dashboard_page() -> str:
     }}
 
     function get(path) {{
-      const [section, key] = path.split(".");
-      return state.sections?.[section]?.[key];
+      // Resolve the whole dotted path (object keys and array indexes), e.g.
+      // "opportunities.scoring_overview.top_ranked_symbols.0". Stopping after
+      // two segments returned the parent object, rendered as "[object Object]".
+      return path.split(".").reduce((node, part) => node?.[part], state.sections);
     }}
 
     function formatField(path, value) {{
+      if (value !== null && typeof value === "object") return "N/A";
       if (["cash_balance", "total_equity", "buying_power", "margin_used", "available_margin", "net_pnl", "total_exposure", "daily_loss_limit", "total_execution_cost"].some((key) => path.endsWith(key))) {{
         return money(value);
       }}
@@ -2168,6 +2441,20 @@ def _trial_contract_script() -> str:
     return """
 let governingAgreement = null;
 
+// Cookie-backed POSTs must carry this session's synchronizer CSRF token,
+// rendered into the page's Logout form by the server.
+function trialCsrfHeaders() {
+  const field = document.getElementById("css-csrf-token");
+  return {"Content-Type": "application/json", "X-CSRF-Token": field ? field.value : ""};
+}
+
+function trialIdempotencyKey(prefix) {
+  const random = (window.crypto && window.crypto.randomUUID)
+    ? window.crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return `${prefix}:${random}`;
+}
+
 function trialNow() {
   return new Date().toISOString().replace(".000Z", "Z");
 }
@@ -2216,16 +2503,17 @@ async function enrollTrial() {
     acceptance_audit_reference: `web-accept:${Date.now()}`,
     evidence_refs: governingAgreement.evidence_refs,
     affirm_terms_acceptance: true,
-    affirm_automatic_conversion_disclosure: true
+    affirm_automatic_conversion_disclosure: true,
+    idempotency_key: trialIdempotencyKey("web-enroll")
   };
   const response = await fetch("/api/v1/commercial-trial/enroll", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: trialCsrfHeaders(),
     body: JSON.stringify(payload)
   });
   const data = await response.json();
   result.textContent = response.ok
-    ? `Trial accepted. Exact expiry: ${data.trial_expires_at}. No payment has been executed.`
+    ? `Enrollment request ${data.controlled_action.action_id} is ${data.controlled_action.status}: it takes effect only after a second authorized approver approves it on the Approvals page. No payment has been executed.`
     : `Enrollment blocked: ${data.detail || "validation failed"}`;
 }
 
@@ -2235,33 +2523,79 @@ async function cancelTrial() {
     account_reference: document.getElementById("trial-account-reference").value.trim(),
     canceled_at: trialNow(),
     cancellation_audit_reference: `web-cancel:${Date.now()}`,
-    evidence_refs: ["customer:web-cancellation"]
+    evidence_refs: ["customer:web-cancellation"],
+    idempotency_key: trialIdempotencyKey("web-cancel")
   };
   const response = await fetch("/api/v1/commercial-trial/cancel", {
     method: "POST",
-    headers: {"Content-Type": "application/json"},
+    headers: trialCsrfHeaders(),
     body: JSON.stringify(payload)
   });
   const data = await response.json();
   document.getElementById("trial-result").textContent = response.ok
-    ? `Cancellation recorded at ${data.canceled_at}. Conversion is blocked if cancellation occurred before expiry.`
+    ? `Cancellation request ${data.controlled_action.action_id} is ${data.controlled_action.status}: it takes effect only after a second authorized approver approves it. Conversion is blocked if cancellation occurred before expiry.`
     : `Cancellation blocked: ${data.detail || "validation failed"}`;
 }
 
+const TRIAL_STATUS_READ_ONLY_NOTE =
+  "Checking status is read-only: it executes no payment and grants no trading authority.";
+
+// Read-only status check. Uses the Agreement ID / Version fields directly (the
+// enrollment is keyed by agreement, so the server needs them) -- it does not
+// require Load Agreement or the acceptance checkboxes. Every outcome, including
+// missing input, not-found, expired sign-in and network failure, is shown.
 async function checkTrialStatus() {
-  if (!governingAgreement) return;
-  const params = new URLSearchParams({
+  const result = document.getElementById("trial-result");
+  result.style.whiteSpace = "pre-line";
+  const fields = {
     customer_id: document.getElementById("trial-customer-id").value.trim(),
     account_reference: document.getElementById("trial-account-reference").value.trim(),
-    agreement_id: governingAgreement.agreement_id,
-    agreement_version: governingAgreement.agreement_version,
-    assessed_at: trialNow()
-  });
-  const response = await fetch(`/api/v1/commercial-trial/status?${params.toString()}`, {cache: "no-store"});
-  const data = await response.json();
-  document.getElementById("trial-result").textContent = response.ok
-    ? `Status: ${data.status}. ${data.reason}. Payment execution remains disabled.`
-    : `Status unavailable: ${data.detail || "validation failed"}`;
+    agreement_id: document.getElementById("trial-agreement-id").value.trim(),
+    agreement_version: document.getElementById("trial-agreement-version").value.trim()
+  };
+  const missing = Object.entries({
+    "Customer ID": fields.customer_id, "Account Reference": fields.account_reference,
+    "Agreement ID": fields.agreement_id, "Version": fields.agreement_version
+  }).filter(([, value]) => !value).map(([label]) => label);
+  if (missing.length) {
+    result.textContent = `Check Status needs: ${missing.join(", ")}.`;
+    return;
+  }
+  result.textContent = "Checking status...";
+  const params = new URLSearchParams({...fields, assessed_at: trialNow()});
+  let response;
+  let data = {};
+  try {
+    response = await fetch(`/api/v1/commercial-trial/status?${params.toString()}`, {cache: "no-store"});
+    data = await response.json().catch(() => ({}));
+  } catch (error) {
+    result.textContent = `Status check failed: the server could not be reached.\n${TRIAL_STATUS_READ_ONLY_NOTE}`;
+    return;
+  }
+  if (response.ok) {
+    result.textContent = [
+      `Status: ${data.status}`,
+      `Customer ID: ${data.customer_id}`,
+      `Account Reference: ${data.account_reference}`,
+      `Agreement: ${data.agreement_id} ${data.agreement_version}`,
+      `Trial start: ${data.trial_start_at || "not recorded"}`,
+      `Trial expiry: ${data.trial_expires_at || "not recorded"}`,
+      `Cancellation recorded: ${data.cancellation_recorded ? `YES (${data.canceled_at})` : "NO"}`,
+      `Reason: ${data.reason}`,
+      TRIAL_STATUS_READ_ONLY_NOTE
+    ].join("\\n");
+  } else if (response.status === 404) {
+    result.textContent = `Not found: no enrollment for customer ${fields.customer_id} / account ` +
+      `${fields.account_reference} under agreement ${fields.agreement_id} ${fields.agreement_version}` +
+      ` (${data.detail || "not found"}).\n${TRIAL_STATUS_READ_ONLY_NOTE}`;
+  } else if (response.status === 401) {
+    result.textContent = "Your session has ended. Sign in again to check status.";
+  } else if (response.status === 403) {
+    result.textContent = `Not permitted: ${data.detail || "your role cannot view trial status"}.`;
+  } else {
+    result.textContent = `Status unavailable (${response.status}): ${data.detail || "request rejected"}.\n` +
+      TRIAL_STATUS_READ_ONLY_NOTE;
+  }
 }
 
 document.getElementById("trial-load-agreement").addEventListener("click", loadTrialAgreement);
@@ -2423,6 +2757,199 @@ async function refreshCommercializationOperations() {
 
 document.getElementById("ops-refresh").addEventListener("click", refreshCommercializationOperations);
 """
+
+def _approvals_page() -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111820">
+  <title>CSS Maker-Checker Approvals</title>
+  <style>{_css()}</style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true">CSS</div>
+        <div>
+          <p class="eyebrow">Capital Strata Systems</p>
+          <h1>Maker-Checker Approvals</h1>
+        </div>
+      </div>
+      <section class="status-strip">
+        <span>Second-approver governance</span>
+        <span>No payment execution</span>
+        <span>No trading authority</span>
+      </section>
+    </header>
+    {_app_nav("approvals")}
+
+    <section class="control-row">
+      <label>Status
+        <select id="approvals-status">
+          <option value="PENDING" selected>PENDING</option>
+          <option value="EXECUTED">EXECUTED</option>
+          <option value="FAILED">FAILED</option>
+          <option value="REJECTED">REJECTED</option>
+          <option value="">ALL</option>
+        </select>
+      </label>
+      <button type="button" id="approvals-refresh">Refresh</button>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="panel wide">
+        <div class="panel-head">
+          <h2>Controlled Actions</h2>
+          <span id="approvals-count">Loading</span>
+        </div>
+        <p class="panel-note">A request takes effect only when an authorized checker other than its maker approves it
+          (HEAD_FINCON or HEAD_COMPLIANCE). The server enforces this for every request; the buttons are only a convenience.</p>
+        <div id="approvals-list" class="empty-state">Loading...</div>
+        <p class="panel-note" id="approvals-result" role="status"></p>
+      </article>
+    </section>
+  </main>
+  <script>{_approvals_script()}</script>
+</body>
+</html>"""
+
+
+def _approvals_script() -> str:
+    return """
+const APPROVER_ROLES = ["HEAD_FINCON", "HEAD_COMPLIANCE"];
+
+function approvalsIdentity() {
+  const node = document.getElementById("css-session-identity");
+  return {
+    userId: node ? node.dataset.userId : "",
+    roles: node ? node.dataset.roles.split(",").map((r) => r.trim()) : []
+  };
+}
+
+function approvalsHeaders() {
+  const field = document.getElementById("css-csrf-token");
+  return {"Content-Type": "application/json", "X-CSRF-Token": field ? field.value : ""};
+}
+
+function cell(row, text) {
+  const td = document.createElement("td");
+  td.textContent = text == null || text === "" ? "-" : String(text);
+  row.appendChild(td);
+  return td;
+}
+
+function describe(action) {
+  const p = action.payload || {};
+  return action.action_type + " " + action.action_id +
+    "\\ncustomer " + (p.customer_id || "-") + " / account " + (p.account_reference || "-") +
+    "\\nagreement " + (p.agreement_id || "-") + " " + (p.agreement_version || "") +
+    "\\nmaker " + action.maker_id + " (" + action.maker_role + ")";
+}
+
+async function decide(action, verb) {
+  let reason = null;
+  if (verb === "reject") {
+    reason = window.prompt("Reason for rejecting:\\n\\n" + describe(action));
+    if (!reason || !reason.trim()) return;
+  } else if (!window.confirm("Approve this request?\\n\\n" + describe(action))) {
+    return;
+  }
+  const result = document.getElementById("approvals-result");
+  const response = await fetch(
+    "/api/v1/commercial/controlled-actions/" + encodeURIComponent(action.action_id) + "/" + verb,
+    {method: "POST", headers: approvalsHeaders(),
+     body: JSON.stringify({expected_payload_hash: action.payload_hash, reason: reason})}
+  );
+  const data = await response.json().catch(() => ({}));
+  if (response.ok) {
+    const done = data.controlled_action || {};
+    result.textContent = "Request " + done.action_id + " is now " + done.status +
+      (done.resulting_state ? " (" + done.resulting_state + ")" : "") +
+      (done.failure_reason ? " - " + done.failure_reason : "") + ". No payment has been executed.";
+  } else {
+    result.textContent = "Decision refused (" + response.status + "): " + (data.detail || "not permitted");
+  }
+  await loadApprovals();
+}
+
+async function loadApprovals() {
+  const list = document.getElementById("approvals-list");
+  const count = document.getElementById("approvals-count");
+  const status = document.getElementById("approvals-status").value;
+  const response = await fetch(
+    "/api/v1/commercial/controlled-actions" + (status ? "?status=" + encodeURIComponent(status) : ""),
+    {cache: "no-store"}
+  );
+  const data = await response.json().catch(() => ({}));
+  list.replaceChildren();
+  if (!response.ok) {
+    list.className = "empty-state";
+    list.textContent = response.status === 404
+      ? "Commercial governance is not configured on this server."
+      : "Unavailable (" + response.status + "): " + (data.detail || "not permitted");
+    count.textContent = "-";
+    return;
+  }
+  const actions = data.controlled_actions || [];
+  count.textContent = actions.length + " " + (status || "total");
+  if (!actions.length) {
+    list.className = "empty-state";
+    list.textContent = "No controlled actions with this status.";
+    return;
+  }
+  const me = approvalsIdentity();
+  const canApprove = me.roles.some((r) => APPROVER_ROLES.includes(r));
+  const table = document.createElement("table");
+  table.id = "approvals-table";
+  const head = table.createTHead().insertRow();
+  ["Request ID", "Type", "Maker", "Customer / Account", "Agreement", "Requested", "Status", "Checker", "Decision"]
+    .forEach((h) => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  const body = table.createTBody();
+  actions.forEach((action) => {
+    const p = action.payload || {};
+    const row = body.insertRow();
+    row.dataset.actionId = action.action_id;
+    cell(row, action.action_id);
+    cell(row, action.action_type);
+    cell(row, action.maker_id + " (" + action.maker_role + ")");
+    cell(row, (p.customer_id || "-") + " / " + (p.account_reference || "-"));
+    cell(row, (p.agreement_id || "-") + " " + (p.agreement_version || ""));
+    cell(row, action.requested_at);
+    cell(row, action.status + (action.resulting_state ? " (" + action.resulting_state + ")" : "") +
+              (action.failure_reason ? " - " + action.failure_reason : ""));
+    cell(row, action.checker_id ? action.checker_id + " (" + action.checker_role + ")" : "");
+    const decision = cell(row, "");
+    decision.textContent = "";
+    if (action.status !== "PENDING") {
+      decision.textContent = "-";
+    } else if (!canApprove) {
+      decision.textContent = "Needs HEAD_FINCON or HEAD_COMPLIANCE";
+    } else if (action.maker_id === me.userId) {
+      decision.textContent = "Your own request - another approver must decide";
+    } else {
+      [["approve", "Approve"], ["reject", "Reject"]].forEach(([verb, label]) => {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = label;
+        button.dataset.verb = verb;
+        button.addEventListener("click", () => decide(action, verb));
+        decision.appendChild(button);
+      });
+    }
+  });
+  list.className = "";
+  list.appendChild(table);
+}
+
+document.getElementById("approvals-refresh").addEventListener("click", loadApprovals);
+document.getElementById("approvals-status").addEventListener("change", loadApprovals);
+loadApprovals();
+"""
+
+
 def _css() -> str:
     return """
 :root {

@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
+
+from backend.app.auth.session_dependency import require_operator_session
 
 from dashboard.runtime.dashboard_hydration_coordinator import (
     DashboardHydrationCoordinator,
@@ -159,7 +161,11 @@ def get_runtime_alerts_payload(
 def create_dashboard_state_router(
     state_provider: DashboardStateProvider | None = None,
 ) -> APIRouter:
-    router = APIRouter()
+    # Every route here (including Mission Control) requires a valid operator
+    # session -- cookie or bearer, no specific commercial permission, since
+    # this is a general trading-operations view rather than a commercial
+    # collections one. Previously this whole router had no authentication.
+    router = APIRouter(dependencies=[Depends(require_operator_session)])
 
     @router.get("/api/v1/dashboard-state")
     def read_dashboard_state() -> dict[str, Any]:

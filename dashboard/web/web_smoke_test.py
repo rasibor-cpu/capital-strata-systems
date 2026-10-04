@@ -55,6 +55,9 @@ def main() -> int:
         "/api/v1/commercialization-operations/status",
         "/api/v1/commercialization-release/readiness",
         "/ws/v1/dashboard-state",
+        "/auth/operator/login",
+        "/auth/operator/logout",
+        "/auth/operator/me",
     }
     missing = required_routes - routes
     if missing:

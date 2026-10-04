@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import hmac
 import json
 import os
+import secrets
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
@@ -15,7 +17,17 @@ ARTIFACTS_DIR = PROJECT_ROOT / "artifacts"
 SESSION_AUTH_FILE = ARTIFACTS_DIR / "css_auth_session.json"
 
 INITIAL_ADMIN_ID = "00000"
+# The historically published bootstrap password. It is no longer ever issued:
+# it stays only as a deny-list value (it can never be chosen as a password) and
+# to detect and neutralize unclaimed legacy stores (see _migrate_bootstrap_admin).
 INITIAL_ADMIN_PASSWORD = "123456"
+# Bootstrap-administrator lifecycle. A fresh store's 00000 record is
+# BOOTSTRAP_REQUIRED with no usable password: nothing -- sign-in, the operator
+# API, mobile -- can authenticate as it until a local operator runs
+# ``python -m scripts.bootstrap_css_admin`` (bootstrap_initial_admin), exactly
+# once. There is no network path to bootstrap, so no first-claim race.
+BOOTSTRAP_REQUIRED = "required"
+BOOTSTRAP_INITIALIZED = "initialized"
 INITIAL_DISPLAY_NAME = "CSS Administrator"
 INITIAL_ROLE = "SUPER_USER"
 MIN_PASSWORD_LENGTH = 6
@@ -39,6 +51,15 @@ FALLBACK_CSS_ROLES = (
 USER_ADMIN_ROLES = {"SUPER_USER"}
 
 CSS_AUTH_PANEL_WIDTH = 78
+
+
+def _log_auth(event_type: str, **kwargs: Any) -> None:
+    # Deferred import: css_sign_on stays free of a hard dependency on the
+    # backend/engine layers at import time (it's used from a bare console/Tk
+    # entry point too); auth_audit itself never raises.
+    from backend.app.auth.auth_audit import log_auth_event
+
+    log_auth_event(event_type, **kwargs)
 
 
 class AuthFailure(Exception):
@@ -94,7 +115,7 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
 
     changed = False
     if not users_file.exists():
-        users = {INITIAL_ADMIN_ID: _default_admin_record()}
+        users = {INITIAL_ADMIN_ID: _uninitialized_admin_record()}
         save_users(users, users_file)
         return users
 
@@ -108,7 +129,9 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
         raise RuntimeError("CSS_USER_STORE_INVALID")
 
     if INITIAL_ADMIN_ID not in users:
-        users[INITIAL_ADMIN_ID] = _default_admin_record()
+        users[INITIAL_ADMIN_ID] = _uninitialized_admin_record()
+        changed = True
+    elif isinstance(users[INITIAL_ADMIN_ID], dict) and _migrate_bootstrap_admin(users[INITIAL_ADMIN_ID]):
         changed = True
 
     for key, record in list(users.items()):
@@ -134,6 +157,7 @@ def load_users(users_file: Path = USERS_FILE) -> Dict[str, Any]:
             "lockout_until": None,
             "lockout_seconds": 0,
             "lockout_started_at": None,
+            "disabled": False,
         }
         for field, default in defaults.items():
             if field not in record:
@@ -228,10 +252,45 @@ def create_user(
         "lockout_until": None,
         "lockout_seconds": 0,
         "lockout_started_at": None,
+        "disabled": False,
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "created_by": str(actor_ctx.get("user_id", "")),
     }
     users[normalized_user_id] = user_record
+    return build_user_context(user_record, normalized_user_id)
+
+
+def set_user_disabled(
+    users: Dict[str, Any],
+    actor_ctx: Dict[str, Any],
+    user_id: str,
+    disabled: bool,
+) -> Dict[str, Any]:
+    """Disable or re-enable an operator account. SUPER_USER only.
+
+    Disabling does not itself revoke existing sessions -- callers that hold a
+    bearer/cookie session store (the web/API layer, not this module) should
+    call ``token_store.revoke_all_for_user`` alongside this when disabling.
+    """
+    if not can_manage_users(actor_ctx):
+        _log_auth(
+            "AUTHORIZATION_DENIED", actor_id=str(actor_ctx.get("user_id", "")),
+            actor_role=actor_ctx.get("role"), outcome="DENIED",
+            reason="not a super user", details={"target_user_id": normalize_user_id(user_id), "disabled": disabled},
+        )
+        raise AuthFailure("USER_ADMIN_DENIED", "Only a CSS super user can disable or enable accounts.")
+
+    normalized_user_id = normalize_user_id(user_id)
+    user_record = users.get(normalized_user_id)
+    if not isinstance(user_record, dict):
+        raise AuthFailure("USER_NOT_FOUND", "User record not found.")
+
+    user_record["disabled"] = bool(disabled)
+    _log_auth(
+        "ACCOUNT_DISABLED" if disabled else "ACCOUNT_ENABLED",
+        actor_id=str(actor_ctx.get("user_id", "")), actor_role=actor_ctx.get("role"),
+        outcome="SUCCEEDED", details={"target_user_id": normalized_user_id},
+    )
     return build_user_context(user_record, normalized_user_id)
 
 
@@ -272,6 +331,65 @@ def validate_initial_password(password: str) -> None:
 
 
 
+def _verify_credentials_or_raise(user_record: Dict[str, Any], normalized_user_id: str, password: str) -> None:
+    """Disabled check, active-lockout check, then password verification with
+    failed-attempt counting and timed lockout. Shared by sign-in and by the
+    authenticated password change so both enforce one policy. Raises
+    ``AuthFailure``; mutates the record's counters (callers persist them)."""
+    if bool(user_record.get("disabled", False)):
+        # Checked before lockout/password so a disabled account never leaks
+        # lockout timing or password-correctness information.
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="ACCOUNT_DISABLED",
+                   reason="account is disabled")
+        raise AuthFailure("ACCOUNT_DISABLED", "This account has been disabled.")
+
+    if user_record.get("bootstrap_state") == BOOTSTRAP_REQUIRED:
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="BOOTSTRAP_REQUIRED",
+                   reason="administrator not initialized; local bootstrap required")
+        raise AuthFailure("ACCOUNT_NOT_INITIALIZED", "This account has not been initialized.")
+
+    now = datetime.now()
+    lockout_remaining = active_lockout_remaining_seconds(user_record, now)
+    if lockout_remaining > 0:
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="LOCKED_OUT",
+                   reason="active lockout window")
+        raise AuthFailure(
+            "AUTH_LOCKOUT",
+            (
+                "Sequential failed sign-ons paused for "
+                f"{format_duration(lockout_remaining)} for user ID {normalized_user_id}."
+            ),
+        )
+
+    expected_hash = str(user_record.get("password_hash", "")).strip()
+
+    if not verify_password(password, expected_hash):
+        failed_attempts = int(user_record.get("failed_attempts", 0) or 0) + 1
+        user_record["failed_attempts"] = failed_attempts
+
+        if failed_attempts >= LOCKOUT_START_ATTEMPT:
+            lockout_seconds = lockout_seconds_for_attempt(failed_attempts)
+            apply_timed_lockout(user_record, lockout_seconds, now)
+            _log_auth("ACCOUNT_LOCKOUT", actor_id=normalized_user_id, outcome="LOCKED",
+                       reason=f"{failed_attempts} sequential failed attempts",
+                       details={"lockout_seconds": lockout_seconds})
+            raise AuthFailure(
+                "AUTH_LOCKOUT",
+                (
+                    "Sequential failed sign-ons paused for "
+                    f"{format_duration(lockout_seconds)} after failed attempt {failed_attempts}."
+                ),
+            )
+
+        remaining = LOCKOUT_START_ATTEMPT - failed_attempts
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="WRONG_PASSWORD",
+                   reason=f"{remaining} attempt(s) remaining before lockout")
+        raise AuthFailure(
+            "AUTH_FAILED",
+            f"Authentication failed. {remaining} attempt(s) remaining.",
+        )
+
+
 def change_authenticated_password(
     users: Dict[str, Any],
     user_id: str,
@@ -284,10 +402,17 @@ def change_authenticated_password(
     if not user_record:
         raise AuthFailure("USER_NOT_FOUND", "User record not found.")
 
-    expected_hash = str(user_record.get("password_hash", "")).strip()
-    current_hash = hash_password(current_password)
-    if current_hash != expected_hash:
-        raise AuthFailure("INVALID_CURRENT_PASSWORD", "Current password is incorrect.")
+    # The same disabled / lockout / failed-attempt policy as sign-in: this
+    # path hands the caller a fresh session (operator API change-password),
+    # so it must not let a disabled account back in or offer an unthrottled
+    # password-guessing oracle that sidesteps the sign-in lockout.
+    try:
+        _verify_credentials_or_raise(user_record, normalized_user_id, current_password)
+    except AuthFailure:
+        save_users(users)  # persist the failed-attempt / lockout counters
+        raise
+    user_record["failed_attempts"] = 0
+    clear_lockout_state(user_record)
 
     if new_password != confirm_password:
         raise PasswordValidationError("New password and confirmation do not match.")
@@ -304,53 +429,34 @@ def change_authenticated_password(
 def authenticate_credentials(users: Dict[str, Any], user_id: str, password: str) -> Dict[str, Any]:
     normalized_user_id = normalize_user_id(user_id)
     if not normalized_user_id:
+        _log_auth("LOGIN_FAILURE", actor_id=str(user_id), outcome="INVALID_USER_ID",
+                   reason="malformed user id")
         raise AuthFailure("INVALID_USER_ID", "Enter a valid five digit user ID.")
 
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
+        # Logged server-side for real visibility into probing attempts; the
+        # HTTP-facing message stays the same generic wording regardless, so
+        # this never becomes a client-observable user-enumeration channel.
+        _log_auth("LOGIN_FAILURE", actor_id=normalized_user_id, outcome="UNKNOWN_USER",
+                   reason="user id not recognized")
         raise AuthFailure("INVALID_USER_ID", "User ID not recognized.")
 
-    now = datetime.now()
-    lockout_remaining = active_lockout_remaining_seconds(user_record, now)
-    if lockout_remaining > 0:
-        raise AuthFailure(
-            "AUTH_LOCKOUT",
-            (
-                "Sequential failed sign-ons paused for "
-                f"{format_duration(lockout_remaining)} for user ID {normalized_user_id}."
-            ),
-        )
-
+    _verify_credentials_or_raise(user_record, normalized_user_id, password)
     expected_hash = str(user_record.get("password_hash", "")).strip()
-    supplied_hash = hash_password(password)
-
-    if supplied_hash != expected_hash:
-        failed_attempts = int(user_record.get("failed_attempts", 0) or 0) + 1
-        user_record["failed_attempts"] = failed_attempts
-
-        if failed_attempts >= LOCKOUT_START_ATTEMPT:
-            lockout_seconds = lockout_seconds_for_attempt(failed_attempts)
-            apply_timed_lockout(user_record, lockout_seconds, now)
-            raise AuthFailure(
-                "AUTH_LOCKOUT",
-                (
-                    "Sequential failed sign-ons paused for "
-                    f"{format_duration(lockout_seconds)} after failed attempt {failed_attempts}."
-                ),
-            )
-
-        remaining = LOCKOUT_START_ATTEMPT - failed_attempts
-        raise AuthFailure(
-            "AUTH_FAILED",
-            f"Authentication failed. {remaining} attempt(s) remaining.",
-        )
 
     user_record["failed_attempts"] = 0
     clear_lockout_state(user_record)
 
+    if needs_password_rehash(expected_hash):
+        user_record["password_hash"] = hash_password(password)
+
     if password_expired(user_record):
+        _log_auth("LOGIN_SUCCESS", actor_id=normalized_user_id, actor_role=user_record.get("role"),
+                   outcome="PASSWORD_CHANGE_REQUIRED")
         raise PasswordChangeRequired(normalized_user_id)
 
+    _log_auth("LOGIN_SUCCESS", actor_id=normalized_user_id, actor_role=user_record.get("role"), outcome="SUCCEEDED")
     return build_user_context(user_record, normalized_user_id)
 
 
@@ -364,6 +470,10 @@ def change_password(
     user_record = users.get(normalized_user_id)
     if not isinstance(user_record, dict):
         raise PasswordValidationError("User ID not recognized.")
+    if user_record.get("bootstrap_state") == BOOTSTRAP_REQUIRED:
+        # The only way to set the first administrator password is the local
+        # one-time bootstrap (bootstrap_initial_admin), never this path.
+        raise PasswordValidationError("This account has not been initialized.")
 
     validate_new_password(user_record, new_password, confirm_password)
 
@@ -381,6 +491,7 @@ def change_password(
     user_record["failed_attempts"] = 0
     clear_lockout_state(user_record)
 
+    _log_auth("PASSWORD_CHANGE", actor_id=normalized_user_id, actor_role=user_record.get("role"), outcome="SUCCEEDED")
     return build_user_context(user_record, normalized_user_id)
 
 
@@ -405,14 +516,13 @@ def validate_new_password(
     if new_password != confirm_password:
         raise PasswordValidationError("Passwords do not match.")
 
-    new_hash = hash_password(new_password)
     current_hash = str(user_record.get("password_hash", "")).strip()
     history = user_record.get("password_history")
     if not isinstance(history, list):
         history = []
 
     recent_hashes = [current_hash] + [str(value) for value in history[-PASSWORD_HISTORY_LIMIT:]]
-    if new_hash in recent_hashes:
+    if any(verify_password(new_password, recent) for recent in recent_hashes if recent):
         raise PasswordValidationError(
             "New password must differ from the current password and the last two passwords."
         )
@@ -1079,6 +1189,11 @@ def render_console_sign_in_screen() -> None:
     print(_panel_border("-"))
     print(_panel_line("Authentication", "required"))
     print(_panel_line("Initial Admin ID", INITIAL_ADMIN_ID))
+    try:
+        if admin_bootstrap_required(load_users()):
+            print(_panel_line("Admin Setup", "run: python -m scripts.bootstrap_css_admin"))
+    except Exception:
+        pass
     print(_panel_line("Password Age", f"{PASSWORD_MAX_AGE_DAYS} calendar days"))
     print(_panel_line("Password History", f"last {PASSWORD_HISTORY_LIMIT} blocked"))
     print(_panel_line("Failed Attempts", f"timed lockouts from attempt {LOCKOUT_START_ATTEMPT}"))
@@ -1144,19 +1259,117 @@ def normalize_role(value: Any) -> str:
     return str(value or "").strip().upper().replace(" ", "_").replace("-", "_")
 
 
+_PBKDF2_ALGORITHM = "sha256"
+_PBKDF2_ITERATIONS = 600_000
+_PBKDF2_SALT_BYTES = 16
+_PBKDF2_PREFIX = "pbkdf2_sha256"
+
+
 def hash_password(password: str) -> str:
+    """Salted PBKDF2-HMAC-SHA256 password hash (NIST SP 800-63B-aligned work factor)."""
+    salt = secrets.token_bytes(_PBKDF2_SALT_BYTES)
+    return _pbkdf2_encode(password, salt, _PBKDF2_ITERATIONS)
+
+
+def _pbkdf2_encode(password: str, salt: bytes, iterations: int) -> str:
+    derived = hashlib.pbkdf2_hmac(_PBKDF2_ALGORITHM, str(password).encode("utf-8"), salt, iterations)
+    return f"{_PBKDF2_PREFIX}${iterations}${salt.hex()}${derived.hex()}"
+
+
+def _legacy_sha256(password: str) -> str:
     return hashlib.sha256(str(password).encode("utf-8")).hexdigest()
 
 
-def _default_admin_record() -> Dict[str, Any]:
+def verify_password(password: str, stored_hash: str) -> bool:
+    """Verify against a ``pbkdf2_sha256$...`` hash or a legacy unsalted sha256 digest.
+
+    Legacy support exists only so pre-existing user records keep working; every
+    successful verification against a legacy digest is upgraded in place by the
+    caller (see ``needs_password_rehash``).
+    """
+    stored_hash = str(stored_hash or "")
+    if stored_hash.startswith(f"{_PBKDF2_PREFIX}$"):
+        try:
+            _, iterations_raw, salt_hex, digest_hex = stored_hash.split("$", 3)
+            iterations = int(iterations_raw)
+            salt = bytes.fromhex(salt_hex)
+        except (ValueError, TypeError):
+            return False
+        candidate = hashlib.pbkdf2_hmac(
+            _PBKDF2_ALGORITHM, str(password).encode("utf-8"), salt, iterations
+        ).hex()
+        return hmac.compare_digest(candidate, digest_hex)
+    return hmac.compare_digest(_legacy_sha256(password), stored_hash)
+
+
+def needs_password_rehash(stored_hash: str) -> bool:
+    return not str(stored_hash or "").startswith(f"{_PBKDF2_PREFIX}$")
+
+
+def admin_bootstrap_required(users: Dict[str, Any]) -> bool:
+    record = users.get(INITIAL_ADMIN_ID)
+    return isinstance(record, dict) and record.get("bootstrap_state") == BOOTSTRAP_REQUIRED
+
+
+def bootstrap_initial_admin(users: Dict[str, Any], new_password: str, confirm_password: str) -> Dict[str, Any]:
+    """Set the bootstrap administrator's first password -- once, locally.
+
+    Called only by the local ``scripts/bootstrap_css_admin.py`` console
+    command (and the local desktop sign-on); no web, operator-API or mobile
+    route calls it. The operator chooses the password at the console; it is
+    never generated into a file, printed, or logged. Refused once the
+    administrator is initialized, so it cannot be replayed to take over an
+    existing account. The caller persists ``users``.
+    """
+    record = users.get(INITIAL_ADMIN_ID)
+    if not isinstance(record, dict) or record.get("bootstrap_state") != BOOTSTRAP_REQUIRED:
+        _log_auth("ADMIN_BOOTSTRAP", actor_id=INITIAL_ADMIN_ID, outcome="DENIED",
+                   reason="administrator already initialized")
+        raise AuthFailure("BOOTSTRAP_ALREADY_COMPLETE", "The administrator has already been initialized.")
+
+    validate_new_password(record, new_password, confirm_password)
+    record["password_hash"] = hash_password(new_password)
+    record["bootstrap_state"] = BOOTSTRAP_INITIALIZED
+    record["must_change_password"] = False
+    record["last_password_change"] = datetime.now().isoformat(timespec="seconds")
+    record["failed_attempts"] = 0
+    clear_lockout_state(record)
+    _log_auth("ADMIN_BOOTSTRAP", actor_id=INITIAL_ADMIN_ID, actor_role=record.get("role"), outcome="SUCCEEDED")
+    return build_user_context(record, INITIAL_ADMIN_ID)
+
+
+def _migrate_bootstrap_admin(record: Dict[str, Any]) -> bool:
+    """One-time classification of a pre-existing 00000 record. Returns True if changed.
+
+    A record still carrying the published default password (never claimed) is
+    neutralized to BOOTSTRAP_REQUIRED with no usable password; one whose
+    password was already changed is marked initialized and left untouched.
+    Runs the (slow) hash check only once per store, not on every load.
+    """
+    if "bootstrap_state" in record:
+        return False
+    stored = str(record.get("password_hash", "") or "")
+    if not stored or verify_password(INITIAL_ADMIN_PASSWORD, stored):
+        record["password_hash"] = ""
+        record["bootstrap_state"] = BOOTSTRAP_REQUIRED
+        record["must_change_password"] = False
+        record["last_password_change"] = None
+    else:
+        record["bootstrap_state"] = BOOTSTRAP_INITIALIZED
+    return True
+
+
+def _uninitialized_admin_record() -> Dict[str, Any]:
     return {
         "user_id": INITIAL_ADMIN_ID,
         "display_name": INITIAL_DISPLAY_NAME,
         "role": INITIAL_ROLE,
         "unit_code": "CORE",
         "home_branch": "HQ",
-        "password_hash": hash_password(INITIAL_ADMIN_PASSWORD),
-        "must_change_password": True,
+        # No usable password: an empty hash never verifies (verify_password).
+        "password_hash": "",
+        "bootstrap_state": BOOTSTRAP_REQUIRED,
+        "must_change_password": False,
         "last_password_change": None,
         "password_history": [],
         "failed_attempts": 0,

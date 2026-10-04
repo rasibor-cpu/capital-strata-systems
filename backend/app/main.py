@@ -15,14 +15,21 @@ import inspect
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header
 from pydantic import BaseModel, Field
+
+from backend.app.auth.operator_login_router import api_docs_kwargs
 
 # -------------------------------------------------------------------
 # App
 # -------------------------------------------------------------------
 
-app = FastAPI(title="REA Capital Trading Engine (Phase 1 Headless)")
+app = FastAPI(title="REA Capital Trading Engine (Phase 1 Headless)", **api_docs_kwargs())
+
+# Running the engine is a system operation: it needs a bearer operator session
+# whose role holds this PermissionEngine grant (SUPER_USER only today). Bearer
+# only -- no cookie is accepted, so the route carries no CSRF exposure.
+ENGINE_RUN_PERMISSION = "manage_system"
 
 
 # -------------------------------------------------------------------
@@ -183,6 +190,25 @@ def _call_run_headless(run_headless: Any, cfg: Any, req: HeadlessRunRequest) -> 
     }
 
 
+def _token_store_session(token: str):
+    from backend.app.auth.token_store import token_store
+
+    info = token_store.validate(token)
+    return None if info is None else (info.username, tuple(info.roles))
+
+
+def require_engine_operator(authorization: Optional[str] = Header(default=None)) -> Any:
+    """401 without a valid bearer session, 403 (audited) without the grant."""
+    from engine.commercial.commercial_authorization import CommercialAuthorizer, actor_from_bearer
+
+    return actor_from_bearer(
+        authorization,
+        ENGINE_RUN_PERMISSION,
+        session_resolver=_token_store_session,
+        authorizer=CommercialAuthorizer(known_actions=frozenset({ENGINE_RUN_PERMISSION})),
+    )
+
+
 # -------------------------------------------------------------------
 # Routes
 # -------------------------------------------------------------------
@@ -219,7 +245,7 @@ def health() -> Dict[str, Any]:
 
 
 @app.post("/engine/headless/run")
-def engine_headless_run(req: HeadlessRunRequest) -> Dict[str, Any]:
+def engine_headless_run(req: HeadlessRunRequest, _actor: Any = Depends(require_engine_operator)) -> Dict[str, Any]:
     try:
         from backend.app.headless_guarded_entry import run_headless  # type: ignore
     except Exception as e:

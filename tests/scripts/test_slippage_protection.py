@@ -20,11 +20,18 @@ def dashboard():
         "unit_code": "test", 
         "home_branch": "test"
     }
+    original_css_sign_on = sys.modules.get("dashboard.auth.css_sign_on")
     sys.modules["dashboard.auth.css_sign_on"] = mock_auth
     sys.modules["builtins"].input = lambda prompt: "1"
 
     import scripts.css_live_dashboard as db
-    yield db
+    try:
+        yield db
+    finally:
+        if original_css_sign_on is not None:
+            sys.modules["dashboard.auth.css_sign_on"] = original_css_sign_on
+        else:
+            sys.modules.pop("dashboard.auth.css_sign_on", None)
 
 @pytest.fixture(autouse=True)
 def reset_dashboard_state(dashboard, monkeypatch):
