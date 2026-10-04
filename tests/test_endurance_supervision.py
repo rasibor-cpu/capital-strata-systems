@@ -267,6 +267,15 @@ def test_heartbeat_loss_is_classified(kw, expected, critical):
     assert result.critical is critical
 
 
+def test_no_pid_yet_is_startup_grace_only_within_the_grace():
+    # Harness rehearsal 1 (2026-10-04) invalidated itself 18 ms after start:
+    # the monitor's first tick ran before the supervisor had reported a PID.
+    early = _obs(pid=None, pid_alive=False, thread_gap_seconds=None, loop_gap_seconds=None, seconds_since_launch=0.02)
+    assert early.classification == hd.STARTUP_GRACE and early.critical is False
+    late = _obs(pid=None, pid_alive=False, thread_gap_seconds=None, loop_gap_seconds=None, seconds_since_launch=121)
+    assert late.classification == hd.ENGINE_TERMINATED and late.critical is True
+
+
 def test_a_clock_step_never_masks_a_real_runtime_loss():
     assert _obs(pid_alive=False, wall_minus_monotonic_drift_seconds=3600).classification == hd.ENGINE_TERMINATED
     assert _obs(loop_gap_seconds=400, wall_minus_monotonic_drift_seconds=-3600).classification == hd.EVENT_LOOP_BLOCKED

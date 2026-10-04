@@ -188,6 +188,16 @@ def test_invalidation_is_terminal_and_credits_zero_hours(git_repo, monkeypatch):
     assert read_json(mon.status_path)["status"] == em.INVALIDATED
 
 
+def test_first_tick_before_the_supervisor_reports_a_pid_does_not_invalidate(git_repo, monkeypatch):
+    mon = _monitor(git_repo)
+    mon.prepare()
+    mon._child_launch_mono = time.monotonic()  # as launch_supervisor() sets it
+    monkeypatch.setattr(mon, "_http_health", lambda: {"status": None})
+    snap = mon.observe()  # no supervisor_state.json / heartbeat yet
+    assert snap["runtime"]["heartbeat"]["classification"] == "STARTUP_GRACE"
+    assert not [r for r in mon.invalidation_reasons(snap) if r.startswith("CRITICAL_HEARTBEAT_LOSS")]
+
+
 def test_interim_checkpoint_is_recorded_but_is_not_completion(git_repo, monkeypatch):
     mon = _monitor(git_repo, interim_checkpoint_hours=23, target_hours=72)
     mon.prepare()

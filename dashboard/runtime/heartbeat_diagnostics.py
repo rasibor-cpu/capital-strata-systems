@@ -90,6 +90,10 @@ def classify_heartbeat(obs: HeartbeatObservation, *, expected_interval_seconds: 
     # observed. Not a runtime failure, but continuity is unverified.
     if obs.monitor_gap_seconds > LOST_SECONDS:
         return result(MONITOR_GAP, obs.monitor_gap_seconds, "the monitor did not run for longer than the LOST threshold")
+    if obs.pid is None and obs.seconds_since_launch <= STARTUP_GRACE_SECONDS:
+        # The supervisor has not published a child PID yet (it was launched
+        # moments ago). Bounded: past the grace a missing PID is terminal.
+        return result(STARTUP_GRACE, None, "supervisor launched recently and has not reported a runtime PID")
     if not obs.pid_alive:
         return result(ENGINE_TERMINATED, obs.thread_gap_seconds, "runtime PID is not alive")
     if obs.thread_gap_seconds is None:

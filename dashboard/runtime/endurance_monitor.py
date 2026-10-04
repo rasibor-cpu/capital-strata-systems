@@ -250,6 +250,9 @@ class EnduranceMonitor:
         else:
             kwargs["start_new_session"] = True  # survives a monitor crash; a resumed monitor re-attaches
         self.supervisor = subprocess.Popen(cmd, **kwargs)
+        # Startup grace is measured from here until the supervisor reports a
+        # child PID; observe() re-anchors it on every child launch.
+        self._child_launch_mono = time.monotonic()
         self.events.append("SUPERVISOR_LAUNCHED", supervisor_pid=self.supervisor.pid, command=cmd[1:])
         self._set_status(RUNNING, reasons=[], supervisor_pid=self.supervisor.pid)
 
