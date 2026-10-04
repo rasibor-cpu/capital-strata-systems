@@ -65,3 +65,6 @@ jobs:
       - name: Run Customer and Operator Web Smoke
         run: |
           python dashboard/web/web_smoke_test.py
+      - name: Run Mobile Smoke
+        run: |
+          python dashboard/mobile/mobile_smoke_test.py
