@@ -49,6 +49,20 @@ The start itself is refused when:
 
 The engineering session runs in an ephemeral cloud container that is reclaimed when the session goes idle and can be restarted. It is not the governed host (Attempts 1 and 2 ran on the owner's workstation, with its broker configuration and local evidence custody). A 23–72 h run there would almost certainly end in `EVIDENCE_RECORDER_GAP` or `SUPERVISOR_PROCESS_EXITED`, which would burn the Attempt 3 label on an environment failure. A harness **rehearsal** (non-certifying, separate run id) was run there instead; see the PR #101 checkpoint.
 
+## Harness rehearsals in the engineering sandbox (non-certifying)
+
+None of these is Attempt 3; none credits any time. Evidence stayed in the sandbox; the summaries below come from `verify` and the ledgers.
+
+| Run id | Head | Purpose | Result | What it proved |
+|---|---|---|---|---|
+| `OV002-HARNESS-REHEARSAL-1` | `638d563` | 10 min clean run | **INVALIDATED** 18 ms after start: `CRITICAL_HEARTBEAT_LOSS:ENGINE_TERMINATED` | **Real defect found:** the first tick ran before the supervisor had reported a PID. Fixed in `8338e22` (missing PID inside the bounded startup grace is `STARTUP_GRACE`), with regression tests |
+| `OV002-HARNESS-FAULT-INJECTION-1` | `8338e22` | (interrupted) | `STOPPED_BEFORE_TARGET` (`OPERATOR_STOP:SIGTERM`) at 0.086 h; ledgers verified | Controlled-stop path: terminal, never "complete", supervisor and runtime stopped. Exposed a minor evidence gap (child exit `unknown`), fixed in `b285aec` |
+| `OV002-HARNESS-REHEARSAL-2` | `8338e22` | 10 min clean run | **INVALIDATED** at 0.121 h: `RELEASE_TREE_MODIFIED` | Engineering edited a tracked file mid-run (the `b285aec` fix). Detected within one 15 s snapshot. The rule works; the run was spent by operator error |
+| `OV002-HARNESS-FAULT-INJECTION-2` | `b285aec` | SIGKILL the runtime after 4 snapshots | **INVALIDATED** 9 s after the kill: `UNEXPECTED_ENGINE_RESTART`; 0 h credited | Exit `-9`/`SIGKILL`, generation, PID transition 17660 → 17787 and restart recorded; supervisor stopped cleanly |
+| `OV002-HARNESS-REHEARSAL-3` | `b285aec` | 10 min clean run, 15 s snapshots | **`COMPLETE_PENDING_GOVERNANCE_REVIEW`** at 0.171 h | 42 snapshots (1 `STARTUP_GRACE`, 41 `HEALTHY`); 41/41 HTTP 200 after startup, max 4.8 ms; runtime RSS 54.2 → 54.9 MB; 0 restarts; 0 tracebacks; posture safe throughout (`execution_allowed=false`, `live_trading_blocked=true`, `advisory_only=true`, unarmed, R7 active); `INTERIM_CHECKPOINT` fired; all three hash chains and the manifest verify; no processes left behind |
+
+Detection latency, by construction: a stalled beat is classified LOST once 180 s have passed since the monitor last saw its sequence advance, observed at the next snapshot. That is at most 180 s + one snapshot interval (60 s in Attempt 3).
+
 ## Starting Attempt 3 on the governed host
 
 From a fresh console on the host, at the PR #101 head:
