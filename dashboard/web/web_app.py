@@ -37,7 +37,7 @@ from backend.app.auth.session_dependency import (
     revoke_session_from_request,
 )
 from dashboard.auth.css_sign_on import AuthFailure, PasswordChangeRequired, authenticate_credentials, load_users, save_users
-from backend.app.auth.operator_login_router import OPERATOR_SESSION_MINUTES, set_session_cookie
+from backend.app.auth.operator_login_router import OPERATOR_SESSION_MINUTES, api_docs_kwargs, set_session_cookie
 from dashboard.runtime.dashboard_state import DashboardState
 from dashboard.runtime.runtime_smoke_test import build_smoke_payloads
 from dashboard.runtime.ws_bridge import create_ws_router
@@ -61,6 +61,7 @@ def create_app(
     app = FastAPI(
         title="Capital Strata Systems Institutional Web Dashboard",
         version="0.1.0",
+        **api_docs_kwargs(),
     )
     # Materialize routes directly from the constructed routers.
     # Current FastAPI/Starlette cloud-CI versions can leave nested

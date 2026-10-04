@@ -27,6 +27,7 @@ from dashboard.auth.css_sign_on import (
     load_users,
     save_users,
 )
+from backend.app.auth.operator_login_router import api_docs_kwargs as _api_docs_kwargs
 from backend.security.permissions import PermissionEngine
 from dashboard.runtime.broker_credential_check import _load_coinbase_credentials, load_local_env
 from dashboard.runtime.broker_balance_reconciliation import (
@@ -62,7 +63,7 @@ DEFAULT_MOBILE_CONTROLS = {
     "live_order_kill_switch": False,
 }
 
-app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0")
+app = FastAPI(title="Capital Strata Systems Mobile", version="0.1.0", **_api_docs_kwargs())
 
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _PASSWORD_CHANGES: Dict[str, Dict[str, Any]] = {}
@@ -253,7 +254,7 @@ async def margin_screen(request: Request):
 async def margin_api(request: Request):
     session = _get_session(request)
     if not session:
-        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"})
+        return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
     
     try:
         from dashboard.runtime.broker_credential_check import load_local_env

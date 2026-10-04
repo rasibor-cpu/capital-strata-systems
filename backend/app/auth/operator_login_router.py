@@ -67,9 +67,26 @@ def _bearer_token(authorization: Optional[str]) -> str:
     return parts[1]
 
 
+def _is_declared_development() -> bool:
+    return os.environ.get("CSS_ENV", "").strip().lower() in {"development", "dev", "local"}
+
+
 def cookie_secure_default() -> bool:
     # Allow local HTTP development; default to secure cookies everywhere else.
-    return os.environ.get("CSS_ENV", "").strip().lower() not in {"development", "dev", "local"}
+    return not _is_declared_development()
+
+
+def api_docs_kwargs() -> dict:
+    """FastAPI constructor kwargs for the interactive API docs.
+
+    ``/docs``, ``/redoc`` and ``/openapi.json`` publish the full route surface
+    without authentication, so they are served only in an explicitly declared
+    development run (``CSS_ENV=development``) and are off everywhere else.
+    ``app.openapi()`` still works in-process either way.
+    """
+    if _is_declared_development():
+        return {}
+    return {"docs_url": None, "redoc_url": None, "openapi_url": None}
 
 
 def set_session_cookie(response: Response, token: str) -> None:
