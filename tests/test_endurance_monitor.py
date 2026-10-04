@@ -301,3 +301,68 @@ def test_real_runtime_publishes_heartbeat_and_a_killed_child_is_recorded(tmp_pat
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+# ---------------------------------------------------------------------------
+# Windows sharing violations (os.replace / open racing a reader)
+# ---------------------------------------------------------------------------
+def test_atomic_write_rides_out_transient_sharing_violations(tmp_path, monkeypatch):
+    from dashboard.runtime import endurance_evidence as ee
+
+    real_replace, calls = os.replace, {"n": 0}
+
+    def flaky_replace(src, dst):
+        calls["n"] += 1
+        if calls["n"] <= 3:
+            raise PermissionError(13, "sharing violation")
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(ee.os, "replace", flaky_replace)
+    monkeypatch.setattr(ee, "REPLACE_RETRY_SECONDS", 0)
+    ee.atomic_write_json(tmp_path / "s.json", {"ok": 1})
+    assert read_json(tmp_path / "s.json") == {"ok": 1}
+    assert calls["n"] == 4
+
+
+def test_atomic_write_gives_up_after_bounded_retries_and_cleans_up(tmp_path, monkeypatch):
+    from dashboard.runtime import endurance_evidence as ee
+
+    def always_locked(src, dst):
+        raise PermissionError(13, "sharing violation")
+
+    monkeypatch.setattr(ee.os, "replace", always_locked)
+    monkeypatch.setattr(ee, "REPLACE_RETRY_SECONDS", 0)
+    with pytest.raises(PermissionError):
+        ee.atomic_write_json(tmp_path / "s.json", {"ok": 1})
+    assert list(tmp_path.iterdir()) == []  # no orphaned temp file
+
+
+def test_transient_unreadable_supervisor_state_keeps_last_good_state(git_repo, monkeypatch):
+    from dashboard.runtime.endurance_evidence import atomic_write_json
+
+    mon = _monitor(git_repo)
+    mon.prepare()
+    mon._child_launch_mono = time.monotonic()
+    monkeypatch.setattr(mon, "_http_health", lambda: {"status": 200})
+    atomic_write_json(mon.supervisor_state_path, {"child_pid": os.getpid(), "supervisor_pid": os.getpid(),
+                                                  "unexpected_restart_count": 0, "run_status": "ACTIVE"})
+    first = mon.observe()
+    transitions_before = sum(1 for r in mon.events.verify() if r["event_type"] == "PID_TRANSITION")
+
+    def locked(_path):
+        raise PermissionError(13, "sharing violation")
+
+    monkeypatch.setattr(em, "read_json_retry", locked)
+    snap = mon.observe()
+    assert snap["supervisor"]["state_read_ok"] is False
+    assert snap["runtime"]["pid"] == first["runtime"]["pid"] == os.getpid()
+    assert sum(1 for r in mon.events.verify() if r["event_type"] == "PID_TRANSITION") == transitions_before
+    assert "SUPERVISOR_EVIDENCE_UNREADABLE" not in mon.invalidation_reasons(snap)
+
+
+def test_persistently_unreadable_supervisor_state_invalidates(git_repo):
+    mon = _monitor(git_repo)
+    mon.prepare()
+    mon._posture_ok_mono = time.monotonic()
+    snap = _snap(mon, supervisor={"state_unreadable_seconds": 181})
+    assert "SUPERVISOR_EVIDENCE_UNREADABLE" in mon.invalidation_reasons(snap)

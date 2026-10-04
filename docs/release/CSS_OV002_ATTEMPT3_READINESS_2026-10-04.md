@@ -63,6 +63,18 @@ None of these is Attempt 3; none credits any time. Evidence stayed in the sandbo
 
 Detection latency, by construction: a stalled beat is classified LOST once 180 s have passed since the monitor last saw its sequence advance, observed at the next snapshot. That is at most 180 s + one snapshot interval (60 s in Attempt 3).
 
+## Windows file-sharing fix (found after 5188e4d, before any governed start)
+
+On Windows, `os.replace()` onto a file that another process has open raises `PermissionError`, because Python opens files without delete-sharing. At `5188e4d` the supervisor rewrote its state file every second with no handling for that error, while the monitor read it every 60 s. Over 72 h that is roughly 4,300 chances for a collision, and a single collision would crash the supervisor and invalidate the run (`SUPERVISOR_PROCESS_EXITED`). A failed read also returned `{}`, which produced spurious PID transitions and, in a resumed monitor, a false "supervisor exited".
+
+Linux CI and the sandbox rehearsals cannot reproduce this, and a 15-minute host rehearsal (about 60 reads) would probably not hit it either.
+
+The fix:
+- Bounded retry on replace (≤ 1 s) and on read.
+- A failed read keeps the last good supervisor state, flagged `state_read_ok=false`.
+- State that stays unreadable longer than the 180 s LOST threshold invalidates the run (`SUPERVISOR_EVIDENCE_UNREADABLE`) rather than being silently absorbed.
+- Tests: `tests/test_endurance_monitor.py`. Three of them fail on the `5188e4d` code.
+
 ## Starting Attempt 3 on the governed host
 
 From a fresh console on the host, at the PR #101 head:

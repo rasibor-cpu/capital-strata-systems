@@ -17,6 +17,7 @@ import json
 import os
 import platform
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -44,6 +45,27 @@ def sha256_file(path: str | os.PathLike[str]) -> str:
     return digest.hexdigest()
 
 
+# On Windows, os.replace() onto a file that another process currently has
+# open fails with PermissionError (Python opens files without
+# FILE_SHARE_DELETE). The supervisor rewrites its state every second while the
+# monitor reads it, so over a 72 h run such collisions are expected; a reader
+# holds the file for milliseconds, so a short bounded retry absorbs them.
+REPLACE_RETRIES = 50
+REPLACE_RETRY_SECONDS = 0.02
+READ_RETRIES = 10
+
+
+def _replace_with_retry(src: str, dst: Path) -> None:
+    for attempt in range(REPLACE_RETRIES):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if attempt == REPLACE_RETRIES - 1:
+                raise
+            time.sleep(REPLACE_RETRY_SECONDS)
+
+
 def atomic_write_json(path: str | os.PathLike[str], payload: Any) -> None:
     """Write-then-rename so a crash never leaves a half-written state file."""
     target = Path(path)
@@ -54,13 +76,26 @@ def atomic_write_json(path: str | os.PathLike[str], payload: Any) -> None:
             json.dump(payload, handle, sort_keys=True, indent=2, default=str)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, target)
+        _replace_with_retry(tmp, target)
     except BaseException:
         try:
             os.unlink(tmp)
         except OSError:
             pass
         raise
+
+
+def read_json_retry(path: str | os.PathLike[str]) -> Any:
+    """read_json that rides out a concurrent atomic replace (Windows sharing
+    violation, or a reader racing the rename). Raises after the last try."""
+    for attempt in range(READ_RETRIES):
+        try:
+            return read_json(path)
+        except (PermissionError, json.JSONDecodeError):
+            if attempt == READ_RETRIES - 1:
+                raise
+            time.sleep(REPLACE_RETRY_SECONDS)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def read_json(path: str | os.PathLike[str]) -> Any:
@@ -266,6 +301,6 @@ def _windows_process_resources(pid: int, out: dict[str, Any]) -> dict[str, Any]:
 
 __all__ = [
     "GENESIS_HASH", "HashChainedLedger", "LedgerError", "atomic_write_json", "build_manifest",
-    "canonical_json", "pid_alive", "process_resources", "process_state", "read_json",
+    "canonical_json", "pid_alive", "process_resources", "process_state", "read_json", "read_json_retry",
     "sha256_file", "sha256_text", "utc_now", "verify_manifest",
 ]

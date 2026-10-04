@@ -46,6 +46,7 @@ from dashboard.runtime.endurance_evidence import (
     process_resources,
     process_state,
     read_json,
+    read_json_retry,
     sha256_file,
     sha256_text,
     utc_now,
@@ -180,6 +181,8 @@ class EnduranceMonitor:
         self._posture_ok_mono: float | None = None
         self._last_freshness: str | None = None
         self._interim_done = False
+        self._last_sup: dict[str, Any] = {}
+        self._sup_unreadable_since: float | None = None
 
     # -- setup ---------------------------------------------------------------
     def prepare(self) -> dict[str, Any]:
@@ -303,12 +306,23 @@ class EnduranceMonitor:
         step = 0.0 if self._last_tick_wall is None else (now_wall - self._last_tick_wall) - monitor_gap
         self._last_tick_mono, self._last_tick_wall = now_mono, now_wall
         drift = (now_wall - self._wall_start) - (now_mono - self._mono_start)
+        # A transient read failure must never look like "no supervisor" or a
+        # PID change: keep the last good state and record that the read failed.
+        sup_read_ok = True
         try:
-            sup = read_json(self.supervisor_state_path)
+            sup = read_json_retry(self.supervisor_state_path)
+            self._last_sup = sup
+        except FileNotFoundError:
+            sup = {}  # not written yet (startup); covered by the startup grace
         except (OSError, ValueError):
-            sup = {}
+            sup, sup_read_ok = dict(self._last_sup), False
+        if sup_read_ok:
+            self._sup_unreadable_since = None
+        elif self._sup_unreadable_since is None:
+            self._sup_unreadable_since = now_mono
+        unreadable_for = 0.0 if self._sup_unreadable_since is None else now_mono - self._sup_unreadable_since
         try:
-            hb = read_json(self.heartbeat_path)
+            hb = read_json_retry(self.heartbeat_path)
         except (OSError, ValueError):
             hb = {}
         child_pid = sup.get("child_pid")
@@ -354,6 +368,8 @@ class EnduranceMonitor:
                         "tracked_tree_clean": identity["tracked_tree_clean"]},
             "config_fingerprint": fingerprint,
             "supervisor": {
+                "state_read_ok": sup_read_ok,
+                "state_unreadable_seconds": round(unreadable_for, 3),
                 "pid": supervisor_pid, "alive": pid_alive(supervisor_pid), "status": sup.get("status"),
                 "run_status": sup.get("run_status"), "terminal_reason": sup.get("terminal_reason"),
                 "started_at_utc": sup.get("started_at_utc"), "restart_count": sup.get("restart_count"),
@@ -396,6 +412,8 @@ class EnduranceMonitor:
             reasons.append("UNEXPLAINED_SUPERVISOR_STOP")
         if not sup.get("alive") and not self._stop_requested:
             reasons.append("SUPERVISOR_PROCESS_EXITED")
+        if (sup.get("state_unreadable_seconds") or 0) > LOST_SECONDS:
+            reasons.append("SUPERVISOR_EVIDENCE_UNREADABLE")
         hb = snap["runtime"]["heartbeat"]
         if hb["classification"] in CRITICAL_RUNTIME_LOSS:
             reasons.append(f"CRITICAL_HEARTBEAT_LOSS:{hb['classification']}")
