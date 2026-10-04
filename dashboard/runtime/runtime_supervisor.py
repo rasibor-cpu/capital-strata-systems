@@ -293,12 +293,15 @@ class RuntimeSupervisor:
 
     def shutdown(self) -> None:
         exit_code = None
-        if self.child is not None and self.child.poll() is None:
-            self.child.terminate()
-            try:
-                self.child.wait(timeout=10)
-            except subprocess.TimeoutExpired:
-                self.child.kill()
+        if self.child is not None:
+            if self.child.poll() is None:
+                self.child.terminate()
+                try:
+                    self.child.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    self.child.kill()
+                    self.child.wait(timeout=10)
+            # Recorded even when the child had already exited on its own.
             exit_code = self.child.poll()
         log_hash = self._close_child_log()
         self.state["status"] = "STOPPED"

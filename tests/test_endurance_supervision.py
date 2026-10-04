@@ -183,6 +183,16 @@ def test_controlled_shutdown_is_terminal_and_records_the_signal(tmp_path):
         _supervisor(tmp_path)
 
 
+def test_shutdown_records_the_exit_of_a_child_that_already_exited(tmp_path):
+    sup = _supervisor(tmp_path)
+    sup.launch_child()
+    sup.child.exit_code = -2  # e.g. the runtime received SIGINT first
+    sup.request_shutdown(signal.SIGTERM)
+    sup.shutdown()
+    stopped = _ledger(tmp_path)[-1]
+    assert stopped["child_exit"]["signal"] == "SIGINT"
+
+
 def test_legacy_config_without_run_id_keeps_existing_behaviour(tmp_path):
     sup = _supervisor(tmp_path, run_id=None, evidence=False, window=300)
     sup.launch_child()
