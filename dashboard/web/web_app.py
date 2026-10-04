@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import html
 import json
+import os
 import urllib.parse
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
@@ -54,6 +58,69 @@ def demo_dashboard_state_provider() -> DashboardState:
     return DashboardHydrationCoordinator().hydrate(**build_smoke_payloads())
 
 
+def endurance_safety_posture(provider: DashboardStateProvider) -> dict[str, Any]:
+    """Read-only safety posture as the running server sees it, for the
+    endurance heartbeat. Values come from the same builders the API serves."""
+    from dashboard.runtime.api_bridge import get_mission_control_payload
+    from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
+
+    mission = get_mission_control_payload(provider)
+    state = provider()
+    controls_path = Path(__file__).resolve().parents[2] / "artifacts" / "css_mobile_controls.json"
+    try:
+        controls = json.loads(controls_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        controls = {}
+    kill = evaluate_live_order_kill_switch(controls if isinstance(controls, dict) else {})
+    return {
+        "execution_allowed": mission.get("execution_allowed"),
+        "live_trading_blocked": mission.get("live_trading_blocked"),
+        "advisory_only": mission.get("advisory_only"),
+        "broker_execution_armed": mission.get("broker_execution_armed"),
+        "broker_name": mission.get("broker_name"),
+        "broker_connected": mission.get("broker_connected"),
+        "account_mode": mission.get("account_mode"),
+        "data_freshness": mission.get("data_freshness"),
+        "r7_unified_trade_gate_active": state.governance_state.unified_trade_gate_active,
+        "resolved_mode": state.resolved_mode(),
+        "engine_mode": state.engine_mode,
+        "live_order_kill_switch_blocked": kill.blocked,
+        "live_order_kill_switch_reason": kill.reason,
+    }
+
+
+def _endurance_heartbeat_lifespan(provider: DashboardStateProvider):
+    """Publish the endurance heartbeat only when a supervisor asks for it
+    (``CSS_RUNTIME_HEARTBEAT_FILE``). Ordinary runs are unchanged."""
+
+    @contextlib.asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        path = os.environ.get("CSS_RUNTIME_HEARTBEAT_FILE")
+        probe = None
+        if path:
+            from dashboard.runtime.runtime_heartbeat import (
+                event_loop_probe,
+                register_stack_dump,
+                start_heartbeat_publisher,
+                stop_heartbeat_publisher,
+            )
+
+            stack_file = os.environ.get("CSS_RUNTIME_STACK_DUMP_FILE")
+            if stack_file:
+                register_stack_dump(stack_file)
+            interval = float(os.environ.get("CSS_RUNTIME_HEARTBEAT_SECONDS", "5"))
+            start_heartbeat_publisher(path, interval_seconds=interval, posture_fn=lambda: endurance_safety_posture(provider))
+            probe = asyncio.create_task(event_loop_probe(interval))
+        try:
+            yield
+        finally:
+            if probe is not None:
+                probe.cancel()
+                stop_heartbeat_publisher()
+
+    return lifespan
+
+
 def create_app(
     state_provider: DashboardStateProvider | None = None,
 ) -> FastAPI:
@@ -61,6 +128,7 @@ def create_app(
     app = FastAPI(
         title="Capital Strata Systems Institutional Web Dashboard",
         version="0.1.0",
+        lifespan=_endurance_heartbeat_lifespan(provider),
         **api_docs_kwargs(),
     )
     # Materialize routes directly from the constructed routers.
