@@ -1,0 +1,987 @@
+{
+ "standard": "PAPS-001",
+ "work_item": "rasibor-cpu/capital-strata-systems#102",
+ "branch": "claude/css-trader-passport-102",
+ "start_sha": "df566eee3fa2aeee65925ebc26ac193c2221d27e",
+ "created_on": "2026-10-05",
+ "phase": 2,
+ "phase1_end_sha": "89056d7",
+ "questionnaire_version": "TP-Q-2.0.0",
+ "rules_version": "TP-R-2.0.0",
+ "origin_policy_version": "TO-2.0.0",
+ "commercial_policy_version": "CA-1.0.0-draft (no fee computed)",
+ "search_before_create": [
+  "No existing onboarding, questionnaire or trader-profile code found (grep across repo, excluding archives)",
+  "Existing trade attribution (scripts/css_trade_attribution.py) is P&L by asset class only, no origin: extended by a new module, not replaced",
+  "Existing legal acceptance (backend/app/compliance/legal_acceptance*) reused as the authority; onboarding acknowledgements explicitly are not legal acceptance",
+  "Existing auth (backend/app/auth token_store) reused for sessions",
+  "No existing CSS illustration set found for onboarding; 8 new SVGs created in phase 1, 1 (two_paths) in phase 2",
+  "Phase 2: phase-1 screenshots searched and reused as the 'before' set (moved, not regenerated); no commercial fee/hurdle/loss-recovery implementation found in the repo (engine/risk/profit_tier_engine.py 20% is a take-profit tier), so commercial.py adds gated machinery only",
+  "Phase 2: governed components (R7, R14F, AntiBleedGuard, journals, persistence, trade warehouse) read for the integration design; none modified"
+ ],
+ "not_preserved_in_git": [
+  {
+   "item": "full-resolution PNG screenshots",
+   "reason": "size; preserved as full-resolution WebP (quality 80) in evidence/phase1_before and evidence/phase2_after"
+  },
+  {
+   "item": "test virtualenv, Playwright browser, axe-core 4.14.0 package",
+   "reason": "third-party tooling, reinstallable; versions recorded in evidence"
+  }
+ ],
+ "generated_not_preserved": [],
+ "files": [
+  {
+   "path": "backend/app/onboarding/__init__.py",
+   "bytes": 199,
+   "sha256": "92cd1309c4baa9e27de9fe4e3bd6e488b2fd05bd843371b3e14914c4dd6a108f",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/engine.py",
+   "bytes": 12817,
+   "sha256": "c57c74f633a8d8e58986e3697bd5630d50924d6fb41e3f39dc4df2dbd97299fb",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/router.py",
+   "bytes": 4240,
+   "sha256": "3e761ac1feb0b2b68f2e161595b0f0fb00eed00b71537c126b9d8ccee3cc3b41",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/rules.py",
+   "bytes": 25296,
+   "sha256": "220213f03f265e6ede941be66bfb3d0ef4a17eca530c2b2b45d0cac678e177e1",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/schema.py",
+   "bytes": 41056,
+   "sha256": "f9ad427b659ec4c0557f115ceedea51e72de44707080dfbd03c3640d534201b2",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/service.py",
+   "bytes": 6842,
+   "sha256": "7e125bf6c11b728504b2b399aa7d4d2ff0e8f90ef48e458fce309669cca352b5",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/standalone.py",
+   "bytes": 971,
+   "sha256": "e8a746d8a78f7868f19b9fd562819243d2e3e0be580c623ea334f4f897986e16",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/onboarding/store.py",
+   "bytes": 2507,
+   "sha256": "dc0970811f43dde994b074ab02a2b0e85b3b909e825c4a601dd6d3a7d782a719",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/trade_origin/__init__.py",
+   "bytes": 161,
+   "sha256": "ebd532d6e7b8e9591834802111b23c455f1c990762a0727343946bb0f045b90a",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/trade_origin/commercial.py",
+   "bytes": 6789,
+   "sha256": "c4a5384a74b6364ba098bf83104f3b1bd9af85e9bfd857951762c4cc6e30e949",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/trade_origin/demo.py",
+   "bytes": 3027,
+   "sha256": "ccf07c2438ec90c65dc3cb23265c4f528df9fc6fcb8a5d40baec0e0806eb2bbe",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/trade_origin/lifecycle.py",
+   "bytes": 6559,
+   "sha256": "78590408c8d9ad114d9ce88d2dea9edff288074310b3d2c00a51ef81cd1e8e7e",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/trade_origin/model.py",
+   "bytes": 26567,
+   "sha256": "19185afe87a7eb1e134372b716a09d4c59d423e5ba28ea7f2e4fa8c96c99497c",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "backend/app/trade_origin/performance.py",
+   "bytes": 5806,
+   "sha256": "d5405acf9058a8b84f198c40767d6c3766cea6d258202b99fa4c93def3e515e8",
+   "category": "source",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/ATTRIBUTION_SPEC.md",
+   "bytes": 7552,
+   "sha256": "31559ea2f98e48c68e45f955b7591a89728a9b2f4e8dfd4df159c52af41cf5b0",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/COMMERCIAL_ATTRIBUTION.md",
+   "bytes": 3678,
+   "sha256": "c96c690ac1bfb3e979452b84e15ac2b8dd0311527f2f480abf46043835718453",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/POST_OV002_INTEGRATION.md",
+   "bytes": 8042,
+   "sha256": "fff17b14e55e923a297b12c2dc78191fd45b48adb887c0b9454d99eb2b7073aa",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/QUESTIONNAIRE_AUDIT.md",
+   "bytes": 5313,
+   "sha256": "2b02390460d8cdb6315bdb32f3dc3041d63037f3787b9cb98001e487f66a33cf",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/QUESTION_SCHEMA.md",
+   "bytes": 23735,
+   "sha256": "e4ee35de31d88cabe218d2f59e37a323e3193d35366ab1f0ba2527729ce3618e",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/QUESTION_SCHEMA_TP-Q-1.0.0.json",
+   "bytes": 39127,
+   "sha256": "4fe832511793b819d74c8d72594539e72d5bc41fe823e18cd19ec40459c6ebcd",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/QUESTION_SCHEMA_TP-Q-2.0.0.json",
+   "bytes": 48782,
+   "sha256": "ad39463a5a29417075609653c5d629990497e4dd550c15679a246312c1dc91d2",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/README.md",
+   "bytes": 7865,
+   "sha256": "7c3560c14a49237db432b36c66ab49f35cb8ecf3d112cb042945e00223a841a5",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/RECOMMENDATION_RULES.md",
+   "bytes": 5739,
+   "sha256": "37f3685f1bbeda008e43d3c1a5ee6b03acdfd3e33287b3999024f798dde01dbf",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/UX_SPEC.md",
+   "bytes": 6692,
+   "sha256": "65cba2a0bccb84201efb20cf912d2b01b2078916c43094db25a110c19bc40bdd",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/build_artifact_register.py",
+   "bytes": 4340,
+   "sha256": "f9a8df505fe9a1c99ed890900972a5c9218453718c23ec2970c8851f01acf27e",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/build_schema_docs.py",
+   "bytes": 2400,
+   "sha256": "14eea6b23ef29f90d5128cdce199dc472ab7ea874034ec7d67d05b406bb407d4",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/REGRESSION_COMPARISON_2026-10-05.md",
+   "bytes": 3847,
+   "sha256": "a753db29cc5ea19074bb169cb5b92b648f92c2f19eeaf14e0a646e2292d96c92",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/REGRESSION_COMPARISON_PHASE2_2026-10-05.md",
+   "bytes": 5013,
+   "sha256": "abb5a6dc2ec986d74def223e82da7bc601565a16d0e4c691cb4f720936de8f75",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/desktop_performance.webp",
+   "bytes": 221868,
+   "sha256": "4a2022b7a78f3bae8c7fca1c9e9774cfb3cae8f73c11a8896729f5490031c22f",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/desktop_welcome.webp",
+   "bytes": 170748,
+   "sha256": "a281a44b09b32954dcfaafe90f0d175f719f927b399ea8f9050328bd2b751087",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/landscape_performance.webp",
+   "bytes": 207432,
+   "sha256": "122b1ed3034474ac16762b325d7a41dcc6ef2598f9493ca8263dae973c4fe2c9",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/landscape_welcome.webp",
+   "bytes": 142178,
+   "sha256": "b1ba86eea21571e5d5321a95c93f0057d14e766d231265942dc81729b6ab8e6a",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_00_welcome.webp",
+   "bytes": 133740,
+   "sha256": "bb0b3d56cfac2b29ec281daca7d16ec32704aefcc9f92d8791b674aa30b1cc4f",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_01_identity.webp",
+   "bytes": 131760,
+   "sha256": "aaf8d751dae054149595c86801ad41a58bb8aae49afb89bccf88bf0f80d97361",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_02_objective.webp",
+   "bytes": 102434,
+   "sha256": "5a18ef08c6b585f417c3e7cc9af137e86f82d217099bad2cb75b191c13fc18d0",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_03_experience.webp",
+   "bytes": 120614,
+   "sha256": "0b5b58d9a36efdc6a4bbbb282ffe935bd20dda5d533f66f7ddc9c38a3bccb1e7",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_04_knowledge_intro.webp",
+   "bytes": 65990,
+   "sha256": "855be6ec8e8c507b18c380ebca77e5ae7bbc14bd88509fb0b56530aad03a46e7",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_05_knowledge_core.webp",
+   "bytes": 135268,
+   "sha256": "39c5deba7a053ebe95279399d4574a253103f906ca8773833d3a6c67098c80ab",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_06_knowledge_risk.webp",
+   "bytes": 144358,
+   "sha256": "9a8f9215cddd8952912792c7d1d885660d45f7186d076ed62b0c871de369c70e",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_07_strengths.webp",
+   "bytes": 67118,
+   "sha256": "d8be4ccafb8a612a9438619af0b03fc01f7060facc6342860b4605311f819aa9",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_08_behaviour.webp",
+   "bytes": 172632,
+   "sha256": "4a38dd23dd865fd83f5afba11dcca38e689de491dc68fc9463301e604060a4bd",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_09_risk_intro.webp",
+   "bytes": 70516,
+   "sha256": "902d5bbcb10c57f08a9a04f223cca85602ecfbed3e8b11290e458c940e7e44e2",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_10_risk_capacity.webp",
+   "bytes": 156090,
+   "sha256": "56f51c44008514ce8a9f94d8941bcadd4885424d0d6212c0de8293441bb0d604",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_11_risk_tolerance.webp",
+   "bytes": 147714,
+   "sha256": "bd1b817e7c4e1676b7c6a95dee5690a71a936b5ed5a1dfa15182b94b92adbdb1",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_12_barriers.webp",
+   "bytes": 71164,
+   "sha256": "6e926adc112f7c616cb8aa26dabc12ad44e960c20fda071a1abdcc8183750995",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_13_markets.webp",
+   "bytes": 67056,
+   "sha256": "c38c1358739967109c52e2f04ab4fdaa09c484663a1c431de6abd9e1b1fc39de",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_14_assistance.webp",
+   "bytes": 101798,
+   "sha256": "8332cc35bd28a6d87d539df4a45d4ded9aaad3da07d2f2c9cfbf6d08e48176b4",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_15_features.webp",
+   "bytes": 74934,
+   "sha256": "d057491ee7cbaf3e15e876b8d3c52f109dcac4d533e7df443f7d4e16f1edc0fb",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_16_time.webp",
+   "bytes": 83726,
+   "sha256": "1829407e4ade699feec961ab330961598fbbdb30bdf564356b547e46a2a4c917",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_17_expectations_intro.webp",
+   "bytes": 84910,
+   "sha256": "bab029e008f62e73195cac5524caf0f1395d5c95fe386c97f0bf8d021231d5d3",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_18_expectations_role.webp",
+   "bytes": 123452,
+   "sha256": "9d3bf82a4f28d23733c258456137e606d09cf3ad4ee4202d7ac3d22ec2730fde",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_19_expectations_outcomes.webp",
+   "bytes": 137378,
+   "sha256": "4f583a2eb26b0b3c1cdea576937722f986b1a6f93112e7c58574a50b66594ee7",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_20_expectations_beliefs.webp",
+   "bytes": 72402,
+   "sha256": "c7a6806d505b21fab3753f74efc86c633c01bdf4e05dce8752953ba8a6429411",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_21_acknowledgements.webp",
+   "bytes": 191220,
+   "sha256": "be9c1fc7ba9cc643ca27b91b24b527b53079e994f50fddef8b7ccac08f3ce132",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_22_passport.webp",
+   "bytes": 66700,
+   "sha256": "d0dd10dcb71d302e1005bceff2f2c626fbe3ec7b101fd34f172b50efc2cc1b89",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_conditional_auto_check.webp",
+   "bytes": 80224,
+   "sha256": "aa5027e753e10ae381ba7a44fe9e7eb23990c068f2d9e0404ec64754046faf7b",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_conditional_knowledge_leverage.webp",
+   "bytes": 105042,
+   "sha256": "31a4496cac862dd5efb7f4d87d7d4144df67a01a90ab4be770fa54007cd1fbe5",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_error_state.webp",
+   "bytes": 154308,
+   "sha256": "f9db01d02284a62efa437f16660c1f18a109a5b7764fb1280a07d1598c69fef2",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_passport.webp",
+   "bytes": 324486,
+   "sha256": "f6afc2ea51cd1b2f25d316268c221f95e9c2413ecfa123fe26dc950440017ec3",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_performance.webp",
+   "bytes": 184678,
+   "sha256": "378ceacbb79f385533fde31c8f58bd5ee1e0836db1142f42cc396b1eaa5423c8",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/s24_text_200pct.webp",
+   "bytes": 269644,
+   "sha256": "7821e314acc49b0e361ce0cf2928be72a5dcb1b8729c121ff73c335de9593281",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/tablet_performance.webp",
+   "bytes": 208850,
+   "sha256": "3ced2bf1821552dcaff2eb03f258a327029a87a3892074d000c84714c15588d4",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase1_before/tablet_welcome.webp",
+   "bytes": 162002,
+   "sha256": "76c32ed84c6bcf7c3e42687d611ea644cf76ede31ff6edc32a381bfc18a2a163",
+   "category": "screenshot evidence (before)",
+   "provenance": "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/desktop_performance.webp",
+   "bytes": 256602,
+   "sha256": "eb941bb799af71712e7edd5f362f0c4ee4289b7b8647cbaf5a1749fff6c2b935",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/desktop_welcome.webp",
+   "bytes": 167994,
+   "sha256": "60e4e5bd90926de9b5edf565b136a91fb5b1426245d8d33233566acda78e1765",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/landscape_performance.webp",
+   "bytes": 239802,
+   "sha256": "9520dabe735534981e5dd1f654f5d185bb31a51a6ee2fcd1c323aba9b2ffc626",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/landscape_welcome.webp",
+   "bytes": 150728,
+   "sha256": "61be6cda5848ae5d338dc96d0566bb406ebf2d854136dfb7aff4248b76ab4640",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_00_welcome.webp",
+   "bytes": 149380,
+   "sha256": "c5c03eddbdbb5fffaa7b63f1fb5daa55b91746928adeeb002dd7265355beab78",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_01_identity.webp",
+   "bytes": 147896,
+   "sha256": "722de41f8dfc8b23c16157da505aca533724900da15dd8e3b425edb91d336926",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_02_objective.webp",
+   "bytes": 134270,
+   "sha256": "8307afc16abe43101fff6a44b9351b484c1f22b49c1a41b2633715d20a89d1c6",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_03_experience.webp",
+   "bytes": 159618,
+   "sha256": "9110631cf9de62104b0cad08594e0ecc21e7a78afe0588fb407443dd6ae38093",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_04_knowledge_intro.webp",
+   "bytes": 68532,
+   "sha256": "ada43319295b8ade0906cd76067b4f6b3baf44f26f689cd4487dc8d37e7f75e5",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_05_knowledge_core.webp",
+   "bytes": 152122,
+   "sha256": "a1904cdb72d75e6b75694844515883e74537c0782b126204da136de1bdb21028",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_06_knowledge_risk.webp",
+   "bytes": 158400,
+   "sha256": "f02ba28b168c3b8935eff8c1eff4a8115cb94ced795c9694df753b540bf55d80",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_07_thinking.webp",
+   "bytes": 104460,
+   "sha256": "d6d4a80e0d08b21c77eff71f40076457db959bfb558bf3835302d825a45797a9",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_08_behaviour.webp",
+   "bytes": 201956,
+   "sha256": "fc40967e30c57dfe08185c25f66aba2bdbdce02f473f2b88fb16d39d31f0473f",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_09_risk_intro.webp",
+   "bytes": 71578,
+   "sha256": "b788d43f17ca7fbede42890dfe1d143f1c8c5854d1500c52390eefaee3c2ff48",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_10_risk_capacity.webp",
+   "bytes": 164640,
+   "sha256": "42ccc7d92260219e2a6b48e0f2c61febba1bb41f61f62a8c21ae9895bf3bc1e1",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_11_risk_tolerance.webp",
+   "bytes": 165842,
+   "sha256": "0160c46fbb63523e6eef37fbca84b66a4c8f80ef74e0e62ac0b4360779877932",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_12_barriers.webp",
+   "bytes": 78254,
+   "sha256": "fdec0b5ed8529a7b30ff06a90852c4606f112d7c66a07c3ed533c61a7b563a37",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_13_markets.webp",
+   "bytes": 76642,
+   "sha256": "46b7fb83cc525297632dcea70e27ee5f5910b4081059f6b9111d9cb50f92e7d1",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_14_assistance.webp",
+   "bytes": 107144,
+   "sha256": "96106b34fbf7dd089e4a999bf11558fade327ae97ec9cc5cdce3f55021f97b99",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_15_support.webp",
+   "bytes": 134558,
+   "sha256": "cdc9f1c21ef4e87f44d06b684bad0907d6ae6b5db218767c55d690c949118fca",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_16_time.webp",
+   "bytes": 92584,
+   "sha256": "060b1e06bf0346ba59432ed14d2377b0d0281a06b3f0680336f995362291b207",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_17_expectations_intro.webp",
+   "bytes": 90530,
+   "sha256": "c588a4e1c0ce9a1420211f23803df2adbf87b612f10c9617bf7d019aa4103106",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_18_expectations.webp",
+   "bytes": 146194,
+   "sha256": "862a3d19bb4612ace42eb546db036fc1faf3e00d2c0022e7d3f7a40ec355606f",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_19_reality_check.webp",
+   "bytes": 136430,
+   "sha256": "cb0981e6c75570757daafaabdf35ced6e947e021bf8878a4b5b3fafd332dfe0e",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_20_attribution_paths.webp",
+   "bytes": 133268,
+   "sha256": "e4722eceb6cdf4b0ee3b734101770e3bff58145eecb31dcd41372809554f3158",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_21_acknowledgements.webp",
+   "bytes": 145178,
+   "sha256": "7379aaa89be06a71f5da74e76cb53542d95aa6641a3ec1a96608831caf28c739",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_22_passport.webp",
+   "bytes": 72470,
+   "sha256": "afa4aec9a68a09723fd4fca9cfe639d743d8c376f6ca59916bd33cc0de3cd852",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_attribution_paths.webp",
+   "bytes": 133268,
+   "sha256": "e4722eceb6cdf4b0ee3b734101770e3bff58145eecb31dcd41372809554f3158",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_conditional_auto_check.webp",
+   "bytes": 84300,
+   "sha256": "01dd1fa074cfac240b3b94479f82cfeed96e4b721e74b2a5694f495fde3a938a",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_conditional_knowledge_leverage.webp",
+   "bytes": 111928,
+   "sha256": "c24cbc7d432f5a940b0874a5b7c3df20c20ec9b3cca86197973c3b531e2eb962",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_error_state.webp",
+   "bytes": 158978,
+   "sha256": "53006ef800671aeaf964f18fdf12650ea267387c21b9d1c0d9934762d8a842b5",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_error_summary.webp",
+   "bytes": 210700,
+   "sha256": "17874778208cc25dbc4cf655cc0ad196bfe22097bcf972c340f84f4d01fe041d",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_passport.webp",
+   "bytes": 483326,
+   "sha256": "85d00650de2a2453be46f6ecdd73148550cb8ec3ebefb8459df33a1c997b61fc",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_performance.webp",
+   "bytes": 215240,
+   "sha256": "053f8028edd4a7ac4f8bdebf476cd3d2cf38847467a974051bdc4ddd7f8b2896",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_resume_banner.webp",
+   "bytes": 161580,
+   "sha256": "e837e094e6427f11e1f29a5af1c73f5ebc0caaf8e457cc12628f53210636c774",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/s24_text_200pct.webp",
+   "bytes": 283688,
+   "sha256": "fb24899d51cfac8427926ee2ad743303f678c561f10268e5258c21d2a45b4079",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/tablet_performance.webp",
+   "bytes": 240574,
+   "sha256": "2e98e7c73efd9915f3725a0947b76449c4d41e41baa7122e4bf365748d2e7782",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/phase2_after/tablet_welcome.webp",
+   "bytes": 167124,
+   "sha256": "a74b789a779601ac8345d4d95cc0da86f3fb6f642b9e6f6f517382c76f914f76",
+   "category": "screenshot evidence (after)",
+   "provenance": "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/pytest_trader_passport_2026-10-05.txt",
+   "bytes": 9004,
+   "sha256": "bb2c4d90ccb998f2337d8728e564871471c822d0b6b85a224603fb742cef6923",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "docs/product/trader_passport/evidence/pytest_trader_passport_phase2_2026-10-05.txt",
+   "bytes": 14309,
+   "sha256": "5775aed89c0c93972c9141903e3f8f8e56bf1871b63b7816972b58c6552723f9",
+   "category": "documentation / evidence",
+   "provenance": "Written or generated for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/capacity_vs_tolerance.svg",
+   "bytes": 1102,
+   "sha256": "6b8043bb368715ef377b19cb0367a5499c57e5d04db5dc4c30ba831e47b18259",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/compass.svg",
+   "bytes": 1259,
+   "sha256": "983d400160c6e266c26d84bab26cdfa601d851dcf9184749d7c8670a4b5c48cc",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/css-mark.svg",
+   "bytes": 449,
+   "sha256": "dcc06139c5358da16f7936df0d5fe80dcd15ed3a09e126294b72c3657c5fe5b0",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/modes.svg",
+   "bytes": 1450,
+   "sha256": "f82f6783460463540b767377dc298437a57c7f68c4ff372825b9a043590d03f9",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/passport.svg",
+   "bytes": 821,
+   "sha256": "9e72c939d7fa8eb38e83519098bc2f9fa043255f707bcb82138718ef77d67f23",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/range.svg",
+   "bytes": 1093,
+   "sha256": "b32e1787698b2889978c9b7f4cc693348665360c725bcfc7b0865a449aa2a319",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/toolkit.svg",
+   "bytes": 1696,
+   "sha256": "00de560249cac5291ab94a297d6ed5bed79e2ea525b85eb6c356c1b965211bda",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/two_ledgers.svg",
+   "bytes": 1257,
+   "sha256": "a668464478ce2cc063edd2f2d9b025cb08683f7671b23c6e1de57479bb02695a",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/assets/two_paths.svg",
+   "bytes": 3023,
+   "sha256": "07a497fcbb94676f203c840d3b86ebfae2cbc91ad33012e09b2e9ee22b3837ff",
+   "category": "graphic",
+   "provenance": "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/index.html",
+   "bytes": 1629,
+   "sha256": "ed9b9404dfb941788965c2877c6c315c78e3f4771196cee69a66b1538796d3ec",
+   "category": "ui source",
+   "provenance": "Original CSS UI code for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/passport.css",
+   "bytes": 17699,
+   "sha256": "3fc9d8dbfa0355ed46aa46a52a34f39456a53c1255fcd71abb44a10fe50428cd",
+   "category": "ui source",
+   "provenance": "Original CSS UI code for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "frontend/trader_passport/passport.js",
+   "bytes": 34463,
+   "sha256": "b48b9a1c39028fd44de3133c1a9be4d8d5ff5458805beb8d88e8aef1c8968cac",
+   "category": "ui source",
+   "provenance": "Original CSS UI code for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "tests/onboarding/__init__.py",
+   "bytes": 0,
+   "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+   "category": "test",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "tests/onboarding/test_trader_passport.py",
+   "bytes": 27480,
+   "sha256": "c29b592b3a5e45603ca26327f5c918b684042cff278bb14dcc0dafc8979b9f24",
+   "category": "test",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "tests/onboarding/test_trader_passport_ui.py",
+   "bytes": 15523,
+   "sha256": "9a3e93edb083ae234e87be6ae80dc5316f43abb98615b84674bac519f202c705",
+   "category": "test",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  },
+  {
+   "path": "tests/trade_origin/test_trade_origin.py",
+   "bytes": 23257,
+   "sha256": "7ac487f57b710e122ebbbb54f8b7d019e7e3103202e1dc4e75e505848b42e188",
+   "category": "test",
+   "provenance": "Written for Issue #102",
+   "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
+  }
+ ]
+}

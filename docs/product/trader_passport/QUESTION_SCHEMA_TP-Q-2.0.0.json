@@ -1,0 +1,1906 @@
+{
+ "version": "TP-Q-2.0.0",
+ "stages": [
+  {
+   "id": "welcome",
+   "kind": "interstitial",
+   "group": "Welcome",
+   "illustration": "compass",
+   "title": "Welcome to your CSS Trader Passport",
+   "body": [
+    "CSS is governance-first decision support. It studies markets, explains what it sees and, when you want it to, proposes trades as CSS Trade Cards."
+   ],
+   "points": [
+    {
+     "icon": "discover",
+     "title": "Discover",
+     "text": "CSS surfaces opportunities and analysis. Every decision is yours."
+    },
+    {
+     "icon": "confirm",
+     "title": "Confirm",
+     "text": "CSS proposes governed Trade Cards. Nothing happens unless you confirm it."
+    },
+    {
+     "icon": "auto",
+     "title": "Auto (separate approval)",
+     "text": "Governed automated execution, only where it is permitted and separately authorised. This questionnaire never switches it on."
+    }
+   ],
+   "callout": "Trading involves risk, including losing money you put in. CSS does not guarantee profit, and past results do not predict future results.",
+   "questions": [
+    {
+     "id": "ack_risk_intro",
+     "type": "consent",
+     "required": true,
+     "must_be_true": true,
+     "dimension": "acknowledgement",
+     "purpose": "Record that the user saw the risk statement before starting",
+     "prompt": "I understand that trading involves risk and that CSS does not guarantee profit."
+    }
+   ]
+  },
+  {
+   "id": "identity",
+   "kind": "question",
+   "group": "About you",
+   "title": "About you",
+   "questions": [
+    {
+     "id": "display_name",
+     "type": "text",
+     "required": true,
+     "min_len": 2,
+     "max_len": 40,
+     "dimension": "profile",
+     "purpose": "So CSS can greet you and personalise your Passport. A first name or nickname is fine.",
+     "prompt": "Preferred name",
+     "help": "Shown in your Passport and on screen. A nickname is fine."
+    },
+    {
+     "id": "full_name",
+     "type": "text",
+     "required": false,
+     "min_len": 0,
+     "max_len": 120,
+     "sensitive": true,
+     "dimension": "profile",
+     "purpose": "Optional; only needed later for brokerage-account checks",
+     "prompt": "Full legal name (optional)",
+     "help": "Only needed later if you connect a brokerage account, which asks for it under its own checks."
+    },
+    {
+     "id": "email",
+     "type": "email",
+     "required": true,
+     "sensitive": true,
+     "dimension": "contact",
+     "purpose": "Used for your account and essential service messages, like security notices.",
+     "prompt": "Email"
+    },
+    {
+     "id": "phone",
+     "type": "phone",
+     "required": false,
+     "sensitive": true,
+     "dimension": "contact",
+     "purpose": "Only needed if you want messages by text. Leave it blank otherwise.",
+     "prompt": "Mobile number (optional)",
+     "help": "International format, e.g. +1 416 555 0100. Only used if you choose text messages."
+    },
+    {
+     "id": "country",
+     "type": "country",
+     "required": true,
+     "dimension": "contact",
+     "purpose": "Which features and rules apply where the user lives",
+     "prompt": "Country or region",
+     "help": "Some CSS features depend on where you live."
+    },
+    {
+     "id": "preferred_channel",
+     "type": "single",
+     "required": true,
+     "dimension": "engagement",
+     "purpose": "So CSS sends updates where you will actually see them.",
+     "prompt": "Preferred way to hear from CSS",
+     "options": [
+      {
+       "value": "in_app",
+       "label": "In the app"
+      },
+      {
+       "value": "email",
+       "label": "Email"
+      },
+      {
+       "value": "push",
+       "label": "Push notifications"
+      },
+      {
+       "value": "sms",
+       "label": "Text message"
+      }
+     ]
+    },
+    {
+     "id": "consent_service_notifications",
+     "type": "consent",
+     "required": false,
+     "dimension": "consent",
+     "purpose": "Opt-in for alerts and service notifications",
+     "prompt": "Send me alerts and service notifications for features I turn on."
+    },
+    {
+     "id": "consent_marketing",
+     "type": "consent",
+     "required": false,
+     "dimension": "consent",
+     "purpose": "Product news is separate from service messages. You can change this any time.",
+     "prompt": "Send me occasional product news. (Optional, and separate from alerts.)"
+    }
+   ]
+  },
+  {
+   "id": "objective",
+   "kind": "question",
+   "group": "Your goals",
+   "title": "Your goals and priorities",
+   "questions": [
+    {
+     "id": "objectives",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 3,
+     "dimension": "objectives",
+     "purpose": "What the user wants from trading and CSS",
+     "prompt": "What do you want from trading and CSS? Choose up to three.",
+     "options": [
+      {
+       "value": "learn",
+       "label": "Learn to trade"
+      },
+      {
+       "value": "improve_process",
+       "label": "Improve my existing process"
+      },
+      {
+       "value": "supplement_investing",
+       "label": "Add to my wider investing"
+      },
+      {
+       "value": "active_trading",
+       "label": "Trade actively"
+      },
+      {
+       "value": "diversify",
+       "label": "Diversify my portfolio"
+      },
+      {
+       "value": "systematic_support",
+       "label": "Systematic decision support"
+      },
+      {
+       "value": "discipline",
+       "label": "Become more disciplined"
+      },
+      {
+       "value": "new_markets",
+       "label": "Explore new markets"
+      }
+     ]
+    },
+    {
+     "id": "objective_ranking",
+     "type": "rank",
+     "required": true,
+     "min_select": 3,
+     "max_select": 3,
+     "dimension": "objectives",
+     "purpose": "Financial priorities, which shape risk and mode guidance",
+     "prompt": "Rank your top three financial priorities, most important first.",
+     "options": [
+      {
+       "value": "preservation",
+       "label": "Protect what I have"
+      },
+      {
+       "value": "steady_growth",
+       "label": "Steady growth"
+      },
+      {
+       "value": "long_term_wealth",
+       "label": "Long-term wealth"
+      },
+      {
+       "value": "supplement",
+       "label": "Supplement other investments"
+      },
+      {
+       "value": "aggressive_growth",
+       "label": "Aggressive growth"
+      },
+      {
+       "value": "accessibility",
+       "label": "Keep money accessible"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "experience",
+   "kind": "question",
+   "group": "Experience",
+   "title": "Your experience",
+   "questions": [
+    {
+     "id": "experience_by_class",
+     "type": "matrix",
+     "required": true,
+     "rows": [
+      {
+       "value": "equities",
+       "label": "Stocks (equities)"
+      },
+      {
+       "value": "etfs",
+       "label": "ETFs"
+      },
+      {
+       "value": "fx",
+       "label": "Currencies (FX)"
+      },
+      {
+       "value": "crypto",
+       "label": "Crypto"
+      },
+      {
+       "value": "options",
+       "label": "Options"
+      },
+      {
+       "value": "futures",
+       "label": "Futures"
+      }
+     ],
+     "options": [
+      {
+       "value": "none",
+       "label": "None"
+      },
+      {
+       "value": "beginner",
+       "label": "Beginner"
+      },
+      {
+       "value": "intermediate",
+       "label": "Intermediate"
+      },
+      {
+       "value": "experienced",
+       "label": "Experienced"
+      }
+     ],
+     "dimension": "experience",
+     "purpose": "Experience differs by market. This helps CSS pitch explanations at the right level for each one.",
+     "prompt": "Pick the closest band for each market. 'None' is a perfectly good answer.",
+     "help": "Beginner: a few trades or paper trading. Intermediate: regular trading for a year or more. Experienced: several years, through different market conditions."
+    },
+    {
+     "id": "css_familiarity",
+     "type": "single",
+     "required": true,
+     "dimension": "css_familiarity",
+     "purpose": "How much product explanation the user needs",
+     "prompt": "Have you used CSS or similar decision-support tools before?",
+     "options": [
+      {
+       "value": "new",
+       "label": "No, this is new to me"
+      },
+      {
+       "value": "other_tools",
+       "label": "I've used other trading or analysis tools"
+      },
+      {
+       "value": "css_before",
+       "label": "I've used CSS before"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "knowledge_intro",
+   "kind": "interstitial",
+   "group": "Knowledge",
+   "illustration": "toolkit",
+   "title": "A quick knowledge check, not a test",
+   "body": [
+    "A few short questions help CSS decide which explanations to show you.",
+    "There is no pass mark. 'I'm not sure yet' is always an option and simply points you to the right lesson."
+   ]
+  },
+  {
+   "id": "knowledge_core",
+   "kind": "question",
+   "group": "Knowledge",
+   "title": "Orders and sizing",
+   "questions": [
+    {
+     "id": "kq_market_vs_limit",
+     "type": "quiz",
+     "topic": "order_types",
+     "prompt": "What does a limit order do?",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "Fills immediately at whatever the market price is"
+      },
+      {
+       "value": "b",
+       "label": "Fills only at your chosen price or better"
+      },
+      {
+       "value": "c",
+       "label": "Closes a trade automatically after a loss"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "A limit order sets the worst price you accept. It may not fill at all.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with order types, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_stop",
+     "type": "quiz",
+     "topic": "stop_orders",
+     "prompt": "A stop-loss order is mainly used to…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "Guarantee the exit price"
+      },
+      {
+       "value": "b",
+       "label": "Limit a loss by exiting once a price is reached"
+      },
+      {
+       "value": "c",
+       "label": "Increase position size when price falls"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "A stop triggers an exit at a level you set. In fast markets the fill can be worse than the stop price.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with stop orders, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_position_size",
+     "type": "quiz",
+     "topic": "position_sizing",
+     "prompt": "With a $10,000 account and a 1% risk rule, the most you plan to lose on one trade is…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "$10"
+      },
+      {
+       "value": "b",
+       "label": "$100"
+      },
+      {
+       "value": "c",
+       "label": "$1,000"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "1% of $10,000 is $100. Position size is then set so that hitting your stop loses about that much.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with position sizing, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_risk_reward",
+     "type": "quiz",
+     "topic": "risk_reward",
+     "prompt": "A trade risks $50 to make $150. Its reward-to-risk ratio is…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "1 : 3"
+      },
+      {
+       "value": "b",
+       "label": "3 : 1"
+      },
+      {
+       "value": "c",
+       "label": "It depends on the win rate only"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "$150 ÷ $50 = 3. A good ratio still needs a sensible win rate to pay off over time.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with risk reward, so CSS explains only what is new. It is not graded against you."
+    }
+   ]
+  },
+  {
+   "id": "knowledge_risk",
+   "kind": "question",
+   "group": "Knowledge",
+   "title": "Volatility, drawdown and diversification",
+   "questions": [
+    {
+     "id": "kq_volatility",
+     "type": "quiz",
+     "topic": "volatility",
+     "prompt": "Higher volatility usually means…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "Larger and faster price swings, up and down"
+      },
+      {
+       "value": "b",
+       "label": "Prices only go up"
+      },
+      {
+       "value": "c",
+       "label": "Less risk"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "a",
+     "explain": "Volatility measures how widely prices move. It widens both gains and losses.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with volatility, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_drawdown",
+     "type": "quiz",
+     "topic": "drawdown",
+     "prompt": "An account falls from $12,000 to $9,000 before recovering. The drawdown was…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "$9,000"
+      },
+      {
+       "value": "b",
+       "label": "25%"
+      },
+      {
+       "value": "c",
+       "label": "75%"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "Drawdown is the fall from a peak: $3,000 ÷ $12,000 = 25%.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with drawdown, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_diversification",
+     "type": "quiz",
+     "topic": "diversification",
+     "prompt": "Diversification aims to…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "Remove all risk"
+      },
+      {
+       "value": "b",
+       "label": "Reduce the impact of any single position going wrong"
+      },
+      {
+       "value": "c",
+       "label": "Guarantee higher returns"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "Spreading exposure lowers the damage one position can do. It cannot remove market-wide risk.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with diversification, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_exposure",
+     "type": "quiz",
+     "topic": "portfolio_exposure",
+     "prompt": "You hold three different tech stocks, each 20% of your account. Your exposure to the tech sector is…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "About 20%"
+      },
+      {
+       "value": "b",
+       "label": "About 60%"
+      },
+      {
+       "value": "c",
+       "label": "Unknown without prices"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "Three positions in one sector add up: 3 × 20% = 60% exposure to that sector.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with portfolio exposure, so CSS explains only what is new. It is not graded against you."
+    }
+   ]
+  },
+  {
+   "id": "thinking",
+   "kind": "question",
+   "group": "How you work",
+   "title": "How you think about markets",
+   "questions": [
+    {
+     "id": "thinking_style",
+     "type": "single",
+     "required": true,
+     "dimension": "decision_style",
+     "purpose": "Detail vs pattern vs big-picture tendency, used to tailor Trade Card presentation",
+     "prompt": "When you look at a market, what do you notice first?",
+     "options": [
+      {
+       "value": "detail",
+       "label": "The details",
+       "detail": "Numbers, levels, costs, the fine print"
+      },
+      {
+       "value": "pattern",
+       "label": "The patterns",
+       "detail": "Shapes on the chart, trends, repeating behaviour"
+      },
+      {
+       "value": "big_picture",
+       "label": "The big picture",
+       "detail": "News, the economy, why things are moving"
+      }
+     ]
+    },
+    {
+     "id": "strengths",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 3,
+     "dimension": "strengths",
+     "purpose": "Self-described analytical and working strengths",
+     "prompt": "Which of these sound like you? Choose up to three.",
+     "options": [
+      {
+       "value": "quantitative",
+       "label": "Comfortable with numbers"
+      },
+      {
+       "value": "disciplined",
+       "label": "Disciplined / process-driven"
+      },
+      {
+       "value": "patient",
+       "label": "Patient"
+      },
+      {
+       "value": "research",
+       "label": "Research-oriented"
+      },
+      {
+       "value": "decisive",
+       "label": "Decisive"
+      },
+      {
+       "value": "risk_aware",
+       "label": "Risk-aware"
+      },
+      {
+       "value": "adaptable",
+       "label": "Adaptable"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "behaviour",
+   "kind": "question",
+   "group": "How you work",
+   "title": "How you make decisions",
+   "body": [
+    "There are no right answers here. CSS uses them to pace alerts and reminders, not to judge you."
+   ],
+   "questions": [
+    {
+     "id": "bh_decision_speed",
+     "type": "single",
+     "required": true,
+     "dimension": "decision_style",
+     "purpose": "Decision speed; sets alert decision windows",
+     "prompt": "When a decision needs making quickly, I usually…",
+     "options": [
+      {
+       "value": "quick",
+       "label": "Decide quickly and confidently"
+      },
+      {
+       "value": "considered",
+       "label": "Decide, but prefer a little time"
+      },
+      {
+       "value": "slow",
+       "label": "Need time; quick decisions stress me"
+      }
+     ]
+    },
+    {
+     "id": "bh_after_losses",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_discipline",
+     "purpose": "How you respond after losses helps CSS decide which reminders to show you.",
+     "prompt": "After several losing trades in a row, I usually…",
+     "options": [
+      {
+       "value": "pause_review",
+       "label": "Pause and review"
+      },
+      {
+       "value": "continue_plan",
+       "label": "Keep following my plan"
+      },
+      {
+       "value": "trade_more",
+       "label": "Trade more to win it back"
+      },
+      {
+       "value": "stop_entirely",
+       "label": "Stop trading for a while"
+      }
+     ]
+    },
+    {
+     "id": "bh_drawdown_reaction",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_discipline",
+     "purpose": "Shows how CSS can support you when markets fall sharply.",
+     "prompt": "If my account dropped sharply but temporarily, I would…",
+     "options": [
+      {
+       "value": "hold_plan",
+       "label": "Stick to my plan"
+      },
+      {
+       "value": "reduce",
+       "label": "Reduce my exposure"
+      },
+      {
+       "value": "exit_all",
+       "label": "Close everything"
+      },
+      {
+       "value": "add_more",
+       "label": "Add more to recover faster"
+      }
+     ]
+    },
+    {
+     "id": "bh_size_after_loss",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_discipline",
+     "purpose": "Increasing size to win back losses is a common risk; CSS can flag it for you.",
+     "prompt": "After a loss, I'm tempted to increase my next position size.",
+     "options": [
+      {
+       "value": "never",
+       "label": "Rarely or never"
+      },
+      {
+       "value": "sometimes",
+       "label": "Sometimes"
+      },
+      {
+       "value": "often",
+       "label": "Often"
+      }
+     ]
+    },
+    {
+     "id": "bh_exit_rule",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_discipline",
+     "purpose": "Planning exits in advance is a core habit; this tells CSS how much to prompt for one.",
+     "prompt": "I decide my exit before I enter a trade.",
+     "options": [
+      {
+       "value": "always",
+       "label": "Almost always"
+      },
+      {
+       "value": "sometimes",
+       "label": "Sometimes"
+      },
+      {
+       "value": "rarely",
+       "label": "Rarely"
+      }
+     ]
+    },
+    {
+     "id": "bh_strategy_switch",
+     "type": "single",
+     "required": true,
+     "dimension": "decision_style",
+     "purpose": "Strategy consistency under short-term underperformance",
+     "prompt": "After a few weeks of poor results, I change my strategy…",
+     "options": [
+      {
+       "value": "rarely",
+       "label": "Rarely"
+      },
+      {
+       "value": "sometimes",
+       "label": "Sometimes"
+      },
+      {
+       "value": "often",
+       "label": "Often"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "risk_intro",
+   "kind": "interstitial",
+   "group": "Risk",
+   "illustration": "capacity_vs_tolerance",
+   "title": "Two different questions about risk",
+   "points": [
+    {
+     "icon": "capacity",
+     "title": "Risk capacity",
+     "text": "How much loss your finances can absorb without harming your life."
+    },
+    {
+     "icon": "tolerance",
+     "title": "Risk tolerance",
+     "text": "How much ups and downs you are comfortable living with."
+    }
+   ],
+   "callout": "They are often different. CSS plans around the lower of the two."
+  },
+  {
+   "id": "risk_capacity",
+   "kind": "question",
+   "group": "Risk",
+   "title": "Your risk capacity",
+   "questions": [
+    {
+     "id": "rc_capital_band",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_capacity",
+     "purpose": "Scale of capital, for context (bands, not precise figures)",
+     "prompt": "Roughly how much do you intend to trade with?",
+     "options": [
+      {
+       "value": "lt_1k",
+       "label": "Under $1,000"
+      },
+      {
+       "value": "1k_10k",
+       "label": "$1,000 – $10,000"
+      },
+      {
+       "value": "10k_50k",
+       "label": "$10,000 – $50,000"
+      },
+      {
+       "value": "50k_250k",
+       "label": "$50,000 – $250,000"
+      },
+      {
+       "value": "gt_250k",
+       "label": "Over $250,000"
+      },
+      {
+       "value": "prefer_not",
+       "label": "Prefer not to say"
+      }
+     ]
+    },
+    {
+     "id": "rc_living_dependence",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_capacity",
+     "purpose": "Dependence on this capital for living expenses",
+     "prompt": "Would losing this money affect your ability to pay living expenses?",
+     "options": [
+      {
+       "value": "no",
+       "label": "No"
+      },
+      {
+       "value": "somewhat",
+       "label": "Somewhat"
+      },
+      {
+       "value": "yes",
+       "label": "Yes"
+      }
+     ]
+    },
+    {
+     "id": "rc_emergency_fund",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_capacity",
+     "purpose": "Savings outside trading affect how much loss your finances can absorb.",
+     "prompt": "Do you have emergency savings separate from this money?",
+     "options": [
+      {
+       "value": "yes_6m",
+       "label": "Yes, six months or more of expenses"
+      },
+      {
+       "value": "yes_lt6m",
+       "label": "Yes, less than six months"
+      },
+      {
+       "value": "no",
+       "label": "No"
+      }
+     ]
+    },
+    {
+     "id": "rc_horizon",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_capacity",
+     "purpose": "Money needed soon can absorb less risk. This sets your risk capacity.",
+     "prompt": "How long could this money stay invested if markets went against you?",
+     "options": [
+      {
+       "value": "lt_1y",
+       "label": "Less than a year"
+      },
+      {
+       "value": "1_3y",
+       "label": "One to three years"
+      },
+      {
+       "value": "gt_3y",
+       "label": "More than three years"
+      }
+     ]
+    },
+    {
+     "id": "rc_max_loss",
+     "type": "single",
+     "required": true,
+     "dimension": "loss_tolerance",
+     "purpose": "Largest fall the user's finances can accept (drawdown capacity)",
+     "prompt": "The largest fall in this money you could accept without changing your life plans:",
+     "options": [
+      {
+       "value": "lt_5",
+       "label": "Under 5%"
+      },
+      {
+       "value": "5_15",
+       "label": "5–15%"
+      },
+      {
+       "value": "15_30",
+       "label": "15–30%"
+      },
+      {
+       "value": "gt_30",
+       "label": "More than 30%"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "risk_tolerance",
+   "kind": "question",
+   "group": "Risk",
+   "title": "Your comfort with risk",
+   "questions": [
+    {
+     "id": "rt_volatility",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_tolerance",
+     "purpose": "Measures comfort with price swings, which is separate from what you can afford.",
+     "prompt": "Large day-to-day swings in value…",
+     "options": [
+      {
+       "value": "uncomfortable",
+       "label": "Make me uncomfortable"
+      },
+      {
+       "value": "acceptable",
+       "label": "Are acceptable"
+      },
+      {
+       "value": "comfortable",
+       "label": "Don't bother me"
+      }
+     ]
+    },
+    {
+     "id": "rt_temporary_loss",
+     "type": "single",
+     "required": true,
+     "dimension": "loss_tolerance",
+     "purpose": "Comfort with temporary losses (drawdown comfort)",
+     "prompt": "Seeing a position down 10% before it recovers…",
+     "options": [
+      {
+       "value": "uncomfortable",
+       "label": "Would worry me a lot"
+      },
+      {
+       "value": "acceptable",
+       "label": "Is part of trading"
+      },
+      {
+       "value": "comfortable",
+       "label": "Doesn't bother me"
+      }
+     ]
+    },
+    {
+     "id": "rt_consecutive_losses",
+     "type": "single",
+     "required": true,
+     "dimension": "loss_tolerance",
+     "purpose": "Losing runs happen to everyone; this shows how they would feel for you.",
+     "prompt": "Five losing trades in a row would…",
+     "options": [
+      {
+       "value": "uncomfortable",
+       "label": "Make me want to stop"
+      },
+      {
+       "value": "acceptable",
+       "label": "Be hard but expected"
+      },
+      {
+       "value": "comfortable",
+       "label": "Not change my approach"
+      }
+     ]
+    },
+    {
+     "id": "rt_uncertainty",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_tolerance",
+     "purpose": "Markets never give certainty; this shows how CSS should present probabilities.",
+     "prompt": "Acting when the outcome is genuinely uncertain…",
+     "options": [
+      {
+       "value": "uncomfortable",
+       "label": "Is hard for me"
+      },
+      {
+       "value": "acceptable",
+       "label": "Is fine with a plan"
+      },
+      {
+       "value": "comfortable",
+       "label": "Comes naturally"
+      }
+     ]
+    },
+    {
+     "id": "rt_concentration",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_tolerance",
+     "purpose": "Shows how comfortable you are with a lot in one position.",
+     "prompt": "Putting a large share of this money into one position…",
+     "options": [
+      {
+       "value": "uncomfortable",
+       "label": "I'd avoid it"
+      },
+      {
+       "value": "acceptable",
+       "label": "Occasionally, with care"
+      },
+      {
+       "value": "comfortable",
+       "label": "I'm comfortable with it"
+      }
+     ]
+    },
+    {
+     "id": "rt_leverage",
+     "type": "single",
+     "required": true,
+     "dimension": "risk_tolerance",
+     "purpose": "Shows your comfort with borrowed exposure, which magnifies gains and losses.",
+     "prompt": "Using leverage (borrowed exposure)…",
+     "options": [
+      {
+       "value": "uncomfortable",
+       "label": "I'd rather not"
+      },
+      {
+       "value": "acceptable",
+       "label": "In small amounts"
+      },
+      {
+       "value": "comfortable",
+       "label": "I'm comfortable with it"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "barriers",
+   "kind": "question",
+   "group": "Your goals",
+   "title": "What holds you back today?",
+   "questions": [
+    {
+     "id": "barriers",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 9,
+     "dimension": "development_areas",
+     "purpose": "Principal barriers and weaknesses, to target support",
+     "prompt": "Choose any that apply.",
+     "options": [
+      {
+       "value": "no_system",
+       "label": "No clear system"
+      },
+      {
+       "value": "time",
+       "label": "Not enough time"
+      },
+      {
+       "value": "complicated",
+       "label": "Trading feels complicated"
+      },
+      {
+       "value": "experience",
+       "label": "Not enough experience"
+      },
+      {
+       "value": "confidence",
+       "label": "Lack of confidence"
+      },
+      {
+       "value": "emotions",
+       "label": "Emotional decisions"
+      },
+      {
+       "value": "interpreting",
+       "label": "Hard to read the markets"
+      },
+      {
+       "value": "discipline",
+       "label": "Staying disciplined"
+      },
+      {
+       "value": "other",
+       "label": "Something else"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "markets",
+   "kind": "question",
+   "group": "Markets",
+   "title": "Where and how long?",
+   "questions": [
+    {
+     "id": "preferred_markets",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 6,
+     "dimension": "markets",
+     "purpose": "So CSS focuses on the markets you actually want to trade.",
+     "prompt": "Markets you're interested in",
+     "options": [
+      {
+       "value": "equities",
+       "label": "Stocks (equities)"
+      },
+      {
+       "value": "etfs",
+       "label": "ETFs"
+      },
+      {
+       "value": "fx",
+       "label": "Currencies (FX)"
+      },
+      {
+       "value": "crypto",
+       "label": "Crypto"
+      },
+      {
+       "value": "options",
+       "label": "Options"
+      },
+      {
+       "value": "futures",
+       "label": "Futures"
+      }
+     ]
+    },
+    {
+     "id": "holding_periods",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 4,
+     "dimension": "holding_period",
+     "purpose": "How long you hold trades should match the time you have to watch them.",
+     "prompt": "How long do you usually want to hold a trade?",
+     "options": [
+      {
+       "value": "intraday",
+       "label": "Within a day"
+      },
+      {
+       "value": "days",
+       "label": "A few days"
+      },
+      {
+       "value": "weeks",
+       "label": "Weeks"
+      },
+      {
+       "value": "months",
+       "label": "Months or longer"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "knowledge_leverage",
+   "kind": "question",
+   "group": "Markets",
+   "title": "Leverage and margin",
+   "show_if": {
+    "any_of": [
+     {
+      "q": "experience_by_class",
+      "row_in": {
+       "rows": [
+        "fx",
+        "crypto",
+        "options",
+        "futures"
+       ],
+       "values": [
+        "beginner",
+        "intermediate",
+        "experienced"
+       ]
+      }
+     },
+     {
+      "q": "objectives",
+      "includes_any": [
+       "active_trading",
+       "new_markets"
+      ]
+     },
+     {
+      "q": "preferred_markets",
+      "includes_any": [
+       "fx",
+       "crypto",
+       "options",
+       "futures"
+      ]
+     }
+    ]
+   },
+   "questions": [
+    {
+     "id": "kq_leverage",
+     "type": "quiz",
+     "topic": "leverage",
+     "prompt": "With 10:1 leverage, a 5% move against your position changes your margin by…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "−5%"
+      },
+      {
+       "value": "b",
+       "label": "−50%"
+      },
+      {
+       "value": "c",
+       "label": "Nothing until you close"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "Leverage multiplies the move: 10 × 5% = 50% of the margin you put up.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with leverage, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "kq_margin_call",
+     "type": "quiz",
+     "topic": "margin",
+     "prompt": "A margin call means…",
+     "required": true,
+     "options": [
+      {
+       "value": "a",
+       "label": "Your broker is offering a bonus"
+      },
+      {
+       "value": "b",
+       "label": "Your account equity fell below the required margin and you must add funds or reduce positions"
+      },
+      {
+       "value": "c",
+       "label": "Your trade has hit its profit target"
+      },
+      {
+       "value": "not_sure",
+       "label": "I'm not sure yet"
+      }
+     ],
+     "correct": "b",
+     "explain": "If you don't act, the broker may close positions for you, often at a bad moment.",
+     "dimension": "market_knowledge",
+     "purpose": "Checks your familiarity with margin, so CSS explains only what is new. It is not graded against you."
+    },
+    {
+     "id": "uses_leverage",
+     "type": "single",
+     "required": true,
+     "dimension": "leverage_familiarity",
+     "purpose": "Lets CSS add the right safeguards and education if you plan to use leverage.",
+     "prompt": "Do you plan to use leverage or margin?",
+     "options": [
+      {
+       "value": "no",
+       "label": "No"
+      },
+      {
+       "value": "small",
+       "label": "In small amounts"
+      },
+      {
+       "value": "yes",
+       "label": "Yes, regularly"
+      },
+      {
+       "value": "unsure",
+       "label": "Not sure"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "assistance",
+   "kind": "question",
+   "group": "Working with CSS",
+   "illustration": "modes",
+   "title": "How much help do you want from CSS?",
+   "questions": [
+    {
+     "id": "assistance_preference",
+     "type": "single",
+     "required": true,
+     "dimension": "assistance",
+     "purpose": "Desired level of CSS assistance (preference only; never authority)",
+     "prompt": "Choose the closest fit.",
+     "options": [
+      {
+       "value": "discover",
+       "label": "Discover",
+       "detail": "CSS surfaces opportunities and analysis. You decide and act; you stay fully responsible."
+      },
+      {
+       "value": "confirm",
+       "label": "Confirm",
+       "detail": "CSS proposes governed Trade Cards. Nothing is placed unless you confirm the actions allowed."
+      },
+      {
+       "value": "auto_interest",
+       "label": "Interested in Auto",
+       "detail": "Governed automated execution, where legally, operationally and technically available. Choosing this records interest only; it does not switch anything on."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "auto_check",
+   "kind": "question",
+   "group": "Working with CSS",
+   "title": "What Auto does and doesn't change",
+   "show_if": {
+    "q": "assistance_preference",
+    "in": [
+     "auto_interest"
+    ]
+   },
+   "body": [
+    "Auto would change who presses the button, not how markets behave."
+   ],
+   "questions": [
+    {
+     "id": "auto_understanding",
+     "type": "single",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Check the user understands Auto does not remove market risk",
+     "prompt": "With Auto, which is true?",
+     "options": [
+      {
+       "value": "mechanics_only",
+       "label": "Trades are placed for me under governed rules; losses are still possible"
+      },
+      {
+       "value": "guaranteed",
+       "label": "Returns are more reliable because a system is trading"
+      },
+      {
+       "value": "no_risk",
+       "label": "Risk controls mean I can't lose money"
+      }
+     ],
+     "correct": "mechanics_only"
+    }
+   ]
+  },
+  {
+   "id": "support",
+   "kind": "question",
+   "group": "Working with CSS",
+   "title": "How CSS can support you",
+   "questions": [
+    {
+     "id": "feature_preferences",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 8,
+     "dimension": "features",
+     "purpose": "So CSS shows the tools you care about first instead of everything at once.",
+     "prompt": "Which tools would be most useful?",
+     "options": [
+      {
+       "value": "trade_cards",
+       "label": "CSS Trade Cards"
+      },
+      {
+       "value": "discovery",
+       "label": "Opportunity discovery"
+      },
+      {
+       "value": "alerts",
+       "label": "Alerts"
+      },
+      {
+       "value": "simulator",
+       "label": "Simulator / paper trading"
+      },
+      {
+       "value": "analytics",
+       "label": "Performance analytics"
+      },
+      {
+       "value": "journal",
+       "label": "Trade journal"
+      },
+      {
+       "value": "ai_assist",
+       "label": "AI assistance"
+      },
+      {
+       "value": "risk_monitoring",
+       "label": "Risk monitoring"
+      }
+     ]
+    },
+    {
+     "id": "support_level",
+     "type": "single",
+     "required": true,
+     "dimension": "support_preference",
+     "purpose": "How much explanation CSS shows by default",
+     "prompt": "How much explanation do you want with each idea?",
+     "options": [
+      {
+       "value": "full",
+       "label": "Walk me through it"
+      },
+      {
+       "value": "key_points",
+       "label": "Just the key points"
+      },
+      {
+       "value": "minimal",
+       "label": "Minimal: I'll ask if I need more"
+      }
+     ]
+    },
+    {
+     "id": "learning_style",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 3,
+     "dimension": "support_preference",
+     "purpose": "So learning material comes in the format that works best for you.",
+     "prompt": "How do you like to learn? Choose up to three.",
+     "options": [
+      {
+       "value": "short_reads",
+       "label": "Short reads"
+      },
+      {
+       "value": "worked_examples",
+       "label": "Worked examples"
+      },
+      {
+       "value": "video",
+       "label": "Short videos"
+      },
+      {
+       "value": "practice",
+       "label": "Practice in the simulator"
+      },
+      {
+       "value": "checklists",
+       "label": "Checklists"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "time",
+   "kind": "question",
+   "group": "Working with CSS",
+   "title": "Your time",
+   "questions": [
+    {
+     "id": "engagement_cadence",
+     "type": "single",
+     "required": true,
+     "dimension": "engagement",
+     "purpose": "Available trading time: how often the user checks in",
+     "prompt": "How often will you check in?",
+     "options": [
+      {
+       "value": "several_daily",
+       "label": "Several times a day"
+      },
+      {
+       "value": "daily",
+       "label": "Once a day"
+      },
+      {
+       "value": "few_weekly",
+       "label": "A few times a week"
+      },
+      {
+       "value": "weekly",
+       "label": "Weekly or less"
+      }
+     ]
+    },
+    {
+     "id": "monitoring_availability",
+     "type": "single",
+     "required": true,
+     "dimension": "engagement",
+     "purpose": "Typical decision window during market hours",
+     "prompt": "During market hours, I can usually respond…",
+     "options": [
+      {
+       "value": "within_minutes",
+       "label": "Within minutes"
+      },
+      {
+       "value": "within_hours",
+       "label": "Within a few hours"
+      },
+      {
+       "value": "end_of_day",
+       "label": "By the end of the day"
+      }
+     ]
+    },
+    {
+     "id": "notification_preference",
+     "type": "single",
+     "required": true,
+     "dimension": "engagement",
+     "purpose": "So alerts are useful rather than noise.",
+     "prompt": "Notifications:",
+     "options": [
+      {
+       "value": "important_only",
+       "label": "Only important ones"
+      },
+      {
+       "value": "daily_digest",
+       "label": "A daily digest"
+      },
+      {
+       "value": "all",
+       "label": "Everything relevant"
+      },
+      {
+       "value": "none",
+       "label": "None for now"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "expectations_intro",
+   "kind": "interstitial",
+   "group": "Expectations",
+   "illustration": "range",
+   "title": "What do you expect from CSS?",
+   "body": [
+    "Honest expectations make for better decisions. Some questions check common misunderstandings; if one shows up, CSS will explain rather than judge."
+   ],
+   "callout": "CSS does not guarantee returns. Results vary, and losing trades are a normal part of trading."
+  },
+  {
+   "id": "expectations",
+   "kind": "question",
+   "group": "Expectations",
+   "title": "What you expect from CSS",
+   "questions": [
+    {
+     "id": "ex_primary_value",
+     "type": "single",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "What the user mainly expects CSS to do for them",
+     "prompt": "Above all, I want CSS to help me…",
+     "options": [
+      {
+       "value": "find",
+       "label": "Find opportunities"
+      },
+      {
+       "value": "understand",
+       "label": "Understand what markets are doing"
+      },
+      {
+       "value": "stick_to_plan",
+       "label": "Stick to a plan"
+      },
+      {
+       "value": "manage_risk",
+       "label": "Manage risk"
+      },
+      {
+       "value": "save_time",
+       "label": "Save time"
+      }
+     ]
+    },
+    {
+     "id": "ex_trade_frequency",
+     "type": "single",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Checks whether your expected pace fits the time you have available.",
+     "prompt": "How many trades do you expect to make?",
+     "options": [
+      {
+       "value": "few_monthly",
+       "label": "A few a month"
+      },
+      {
+       "value": "weekly",
+       "label": "A few a week"
+      },
+      {
+       "value": "daily",
+       "label": "About one a day"
+      },
+      {
+       "value": "many_daily",
+       "label": "Many a day"
+      }
+     ]
+    },
+    {
+     "id": "ex_risk",
+     "type": "single",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Self-assessed risk appetite, checked against measured capacity",
+     "prompt": "The level of risk I expect to take:",
+     "options": [
+      {
+       "value": "low",
+       "label": "Low"
+      },
+      {
+       "value": "moderate",
+       "label": "Moderate"
+      },
+      {
+       "value": "high",
+       "label": "High"
+      }
+     ]
+    },
+    {
+     "id": "ex_return_range",
+     "type": "single",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Hoped-for yearly result (aspiration), checked for realism",
+     "prompt": "The yearly result I'm hoping for (an aspiration, not a promise):",
+     "help": "CSS does not guarantee any return. Losses are possible in any year.",
+     "options": [
+      {
+       "value": "preserve",
+       "label": "Mostly preserve capital"
+      },
+      {
+       "value": "modest",
+       "label": "Modest growth"
+      },
+      {
+       "value": "strong",
+       "label": "Strong growth"
+      },
+      {
+       "value": "double_plus",
+       "label": "Double my money or more"
+      },
+      {
+       "value": "unsure",
+       "label": "I don't know"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "reality_check",
+   "kind": "question",
+   "group": "Expectations",
+   "title": "Reality check",
+   "questions": [
+    {
+     "id": "bl_every_trade_profitable",
+     "type": "boolean",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Checks expectations early, because no approach wins every trade.",
+     "prompt": "Every trade CSS recommends will be profitable.",
+     "realistic": false
+    },
+    {
+     "id": "bl_losses_possible",
+     "type": "boolean",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Confirm losses are understood to be possible",
+     "prompt": "I could lose money, including on trades CSS recommends.",
+     "realistic": true
+    },
+    {
+     "id": "bl_drawdowns_normal",
+     "type": "boolean",
+     "required": true,
+     "dimension": "loss_tolerance",
+     "purpose": "Checks that periods of decline are expected, because every approach has them.",
+     "prompt": "Even good strategies go through periods of losses.",
+     "realistic": true
+    },
+    {
+     "id": "bl_auto_guarantees",
+     "type": "boolean",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Checks that automation is understood as a way of placing trades, not a guarantee.",
+     "prompt": "Auto mode guarantees returns.",
+     "realistic": false
+    },
+    {
+     "id": "bl_css_compensates",
+     "type": "boolean",
+     "required": true,
+     "dimension": "expectations",
+     "purpose": "Makes clear who bears trading losses before you start.",
+     "prompt": "CSS will pay me back for trading losses.",
+     "realistic": false
+    },
+    {
+     "id": "ex_success",
+     "type": "multi",
+     "required": true,
+     "min_select": 1,
+     "max_select": 3,
+     "dimension": "expectations",
+     "purpose": "What a useful CSS experience means to the user",
+     "prompt": "A successful CSS experience would mean…",
+     "options": [
+      {
+       "value": "better_decisions",
+       "label": "Better, more consistent decisions"
+      },
+      {
+       "value": "learning",
+       "label": "Learning a lot"
+      },
+      {
+       "value": "discipline",
+       "label": "More discipline"
+      },
+      {
+       "value": "time_saved",
+       "label": "Saving time"
+      },
+      {
+       "value": "returns",
+       "label": "Better results over time"
+      },
+      {
+       "value": "every_trade_wins",
+       "label": "Every trade making money"
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "attribution_paths",
+   "kind": "interstitial",
+   "group": "Your results",
+   "illustration": "two_paths",
+   "title": "Two kinds of trades, kept apart",
+   "points": [
+    {
+     "icon": "css_path",
+     "title": "A CSS idea",
+     "text": "CSS proposes a Trade Card. You choose whether to trade it. If you do, it is recorded as a CSS-attributable trade, linked to that card."
+    },
+    {
+     "icon": "user_path",
+     "title": "Your own idea",
+     "text": "You place a trade without a CSS recommendation. It is recorded as your own trade, in your independent results."
+    }
+   ],
+   "body": [
+    "Your dashboard will show three numbers: profit or loss from CSS-attributable trades, profit or loss from your independent trades, and your combined account result."
+   ],
+   "callout": "A CSS recommendation is not a guaranteed profit, and the decision to trade is always yours."
+  },
+  {
+   "id": "acknowledgements",
+   "kind": "question",
+   "group": "Before your Passport",
+   "title": "Before your Passport",
+   "body": [
+    "If you change a recommendation in a way that alters its risk or idea, it is labelled as modified. If the origin of a trade can't be proven, it is held for review rather than guessed.",
+    "These confirmations are for onboarding only. They do not replace the CSS Terms or the Trading Risk Disclosure, which you accept separately."
+   ],
+   "questions": [
+    {
+     "id": "ack_attribution",
+     "type": "consent",
+     "required": true,
+     "must_be_true": true,
+     "dimension": "acknowledgement",
+     "purpose": "Record understanding of trade-origin labelling",
+     "prompt": "I understand how CSS labels and separates its recommendations from my own trades."
+    },
+    {
+     "id": "ack_no_guarantee",
+     "type": "consent",
+     "required": true,
+     "must_be_true": true,
+     "dimension": "acknowledgement",
+     "purpose": "Record understanding that profit is not guaranteed",
+     "prompt": "I understand CSS does not guarantee profits and I may lose money."
+    },
+    {
+     "id": "ack_recommendation_not_authority",
+     "type": "consent",
+     "required": true,
+     "must_be_true": true,
+     "dimension": "acknowledgement",
+     "purpose": "Record that recommendations are not execution authority",
+     "prompt": "I understand a recommendation is not permission to trade. Execution follows CSS's governed controls, and this questionnaire does not grant any execution authority."
+    },
+    {
+     "id": "ack_responsibility",
+     "type": "consent",
+     "required": true,
+     "must_be_true": true,
+     "dimension": "acknowledgement",
+     "purpose": "Record that the user remains responsible",
+     "prompt": "I understand I remain responsible for my trading decisions and for checking that CSS suits me."
+    }
+   ]
+  },
+  {
+   "id": "passport",
+   "kind": "result",
+   "group": "Your Passport",
+   "illustration": "passport",
+   "title": "Your CSS Trader Passport"
+  }
+ ]
+}

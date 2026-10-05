@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0a1020">
+  <meta name="referrer" content="no-referrer">
+  <title>CSS Trader Passport</title>
+  <link rel="icon" href="assets/css-mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="passport.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+  <div class="shell">
+    <header>
+      <div class="topbar">
+        <div class="brand"><img src="assets/css-mark.svg" alt="" width="32" height="32">
+          <div>Capital Strata Systems<small>Trader Passport</small></div></div>
+      </div>
+      <div class="progress" id="progress" hidden>
+        <div class="progress-meta"><span id="progress-group"></span><span id="progress-text"></span></div>
+        <div class="progress-track" role="progressbar" id="progressbar" aria-label="Onboarding progress"
+             aria-valuemin="1" aria-valuemax="1" aria-valuenow="1"><div class="progress-fill" id="progress-fill"></div></div>
+      </div>
+    </header>
+    <main id="main" tabindex="-1">
+      <p class="note" id="loading">Loading your Passport…</p>
+    </main>
+    <div id="live" class="sr-only" aria-live="polite"></div>
+  </div>
+  <nav class="actions" id="actions" aria-label="Step navigation" hidden>
+    <div class="actions-inner">
+      <button type="button" class="btn" id="back">Back</button>
+      <button type="button" class="btn btn-primary" id="next">Continue</button>
+    </div>
+  </nav>
+  <script src="passport.js"></script>
+</body>
+</html>
