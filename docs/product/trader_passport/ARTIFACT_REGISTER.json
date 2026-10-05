@@ -196,16 +196,16 @@
   },
   {
    "path": "docs/product/trader_passport/evidence/REGRESSION_COMPARISON_2026-10-05.md",
-   "bytes": 3651,
-   "sha256": "0013da30281ea6856bed330462c911cf2ac9619e96aff87a067f58ba614176fe",
+   "bytes": 3847,
+   "sha256": "a753db29cc5ea19074bb169cb5b92b648f92c2f19eeaf14e0a646e2292d96c92",
    "category": "documentation / evidence",
    "provenance": "Written or generated for Issue #102",
    "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
   },
   {
    "path": "docs/product/trader_passport/evidence/pytest_trader_passport_2026-10-05.txt",
-   "bytes": 9004,
-   "sha256": "8e7211501bfa3c8e4a0f371e5ebd547d2aaec4749f15c3505a152f6db3ff22e4",
+   "bytes": 12145,
+   "sha256": "dc922668ed6d00f846096e7f7480ea7e2d4953c46f3656972121c5e93e518f6c",
    "category": "documentation / evidence",
    "provenance": "Written or generated for Issue #102",
    "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
@@ -588,8 +588,8 @@
   },
   {
    "path": "tests/onboarding/test_trader_passport.py",
-   "bytes": 21513,
-   "sha256": "8fff7b55a172bb083da921259060934d99e675825cdf38d3ac12132ff6cee1db",
+   "bytes": 21632,
+   "sha256": "3ecf0ad50da02a7d6073fa87f192b460d3cbb02173eb40e6c3a49a1c36f8c3fc",
    "category": "test",
    "provenance": "Written for Issue #102",
    "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"

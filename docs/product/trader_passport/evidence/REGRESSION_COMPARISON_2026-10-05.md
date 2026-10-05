@@ -43,3 +43,7 @@ Failing/erroring test ids: identical on both (34 entries; diff empty). They pre-
 - FAILED tests/dashboard/test_frontend_payloads.py::test_api_bridge_routes_are_read_only_and_dashboard_state_fed
 
 Root cause of the 3 collection errors: backend/data/ is excluded by .gitignore line 68 'data/', so backend.data.price_feed is missing from the repository (git check-ignore -v backend/data/price_feed.py).
+
+## Governance sweep (CI step) on this branch
+
+PYTHONPATH=. python scripts/run_ai_governance_sweep.py -> "All governance checks passed successfully." (Readiness Score 100, Authority PASS), exit 0

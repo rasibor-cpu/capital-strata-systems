@@ -51,7 +51,7 @@ tests/onboarding/test_trader_passport.py::test_api_requires_session PASSED [ 53%
 tests/onboarding/test_trader_passport.py::test_api_flow_and_errors PASSED [ 55%]
 tests/onboarding/test_trader_passport.py::test_api_performance_fails_closed_without_data PASSED [ 56%]
 tests/onboarding/test_trader_passport.py::test_api_static_ui_and_path_traversal PASSED [ 57%]
-tests/onboarding/test_trader_passport_ui.py::test_full_flow_s24_accessibility_and_layout PASSED [ 58%]
+tests/onboarding/test_trader_passport_ui.py::test_full_flow_s24_accessibility_and_layout FAILED [ 58%]
 tests/onboarding/test_trader_passport_ui.py::test_errors_are_announced_and_focused PASSED [ 60%]
 tests/onboarding/test_trader_passport_ui.py::test_back_and_resume_in_browser PASSED [ 61%]
 tests/onboarding/test_trader_passport_ui.py::test_reduced_motion PASSED  [ 62%]
@@ -86,10 +86,74 @@ tests/trade_origin/test_trade_origin.py::test_missing_mark_is_reported_not_assum
 tests/trade_origin/test_trade_origin.py::test_legacy_records_without_origin_are_held_for_review PASSED [ 98%]
 tests/trade_origin/test_trade_origin.py::test_tampered_totals_detected PASSED [100%]
 
+=================================== FAILURES ===================================
+_________________ test_full_flow_s24_accessibility_and_layout __________________
+
+browser = <Browser type=<BrowserType name=chromium executable_path=/opt/pw-browsers/chromium-1243/chrome-linux64/chrome> version=141.0.7390.37>
+server = 'http://127.0.0.1:40221'
+
+    def test_full_flow_s24_accessibility_and_layout(browser, server):
+        page, token = _page(browser, server, "ui-full")
+        seen, violations = [], {}
+        for step in range(40):
+            view = _current(page, server, token)
+            stage = view["stage"]
+            assert page.locator("h1").first.inner_text().strip(), "every step has a title"
+            if stage["kind"] != "result":
+                assert page.get_attribute("#progressbar", "aria-valuenow") == str(view["progress"]["position"])
+            _layout_checks(page)
+            v = _axe(page)
+            if v:
+                violations[stage["id"]] = v
+            _shot(page, f"s24_{step:02d}_{stage['id']}")
+            if stage["kind"] == "result":
+                break
+            seen.append(stage["id"])
+            _answer_stage(page, stage, BASE, keyboard=stage["id"] == "behaviour")   # one step entirely by keyboard
+            page.click("#next")
+            page.wait_for_function("(id) => !document.querySelector('[data-qid]') || true", arg=stage["id"])
+            page.wait_for_timeout(120)
+        assert seen[0] == "welcome" and "acknowledgements" in seen
+        page.click("#next")                                            # Build my Passport
+        page.wait_for_selector(".pp-hero")
+        assert "Recommended mode" in page.inner_text(".pp-hero")
+        assert "grants no execution authority" in page.inner_text("main")
+        _layout_checks(page)
+        _shot(page, "s24_passport")
+        v = _axe(page)
+        if v:
+            violations["passport"] = v
+        page.goto(server + "/passport/app/index.html#performance")
+        page.wait_for_selector(".kpis")
+        assert "not real trades" in page.inner_text(".sample")
+        assert page.locator(".kpi").count() == 4
+        _layout_checks(page)
+        _shot(page, "s24_performance")
+        v = _axe(page)
+        if v:
+            violations["performance"] = v
+        if AXE is None:
+            pytest.skip("flow and layout checked; axe-core not configured (CSS_AXE_PATH), accessibility scan skipped")
+>       assert violations == {}, violations
+E       AssertionError: {'passport': [{'id': 'color-contrast', 'impact': 'serious', 'nodes': 1}]}
+E       assert {'passport': ... 'nodes': 1}]} == {}
+E         
+E         Left contains 1 more item:
+E         {'passport': [{'id': 'color-contrast', 'impact': 'serious', 'nodes': 1}]}
+E         
+E         Full diff:
+E         - {}
+E         + {...
+E         
+E         ...Full output truncated (8 lines hidden), use '-vv' to show
+
+tests/onboarding/test_trader_passport_ui.py:195: AssertionError
 =============================== warnings summary ===============================
 tests/onboarding/test_trader_passport.py::test_api_requires_session
   <scratchpad>/cssvenv/lib/python3.11/site-packages/fastapi/testclient.py:1: StarletteDeprecationWarning: Using `httpx` with `starlette.testclient` is deprecated; install `httpx2` instead.
     from starlette.testclient import TestClient as TestClient  # noqa
 
 -- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
-======================== 80 passed, 1 warning in 59.22s ========================
+=========================== short test summary info ============================
+FAILED tests/onboarding/test_trader_passport_ui.py::test_full_flow_s24_accessibility_and_layout
+=================== 1 failed, 79 passed, 1 warning in 30.47s ===================
