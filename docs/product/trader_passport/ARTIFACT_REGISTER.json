@@ -204,8 +204,8 @@
   },
   {
    "path": "docs/product/trader_passport/evidence/pytest_trader_passport_2026-10-05.txt",
-   "bytes": 12145,
-   "sha256": "dc922668ed6d00f846096e7f7480ea7e2d4953c46f3656972121c5e93e518f6c",
+   "bytes": 9004,
+   "sha256": "bb2c4d90ccb998f2337d8728e564871471c822d0b6b85a224603fb742cef6923",
    "category": "documentation / evidence",
    "provenance": "Written or generated for Issue #102",
    "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"
@@ -596,8 +596,8 @@
   },
   {
    "path": "tests/onboarding/test_trader_passport_ui.py",
-   "bytes": 11852,
-   "sha256": "e8b96885b57bb003ef1f25a658923842fb9984872185af4b8acb10daab3990b8",
+   "bytes": 12010,
+   "sha256": "72069c51ab6c5e63e36e5056b39610edb235b2334700a5aed2522c5529ba53cc",
    "category": "test",
    "provenance": "Written for Issue #102",
    "status": "COMPLETED — PRESERVED once this commit is pushed to claude/css-trader-passport-102"

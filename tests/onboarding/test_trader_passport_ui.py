@@ -84,14 +84,20 @@ def _page(browser, server, user, **ctx):
 
 def _shot(page, name):
     if EVIDENCE:
-        page.wait_for_timeout(450)                                 # let the 350ms entry animation finish
+        _settle(page)
         EVIDENCE.mkdir(parents=True, exist_ok=True)
         page.screenshot(path=str(EVIDENCE / f"{name}.png"), full_page=True)
+
+
+def _settle(page):
+    """Wait until every running animation/transition has finished, so checks see the final rendering."""
+    page.evaluate("Promise.all(document.getAnimations().map(a => a.finished.catch(() => null)))")
 
 
 def _axe(page):
     if not AXE:
         return None
+    _settle(page)
     page.add_script_tag(path=AXE)
     res = page.evaluate("async () => (await axe.run(document, {runOnly: ['wcag2a','wcag2aa','wcag21a','wcag21aa','best-practice']})).violations"
                         ".map(v => ({id: v.id, impact: v.impact, nodes: v.nodes.length}))")
