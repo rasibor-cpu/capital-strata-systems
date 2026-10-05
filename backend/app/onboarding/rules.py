@@ -1,17 +1,18 @@
 """CSS Trader Passport: recommendation rules (Issue #102).
 
-Turns recorded answers into a Trader Passport. Every output item carries `because`: the question ids and answers it
-was derived from, so the Passport is fully explainable and auditable.
+TP-R-2.0.0 turns recorded answers into a Trader Passport. Every output carries `because`: the question ids and
+answers it was derived from, so the Passport is fully explainable and auditable.
 
 Deliberately absent:
-- No suitability percentage or composite "potential" score.
+- No suitability percentage, readiness score, profitability or "potential" score.
 - No AUTO recommendation. AUTO interest is recorded and acknowledged, never recommended; automated execution is a
   separate governed authorisation outside this module.
-- No execution authority. `execution_authority_granted` is always False and there is no code path that changes it.
-- No validation of unrealistic expectations: mismatches produce calibration messages, never a higher score.
+- No execution authority, and no statement that onboarding makes anyone suitable for live trading.
+- No validation of unrealistic expectations: mismatches produce calibration messages, never a better outcome.
 
-Risk capacity (what finances can absorb) and risk tolerance (comfort with swings) are computed separately and never
-averaged. The effective planning posture is the lower of the two.
+Dimensions use descriptive states only: Foundation, Developing, Experienced (Decision Style and Support Preference are
+descriptions, not levels). Risk capacity and risk tolerance are computed separately and never averaged; the planning
+posture is the lower of the two.
 """
 from __future__ import annotations
 
@@ -20,8 +21,9 @@ from typing import Any, Dict, List
 from .engine import answer_values, quiz_feedback, visible_stages
 from .schema import QUESTION_INDEX, QUESTIONNAIRE_VERSION
 
-RULES_VERSION = "TP-R-1.0.0"
+RULES_VERSION = "TP-R-2.0.0"
 LEVELS = ["LOW", "MODERATE", "HIGHER"]
+STATES = ["Foundation", "Developing", "Experienced"]
 BAND_ORDER = ["none", "beginner", "intermediate", "experienced"]
 COMPLEX_TOPICS = {"leverage", "margin"}
 CORE_TOPICS = {"order_types", "stop_orders", "position_sizing", "risk_reward", "volatility", "drawdown",
@@ -32,7 +34,8 @@ TOPIC_LABELS = {
     "diversification": "Diversification", "portfolio_exposure": "Portfolio exposure", "leverage": "Leverage",
     "margin": "Margin",
 }
-EDUCATION_MODULES = {t: f"CSS Learn: {l}" for t, l in TOPIC_LABELS.items()}
+NOT_SUITABILITY = ("Completing onboarding does not make anyone suitable for live trading. Access to live trading and "
+                   "to any automated execution is decided separately under CSS's governed controls.")
 
 
 def _label(qid: str, value: Any) -> Any:
@@ -54,7 +57,11 @@ def _min_level(*levels: str) -> str:
     return min(levels, key=LEVELS.index)
 
 
-# ------------------------------------------------------------------ components
+def _dimension(name: str, state: str, summary: str, because: List[dict], basis: str) -> dict:
+    return {"dimension": name, "state": state, "summary": summary, "basis": basis, "because": because}
+
+
+# ------------------------------------------------------------------ evidence components
 def experience(a: Dict[str, Any]) -> dict:
     by = a.get("experience_by_class", {})
     top = max(by.values(), key=BAND_ORDER.index) if by else "none"
@@ -65,51 +72,38 @@ def knowledge(session: dict) -> dict:
     fb = quiz_feedback(session)
     demonstrated = sorted({f["topic"] for f in fb if f["result"] == "correct"})
     gaps = sorted({f["topic"] for f in fb if f["result"] != "correct"})
+    explain = {f["topic"]: f["explain"] for f in fb if f["result"] != "correct"}
     return {"demonstrated": [TOPIC_LABELS[t] for t in demonstrated], "gaps": [TOPIC_LABELS[t] for t in gaps],
+            "demonstrated_topics": demonstrated,
             "gap_topics": gaps, "assessed_topics": sorted({f["topic"] for f in fb}),
+            "gap_notes": [{"topic": TOPIC_LABELS[t], "note": explain[t]} for t in gaps],
             "because": [{"question_id": f["question_id"], "answer": f["result"]} for f in fb]}
-
-
-def strengths(a: Dict[str, Any], know: dict) -> dict:
-    self_reported = _label("strengths", a.get("strengths", []))
-    demonstrated = []
-    if a.get("bh_exit_rule") == "always":
-        demonstrated.append({"attribute": "Plans exits in advance", "because": _because(a, "bh_exit_rule")})
-    if a.get("bh_after_losses") in ("pause_review", "continue_plan"):
-        demonstrated.append({"attribute": "Steady after losing streaks", "because": _because(a, "bh_after_losses")})
-    if len(know["demonstrated"]) >= 6:
-        demonstrated.append({"attribute": "Solid grasp of trading basics",
-                             "because": [{"question_id": "knowledge_check",
-                                          "answer": f"{len(know['demonstrated'])} topics answered correctly"}]})
-    return {"self_reported": self_reported, "indicated_by_answers": demonstrated,
-            "because": _because(a, "strengths"),
-            "note": "Self-reported strengths are your own description; the others follow from your answers."}
 
 
 def risk_capacity(a: Dict[str, Any]) -> dict:
     limits = []
     dep = a.get("rc_living_dependence")
     if dep == "yes":
-        limits.append(("LOW", "rc_living_dependence", "Losing this money would affect living expenses."))
+        limits.append(("LOW", "Losing this money would affect living expenses."))
     elif dep == "somewhat":
-        limits.append(("MODERATE", "rc_living_dependence", "Losing this money would partly affect living expenses."))
+        limits.append(("MODERATE", "Losing this money would partly affect living expenses."))
     ef = a.get("rc_emergency_fund")
     if ef == "no":
-        limits.append(("LOW", "rc_emergency_fund", "No separate emergency savings."))
+        limits.append(("LOW", "No separate emergency savings."))
     elif ef == "yes_lt6m":
-        limits.append(("MODERATE", "rc_emergency_fund", "Emergency savings cover less than six months."))
+        limits.append(("MODERATE", "Emergency savings cover less than six months."))
     hz = a.get("rc_horizon")
     if hz == "lt_1y":
-        limits.append(("LOW", "rc_horizon", "The money may be needed within a year."))
+        limits.append(("LOW", "The money may be needed within a year."))
     elif hz == "1_3y":
-        limits.append(("MODERATE", "rc_horizon", "The money may be needed within three years."))
+        limits.append(("MODERATE", "The money may be needed within three years."))
     ml = a.get("rc_max_loss")
     if ml == "lt_5":
-        limits.append(("LOW", "rc_max_loss", "A fall of more than 5% would change life plans."))
+        limits.append(("LOW", "A fall of more than 5% would change life plans."))
     elif ml == "5_15":
-        limits.append(("MODERATE", "rc_max_loss", "A fall of more than 15% would change life plans."))
-    level = _min_level("HIGHER", *[l for l, _, _ in limits])
-    return {"level": level, "limiting_factors": [msg for _lvl, _qid, msg in limits],
+        limits.append(("MODERATE", "A fall of more than 15% would change life plans."))
+    level = _min_level("HIGHER", *[lvl for lvl, _ in limits])
+    return {"level": level, "limiting_factors": [msg for _lvl, msg in limits],
             "because": _because(a, "rc_capital_band", "rc_living_dependence", "rc_emergency_fund", "rc_horizon",
                                 "rc_max_loss"),
             "note": "Capacity is set by the most limiting factor, not an average."}
@@ -117,41 +111,111 @@ def risk_capacity(a: Dict[str, Any]) -> dict:
 
 TOLERANCE_ITEMS = ["rt_volatility", "rt_temporary_loss", "rt_consecutive_losses", "rt_uncertainty",
                    "rt_concentration", "rt_leverage"]
+POINTS = {"uncomfortable": 0, "acceptable": 1, "comfortable": 2}
 
 
 def risk_tolerance(a: Dict[str, Any]) -> dict:
-    points = {"uncomfortable": 0, "acceptable": 1, "comfortable": 2}
-    vals = [points[a[q]] for q in TOLERANCE_ITEMS if q in a]
-    total = sum(vals)
+    total = sum(POINTS[a[q]] for q in TOLERANCE_ITEMS if q in a)
     level = "LOW" if total <= 4 else ("MODERATE" if total <= 8 else "HIGHER")
     return {"level": level, "because": _because(a, *TOLERANCE_ITEMS),
-            "note": "Tolerance reflects comfort with swings and losses, in six answers (0–12 points banded "
-                    "0–4 low, 5–8 moderate, 9–12 higher). It is a band, not a precise measure."}
+            "note": "Comfort with swings and losses across six answers (0–12 points banded 0–4 low, 5–8 moderate, "
+                    "9–12 higher). A band, not a precise measure."}
 
 
-def behaviour(a: Dict[str, Any]) -> List[dict]:
+def loss_tolerance(a: Dict[str, Any]) -> dict:
+    """Drawdown/loss tolerance: what finances can absorb (capacity) next to what feels bearable (comfort)."""
+    capacity = {"lt_5": "under 5%", "5_15": "5–15%", "15_30": "15–30%", "gt_30": "more than 30%"}.get(a.get("rc_max_loss"))
+    comfort = [a.get(q) for q in ("rt_temporary_loss", "rt_consecutive_losses")]
+    feel = ("finds losses hard to sit through" if "uncomfortable" in comfort else
+            "accepts losses as part of trading" if all(c in ("acceptable", "comfortable") for c in comfort) else "mixed")
+    return {"capacity_band": capacity, "comfort": feel,
+            "realistic_about_drawdowns": a.get("bl_drawdowns_normal") is True,
+            "because": _because(a, "rc_max_loss", "rt_temporary_loss", "rt_consecutive_losses", "bl_drawdowns_normal")}
+
+
+DISCIPLINE_GOOD = {"bh_exit_rule": {"always"}, "bh_after_losses": {"pause_review", "continue_plan"},
+                   "bh_size_after_loss": {"never"}, "bh_drawdown_reaction": {"hold_plan", "reduce"}}
+
+
+# ------------------------------------------------------------------ Passport dimensions
+def dimensions(a: Dict[str, Any], exp: dict, know: dict) -> List[dict]:
     out = []
+    assessed = len(know["assessed_topics"]) or 1
+    share = len(know["demonstrated"]) / assessed
+    k_state = "Experienced" if share >= 0.8 else "Developing" if share >= 0.5 else "Foundation"
+    out.append(_dimension("Market Knowledge", k_state,
+                          f"{len(know['demonstrated'])} of {len(know['assessed_topics'])} topics answered confidently.",
+                          know["because"], "≥80% of assessed topics: Experienced; ≥50%: Developing; otherwise Foundation"))
+    e_state = {"none": "Foundation", "beginner": "Foundation", "intermediate": "Developing",
+               "experienced": "Experienced"}[exp["overall"]]
+    rows = {r["value"]: r["label"] for r in QUESTION_INDEX["experience_by_class"][1]["rows"]}
+    top_markets = [rows[k] for k, v in exp["by_class"].items() if v == exp["overall"] and v != "none"]
+    out.append(_dimension("Experience", e_state,
+                          (f"Strongest: {', '.join(top_markets)} ({exp['overall']})." if top_markets
+                           else "No trading experience yet, which is a fine place to start."),
+                          exp["because"], "Highest band across markets: none/beginner Foundation, intermediate Developing, experienced Experienced"))
+    good = sum(1 for q, ok in DISCIPLINE_GOOD.items() if a.get(q) in ok)
+    d_state = "Experienced" if good == 4 else "Developing" if good >= 2 else "Foundation"
+    out.append(_dimension("Risk Discipline", d_state, f"{good} of 4 discipline habits in your answers.",
+                          _because(a, *DISCIPLINE_GOOD), "Planned exits, steady after losses, no size-chasing, "
+                          "measured response to falls: all 4 Experienced; 2–3 Developing; 0–1 Foundation"))
+    style = {"detail": "Detail-led", "pattern": "Pattern-led", "big_picture": "Big-picture"}.get(a.get("thinking_style"), "—")
+    speed = {"quick": "quick to decide", "considered": "considered", "slow": "prefers time"}.get(a.get("bh_decision_speed"), "")
+    consistency = {"rarely": "consistent", "sometimes": "fairly consistent", "often": "changes approach often"}.get(
+        a.get("bh_strategy_switch"), "")
+    out.append(_dimension("Decision Style", style, f"{style}, {speed}, {consistency}.",
+                          _because(a, "thinking_style", "bh_decision_speed", "bh_strategy_switch"),
+                          "Descriptive, not a level"))
+    c_state = {"new": "Foundation", "other_tools": "Developing", "css_before": "Experienced"}.get(a.get("css_familiarity"), "Foundation")
+    out.append(_dimension("CSS Familiarity", c_state,
+                          {"Foundation": "New to tools like CSS: explanations on by default.",
+                           "Developing": "Familiar with similar tools.",
+                           "Experienced": "Has used CSS before."}[c_state],
+                          _because(a, "css_familiarity"), "Self-reported"))
+    lvl = {"full": "Walk-through", "key_points": "Key points", "minimal": "Minimal"}.get(a.get("support_level"), "—")
+    out.append(_dimension("Support Preference", lvl,
+                          f"{lvl} explanations; learns through {', '.join(_label('learning_style', a.get('learning_style', []))).lower() or '—'}.",
+                          _because(a, "support_level", "learning_style"), "Descriptive, not a level"))
+    return out
+
+
+def strengths(a: Dict[str, Any], know: dict) -> List[dict]:
+    out = [{"strength": s, "source": "self-described", "because": _because(a, "strengths")}
+           for s in _label("strengths", a.get("strengths", []))]
+    if a.get("bh_exit_rule") == "always":
+        out.append({"strength": "Plans exits in advance", "source": "from your answers", "because": _because(a, "bh_exit_rule")})
+    if a.get("bh_after_losses") in ("pause_review", "continue_plan"):
+        out.append({"strength": "Steady after losing streaks", "source": "from your answers",
+                    "because": _because(a, "bh_after_losses")})
+    if len(know["demonstrated"]) >= 6:
+        out.append({"strength": "Solid grasp of trading basics", "source": "from your answers",
+                    "because": [{"question_id": "knowledge_check", "answer": f"{len(know['demonstrated'])} topics confident"}]})
+    return out
+
+
+def development_areas(a: Dict[str, Any], know: dict) -> List[dict]:
+    out = [{"area": g["topic"], "note": g["note"], "source": "knowledge check",
+            "because": [b for b in know["because"] if b["answer"] != "correct"]} for g in know["gap_notes"]]
     if a.get("bh_size_after_loss") in ("sometimes", "often") or a.get("bh_after_losses") == "trade_more" \
             or a.get("bh_drawdown_reaction") == "add_more":
-        out.append({"consideration": "Risk of chasing losses",
-                    "support": "CSS will show position-size reminders after losing trades and flag size increases.",
-                    "because": _because(a, "bh_size_after_loss", "bh_after_losses", "bh_drawdown_reaction")})
-    if a.get("bh_time_pressure") == "stressful":
-        out.append({"consideration": "Prefers time to decide",
-                    "support": "Favour longer holding periods and alerts with wider decision windows.",
-                    "because": _because(a, "bh_time_pressure")})
+        out.append({"area": "Chasing losses", "note": "CSS shows position-size reminders after losing trades and flags size increases.",
+                    "source": "decision habits", "because": _because(a, "bh_size_after_loss", "bh_after_losses", "bh_drawdown_reaction")})
+    if a.get("bh_decision_speed") == "slow":
+        out.append({"area": "Decisions under time pressure", "note": "Favour longer holding periods and wider decision windows.",
+                    "source": "decision habits", "because": _because(a, "bh_decision_speed")})
     if a.get("bh_exit_rule") == "rarely":
-        out.append({"consideration": "Exits not usually planned in advance",
-                    "support": "Trade Cards show a stop and target up front; the journal prompts for an exit plan.",
-                    "because": _because(a, "bh_exit_rule")})
+        out.append({"area": "Planning exits", "note": "Trade Cards show a stop and target up front; the journal asks for an exit plan.",
+                    "source": "decision habits", "because": _because(a, "bh_exit_rule")})
     if a.get("bh_strategy_switch") == "often":
-        out.append({"consideration": "Changes strategy quickly",
-                    "support": "Analytics show results over a meaningful sample before suggesting changes.",
-                    "because": _because(a, "bh_strategy_switch")})
+        out.append({"area": "Sticking with a strategy", "note": "Analytics show results over a meaningful sample before suggesting changes.",
+                    "source": "decision habits", "because": _because(a, "bh_strategy_switch")})
     if a.get("bh_drawdown_reaction") == "exit_all":
-        out.append({"consideration": "May exit everything in a sharp fall",
-                    "support": "Start smaller so normal swings stay within your comfort.",
-                    "because": _because(a, "bh_drawdown_reaction")})
+        out.append({"area": "Reacting to sharp falls", "note": "Start smaller so normal swings stay within your comfort.",
+                    "source": "decision habits", "because": _because(a, "bh_drawdown_reaction")})
+    for b in a.get("barriers", []):
+        if b != "other":
+            out.append({"area": _label("barriers", b), "note": "You named this as something holding you back.",
+                        "source": "your barriers", "because": _because(a, "barriers")})
     return out
 
 
@@ -183,10 +247,10 @@ def expectations_calibration(a: Dict[str, Any], know: dict, cap: dict) -> List[d
         add("UNREALISTIC_RETURN", "major",
             "Aiming to double your money in a year usually needs very high risk, which also makes large losses "
             "likely. CSS will not tune itself to that target.", "education:returns_and_risk", "ex_return_range")
-    if a.get("ex_drawdown") == "none":
+    if a.get("bl_drawdowns_normal") is False:
         add("ZERO_DRAWDOWN_EXPECTATION", "major",
             "Every trading approach has periods where the account falls. Expecting none at all isn't realistic.",
-            "education:drawdown", "ex_drawdown")
+            "education:drawdown", "bl_drawdowns_normal")
     if a.get("ex_risk") == "high" and cap["level"] == "LOW":
         add("RISK_EXCEEDS_CAPACITY", "major",
             "You expect to take high risk, but your answers show this money can't absorb large losses. CSS will "
@@ -195,6 +259,10 @@ def expectations_calibration(a: Dict[str, Any], know: dict, cap: dict) -> List[d
         add("FREQUENCY_TIME_MISMATCH", "minor",
             "Many trades a day needs quick responses. With your availability, fewer, longer trades fit better.",
             "education:pacing", "ex_trade_frequency", "monitoring_availability")
+    if "intraday" in a.get("holding_periods", []) and a.get("monitoring_availability") == "end_of_day":
+        add("HOLDING_TIME_MISMATCH", "minor",
+            "Intraday trades need attention during the day. With end-of-day availability, longer holds fit better.",
+            "education:pacing", "holding_periods", "monitoring_availability")
     wants_complex = any(m in a.get("preferred_markets", []) for m in ("options", "futures")) \
         or a.get("uses_leverage") in ("small", "yes")
     if wants_complex and COMPLEX_TOPICS & set(know["gap_topics"]):
@@ -202,7 +270,7 @@ def expectations_calibration(a: Dict[str, Any], know: dict, cap: dict) -> List[d
             "Leveraged or complex products can lose more than expected quickly. Learn leverage and margin and "
             "practise in the simulator first.", "simulation:first", "preferred_markets", "uses_leverage",
             "kq_leverage", "kq_margin_call")
-    if a.get("rc_living_dependence") == "yes" and "supplement" in a.get("objective_ranking", [])[:1]:
+    if a.get("rc_living_dependence") == "yes" and a.get("objective_ranking", [None])[0] in ("supplement", "aggressive_growth"):
         add("INCOME_DEPENDENCE", "major",
             "Money needed for living expenses shouldn't depend on trading results.", "mode:stricter",
             "rc_living_dependence", "objective_ranking")
@@ -210,14 +278,11 @@ def expectations_calibration(a: Dict[str, Any], know: dict, cap: dict) -> List[d
 
 
 # ------------------------------------------------------------------ mode
-def recommend_mode(a: Dict[str, Any], exp: dict, know: dict, cap: dict, tol: dict, flags: List[dict]) -> dict:
-    reasons, because = [], []
+def recommend_mode(a: Dict[str, Any], exp: dict, know: dict, cap: dict, flags: List[dict]) -> dict:
     major = [f for f in flags if f["severity"] == "major"]
     core_gaps = set(know["gap_topics"]) & CORE_TOPICS
     markets = a.get("preferred_markets", [])
-    exp_in_markets = [exp["by_class"].get(m, "none") for m in markets]
-    experienced_somewhere = any(BAND_ORDER.index(b) >= 2 for b in exp_in_markets)
-
+    experienced_somewhere = any(BAND_ORDER.index(exp["by_class"].get(m, "none")) >= 2 for m in markets)
     blocked = []
     if not experienced_somewhere:
         blocked.append("Intermediate or better experience in a market you chose is needed for Confirm.")
@@ -229,8 +294,7 @@ def recommend_mode(a: Dict[str, Any], exp: dict, know: dict, cap: dict, tol: dic
         blocked.append("Your risk capacity is low, so CSS keeps you in control of every decision.")
     mode = "DISCOVER" if blocked else "CONFIRM"
     reasons = blocked or ["Experience in your chosen markets, solid core knowledge and realistic expectations."]
-    because = _because(a, "experience_by_class", "preferred_markets", "assistance_preference")
-    simulation_first = (exp["overall"] in ("none", "beginner")) or bool(core_gaps) or \
+    simulation_first = exp["overall"] in ("none", "beginner") or bool(core_gaps) or \
         any(f["action"] == "simulation:first" for f in flags)
     pref = a.get("assistance_preference")
     note = None
@@ -241,14 +305,36 @@ def recommend_mode(a: Dict[str, Any], exp: dict, know: dict, cap: dict, tol: dic
     elif pref == "confirm" and mode == "DISCOVER":
         note = "You asked for Confirm. CSS suggests starting in Discover for the reasons shown; you can revisit later."
     return {"recommended": mode, "user_preference": pref, "reasons": reasons, "simulation_first": simulation_first,
-            "auto_interest_recorded": pref == "auto_interest", "note": note, "because": because}
+            "auto_interest_recorded": pref == "auto_interest", "note": note,
+            "because": _because(a, "experience_by_class", "preferred_markets", "assistance_preference")}
 
 
-def education_plan(know: dict, flags: List[dict], mode: dict) -> List[dict]:
-    plan = [{"item": EDUCATION_MODULES[t], "why": f"Knowledge check: {TOPIC_LABELS[t]}"} for t in know["gap_topics"]]
+def leverage_profile(a: Dict[str, Any], know: dict) -> dict:
+    if "kq_leverage" not in a:
+        return {"familiarity": "Not assessed (no leveraged markets in your answers)", "intent": "Not asked", "because": []}
+    understood = {"leverage", "margin"} <= set(know["demonstrated_topics"])
+    return {"familiarity": "Understands leverage and margin" if understood else "Leverage and margin to learn first",
+            "intent": _label("uses_leverage", a.get("uses_leverage")),
+            "because": _because(a, "kq_leverage", "kq_margin_call", "uses_leverage")}
+
+
+def engagement_style(a: Dict[str, Any]) -> dict:
+    cadence = _label("engagement_cadence", a.get("engagement_cadence"))
+    window = _label("monitoring_availability", a.get("monitoring_availability"))
+    style = ("Active monitor" if a.get("monitoring_availability") == "within_minutes" else
+             "Periodic reviewer" if a.get("monitoring_availability") == "within_hours" else "End-of-day planner")
+    return {"style": style, "summary": f"Checks in {str(cadence).lower()}; responds {str(window).lower()}.",
+            "notifications": _label("notification_preference", a.get("notification_preference")),
+            "channel": _label("preferred_channel", a.get("preferred_channel")),
+            "because": _because(a, "engagement_cadence", "monitoring_availability", "notification_preference",
+                                "preferred_channel")}
+
+
+def education_plan(know: dict, flags: List[dict], mode: dict, a: Dict[str, Any]) -> List[dict]:
+    plan = [{"item": f"CSS Learn: {TOPIC_LABELS[t]}", "why": f"Knowledge check: {TOPIC_LABELS[t]}"} for t in know["gap_topics"]]
     for f in flags:
         if f["action"].startswith("education:"):
-            plan.append({"item": "CSS Learn: " + f["action"].split(":", 1)[1].replace("_", " ").title(),
+            plan.append({"item": "CSS Learn: " + f["action"].split(":", 1)[1].replace("_", " ").capitalize(),
                          "why": f["code"]})
     if mode["simulation_first"]:
         plan.append({"item": "Paper trading in the CSS simulator", "why": "Practise before using real money"})
@@ -256,6 +342,9 @@ def education_plan(know: dict, flags: List[dict], mode: dict) -> List[dict]:
     for p in plan:
         if p["item"] not in seen:
             seen.add(p["item"]); out.append(p)
+    fmt = _label("learning_style", a.get("learning_style", []))
+    for p in out:
+        p["format"] = fmt
     return out
 
 
@@ -267,39 +356,45 @@ def build_passport(session: dict) -> dict:
     cap = risk_capacity(a)
     tol = risk_tolerance(a)
     flags = expectations_calibration(a, know, cap)
-    mode = recommend_mode(a, exp, know, cap, tol, flags)
+    mode = recommend_mode(a, exp, know, cap, flags)
     posture = _min_level(cap["level"], tol["level"])
     return {
         "questionnaire_version": QUESTIONNAIRE_VERSION,
         "rules_version": RULES_VERSION,
         "preferred_name": a.get("display_name"),
+        "dimensions": dimensions(a, exp, know),
         "experience": exp,
-        "strengths": strengths(a, know),
         "knowledge": know,
+        "strengths": strengths(a, know),
+        "development_areas": development_areas(a, know),
         "risk_capacity": cap,
         "risk_tolerance": tol,
-        "risk_posture": {"level": posture,
-                         "mismatch": cap["level"] != tol["level"],
+        "loss_tolerance": loss_tolerance(a),
+        "risk_posture": {"level": posture, "mismatch": cap["level"] != tol["level"],
                          "note": ("Your comfort with risk is higher than your finances can absorb; CSS plans around "
                                   "capacity." if LEVELS.index(tol["level"]) > LEVELS.index(cap["level"]) else
                                   "Your finances could absorb more risk than you're comfortable with; CSS plans around "
                                   "your comfort." if LEVELS.index(tol["level"]) < LEVELS.index(cap["level"]) else
                                   "Capacity and tolerance agree.")},
-        "behavioural_considerations": behaviour(a),
+        "objectives": {"goals": _label("objectives", a.get("objectives", [])),
+                       "priorities": _label("objective_ranking", a.get("objective_ranking", [])),
+                       "because": _because(a, "objectives", "objective_ranking")},
         "preferred_markets": _label("preferred_markets", a.get("preferred_markets", [])),
         "holding_periods": _label("holding_periods", a.get("holding_periods", [])),
-        "engagement": {k: _label(k, a[k]) for k in ("engagement_cadence", "monitoring_availability",
-                                                     "notification_preference") if k in a},
-        "barriers": _label("barriers", a.get("barriers", [])),
-        "priorities": _label("objective_ranking", a.get("objective_ranking", [])),
+        "leverage": leverage_profile(a, know),
+        "engagement": engagement_style(a),
+        "expectations": {"primary_value": _label("ex_primary_value", a.get("ex_primary_value")),
+                         "success": _label("ex_success", a.get("ex_success", [])),
+                         "because": _because(a, "ex_primary_value", "ex_success")},
         "expectations_calibration": flags,
-        "education_plan": education_plan(know, flags, mode),
+        "education_plan": education_plan(know, flags, mode, a),
         "mode": mode,
         "feature_preferences": _label("feature_preferences", a.get("feature_preferences", [])),
         "stages_answered": [s["id"] for s in visible_stages(session["answers"]) if s["kind"] != "result"],
         "execution_authority_granted": False,
         "authority_note": ("This Passport is guidance. It grants no execution authority and does not change any CSS "
                            "trading mode, broker setting or governance gate."),
+        "suitability_note": NOT_SUITABILITY,
         "legal_acceptance_note": ("Onboarding acknowledgements are not acceptance of the CSS Terms or the Trading Risk "
                                   "Disclosure; those are recorded separately by CSS compliance."),
     }

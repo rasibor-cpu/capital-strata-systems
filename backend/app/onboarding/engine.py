@@ -132,6 +132,34 @@ def new_session(user_key: str) -> dict:
             "current_stage": STAGES[0]["id"], "answers": {}, "events": []}
 
 
+def migrate_session(session: dict) -> dict:
+    """Bring a session from an older questionnaire version onto the current one. Answers to questions that still
+    exist and still validate are kept (provenance gains `migrated_from`); everything else is dropped and logged. The
+    user resumes at the first step that now needs an answer. Nothing is guessed or mapped between different questions."""
+    old = session.get("questionnaire_version")
+    if old == QUESTIONNAIRE_VERSION:
+        return session
+    kept, dropped = {}, []
+    for qid, rec in session.get("answers", {}).items():
+        if qid in QUESTION_INDEX:
+            v, err = validate_answer(QUESTION_INDEX[qid][1], rec.get("value"))
+            if not err and v is not None:
+                kept[qid] = dict(rec, value=v, questionnaire_version=QUESTIONNAIRE_VERSION, migrated_from=old)
+                continue
+        dropped.append(qid)
+    session["answers"] = kept
+    session["questionnaire_version"] = QUESTIONNAIRE_VERSION
+    _prune_hidden(session)
+    _event(session, "questionnaire_migrated", from_version=old, to_version=QUESTIONNAIRE_VERSION,
+           kept=sorted(kept), dropped=sorted(dropped))
+    first = next((s["id"] for s in visible_stages(session["answers"]) if s["kind"] != "result"
+                  and any(q.get("required") and q["id"] not in session["answers"] for q in s.get("questions", []))), "passport")
+    session["current_stage"] = first
+    if session.get("status") == "complete":
+        session["status"] = "reviewing"
+    return session
+
+
 def _event(session: dict, kind: str, **data) -> None:
     # Events carry ids and timestamps only, never answer values, so they are safe to log.
     e = {"at": _now(), "kind": kind, **data}

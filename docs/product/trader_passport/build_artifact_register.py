@@ -27,8 +27,10 @@ changed.discard(str(OUT.relative_to(ROOT)))
 def category(p: str) -> tuple[str, str]:
     if p.endswith(".svg"):
         return "graphic", "Original hand-authored SVG, created 2026-10-05 for Issue #102; no external source, no third-party artwork"
-    if "/screenshots/" in p:
-        return "screenshot evidence", "Playwright/Chromium capture of the local standalone app, S24 emulation unless named otherwise; synthetic data"
+    if "/phase1_before/" in p:
+        return "screenshot evidence (before)", "Phase-1 capture (commit 89056d7), moved unchanged from evidence/screenshots; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data"
+    if "/phase2_after/" in p:
+        return "screenshot evidence (after)", "Phase-2 capture of the local standalone app; Playwright/Chromium, S24 emulation unless named otherwise; synthetic data"
     if p.startswith("tests/"):
         return "test", "Written for Issue #102"
     if p.startswith("docs/"):
@@ -50,16 +52,20 @@ for p in sorted(changed):
 register = {
     "standard": "PAPS-001", "work_item": "rasibor-cpu/capital-strata-systems#102",
     "branch": "claude/css-trader-passport-102", "start_sha": START_SHA, "created_on": "2026-10-05",
-    "questionnaire_version": "TP-Q-1.0.0", "rules_version": "TP-R-1.0.0", "origin_policy_version": "TO-1.0.0",
+    "phase": 2, "phase1_end_sha": "89056d7",
+    "questionnaire_version": "TP-Q-2.0.0", "rules_version": "TP-R-2.0.0", "origin_policy_version": "TO-2.0.0",
+    "commercial_policy_version": "CA-1.0.0-draft (no fee computed)",
     "search_before_create": [
         "No existing onboarding, questionnaire or trader-profile code found (grep across repo, excluding archives)",
         "Existing trade attribution (scripts/css_trade_attribution.py) is P&L by asset class only, no origin: extended by a new module, not replaced",
         "Existing legal acceptance (backend/app/compliance/legal_acceptance*) reused as the authority; onboarding acknowledgements explicitly are not legal acceptance",
         "Existing auth (backend/app/auth token_store) reused for sessions",
-        "No existing CSS illustration set found for onboarding; 8 new SVGs created",
+        "No existing CSS illustration set found for onboarding; 8 new SVGs created in phase 1, 1 (two_paths) in phase 2",
+        "Phase 2: phase-1 screenshots searched and reused as the 'before' set (moved, not regenerated); no commercial fee/hurdle/loss-recovery implementation found in the repo (engine/risk/profit_tier_engine.py 20% is a take-profit tier), so commercial.py adds gated machinery only",
+        "Phase 2: governed components (R7, R14F, AntiBleedGuard, journals, persistence, trade warehouse) read for the integration design; none modified",
     ],
     "not_preserved_in_git": [
-        {"item": "full-resolution PNG screenshots (21 MB)", "reason": "size; preserved as full-resolution WebP (quality 80) in evidence/screenshots"},
+        {"item": "full-resolution PNG screenshots", "reason": "size; preserved as full-resolution WebP (quality 80) in evidence/phase1_before and evidence/phase2_after"},
         {"item": "test virtualenv, Playwright browser, axe-core 4.14.0 package", "reason": "third-party tooling, reinstallable; versions recorded in evidence"},
     ],
     "generated_not_preserved": [],

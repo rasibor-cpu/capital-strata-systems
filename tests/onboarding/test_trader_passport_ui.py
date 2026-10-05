@@ -180,8 +180,15 @@ def test_full_flow_s24_accessibility_and_layout(browser, server):
     assert seen[0] == "welcome" and "acknowledgements" in seen
     page.click("#next")                                            # Build my Passport
     page.wait_for_selector(".pp-hero")
-    assert "Recommended mode" in page.inner_text(".pp-hero")
+    assert "Starting mode" in page.inner_text(".pp-hero")
     assert "grants no execution authority" in page.inner_text("main")
+    assert "does not make anyone suitable for live trading" in page.inner_text(".authority")
+    assert page.locator(".dim").count() == 6
+    assert [page.locator(".dim h3").nth(i).inner_text() for i in range(6)] == [
+        "Market Knowledge", "Experience", "Risk Discipline", "Decision Style", "CSS Familiarity", "Support Preference"]
+    why_text = page.locator(".dim .why").first.text_content()
+    assert "kq_" not in why_text and "—" in why_text            # traced to question prompts, not raw ids
+    assert "auto" not in page.inner_text(".badges").lower() or "not enabled" in page.inner_text(".badges").lower()
     _layout_checks(page)
     _shot(page, "s24_passport")
     v = _axe(page)
@@ -190,7 +197,11 @@ def test_full_flow_s24_accessibility_and_layout(browser, server):
     page.goto(server + "/passport/app/index.html#performance")
     page.wait_for_selector(".kpis")
     assert "not real trades" in page.inner_text(".sample")
-    assert page.locator(".kpi").count() == 4
+    assert page.locator(".kpi").count() == 3
+    labels = page.inner_text(".kpis")
+    assert "CSS-attributable" in labels and "independent" in labels and "Combined" in labels
+    assert "not guaranteed profits" in page.inner_text("main")
+    assert page.locator("tbody tr").count() == 4
     _layout_checks(page)
     _shot(page, "s24_performance")
     v = _axe(page)
@@ -276,3 +287,57 @@ def test_conditional_steps_accessibility(browser, server):
     if AXE is None:
         pytest.skip("conditional steps reached and layout-checked; axe-core not configured, scan skipped")
     assert violations == {}, violations
+
+
+def test_enter_submits_and_error_summary_links(browser, server):
+    page, _ = _page(browser, server, "ui-enter")
+    page.check("#ack_risk_intro")
+    page.keyboard.press("Enter")                                   # focus is on the checkbox inside the form
+    page.wait_for_selector("#display_name")
+    page.focus("#display_name"); page.keyboard.press("Enter")       # everything empty: several errors
+    page.wait_for_selector(".error-summary")
+    links = page.locator(".error-summary a")
+    assert links.count() >= 3
+    assert page.get_attribute("#display_name", "aria-invalid") == "true"
+    _shot(page, "s24_error_summary")
+    links.nth(1).click()
+    assert page.evaluate("document.activeElement.getAttribute('aria-invalid')") == "true"
+    page.fill("#display_name", "Lin"); page.fill("#email", "lin@example.com"); page.select_option("#country", "SG")
+    page.click("label[for='preferred_channel-push']")
+    page.focus("#email"); page.keyboard.press("Enter")
+    page.wait_for_selector("text=Your goals and priorities")
+
+
+def test_resume_banner_after_reload(browser, server):
+    page, _ = _page(browser, server, "ui-banner")
+    page.check("#ack_risk_intro"); page.click("#next")
+    page.wait_for_selector("#display_name")
+    page.reload(); page.wait_for_selector("#display_name")
+    assert "Welcome back" in page.inner_text(".banner")
+    _layout_checks(page)
+    _shot(page, "s24_resume_banner")
+    page.fill("#display_name", "Lin"); page.fill("#email", "lin@example.com"); page.select_option("#country", "SG")
+    page.click("label[for='preferred_channel-push']"); page.click("#next")
+    page.wait_for_selector("text=Your goals and priorities")
+    assert page.locator(".banner").count() == 0                     # shown once, on resume only
+
+
+def test_attribution_education_screen(browser, server):
+    page, token = _page(browser, server, "ui-paths")
+    for _ in range(40):
+        stage = _current(page, server, token)["stage"]
+        if stage["id"] == "attribution_paths":
+            break
+        _answer_stage(page, stage, BASE)
+        page.click("#next")
+        page.wait_for_timeout(120)
+    page.wait_for_selector("text=Two kinds of trades, kept apart")
+    assert page.locator(".points li").count() == 2
+    assert "not a guaranteed profit" in page.inner_text(".callout")
+    assert page.evaluate("document.querySelector('img.illustration').naturalWidth") > 0     # two_paths.svg loads
+    _layout_checks(page)
+    _shot(page, "s24_attribution_paths")
+    v = _axe(page)
+    if AXE is None:
+        pytest.skip("screen rendered and layout-checked; axe-core not configured, scan skipped")
+    assert not v, v

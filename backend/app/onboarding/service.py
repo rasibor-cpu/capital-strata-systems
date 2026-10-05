@@ -33,6 +33,9 @@ class OnboardingService:
         if doc is None:
             doc = {"session": engine.new_session(key), "passport": None, "revisions": []}
             self.store.save(key, doc)
+        elif doc["session"].get("questionnaire_version") != QUESTIONNAIRE_VERSION:
+            engine.migrate_session(doc["session"])          # earlier revisions and Passport are kept unchanged
+            self.store.save(key, doc)
         return key, doc
 
     def _save(self, key: str, doc: dict) -> None:

@@ -26,8 +26,9 @@ BASE = {
     "kq_market_vs_limit": "b", "kq_stop": "b", "kq_position_size": "b", "kq_risk_reward": "b",
     "kq_volatility": "a", "kq_drawdown": "b", "kq_diversification": "b", "kq_exposure": "b",
     "kq_leverage": "b", "kq_margin_call": "b",
+    "css_familiarity": "other_tools", "thinking_style": "pattern",
     "strengths": ["disciplined", "risk_aware"],
-    "bh_time_pressure": "manageable", "bh_after_losses": "pause_review", "bh_drawdown_reaction": "hold_plan",
+    "bh_decision_speed": "considered", "bh_after_losses": "pause_review", "bh_drawdown_reaction": "hold_plan",
     "bh_size_after_loss": "never", "bh_exit_rule": "always", "bh_strategy_switch": "rarely",
     "rc_capital_band": "10k_50k", "rc_living_dependence": "no", "rc_emergency_fund": "yes_6m", "rc_horizon": "gt_3y",
     "rc_max_loss": "15_30",
@@ -35,14 +36,14 @@ BASE = {
     "rt_uncertainty": "acceptable", "rt_concentration": "acceptable", "rt_leverage": "uncomfortable",
     "barriers": ["time"], "preferred_markets": ["equities", "etfs"], "holding_periods": ["days", "weeks"],
     "uses_leverage": "no", "assistance_preference": "confirm", "auto_understanding": "mechanics_only",
-    "feature_preferences": ["trade_cards", "analytics", "journal"],
+    "feature_preferences": ["trade_cards", "analytics", "journal"], "support_level": "key_points",
+    "learning_style": ["worked_examples", "practice"],
     "engagement_cadence": "daily", "monitoring_availability": "within_hours", "notification_preference": "important_only",
-    "ex_role": "propose", "ex_trade_frequency": "weekly", "ex_holding_period": "days", "ex_automation": "approve",
-    "ex_communication": "summaries", "ex_risk": "moderate", "ex_drawdown": "10_20", "ex_return_range": "modest",
+    "ex_primary_value": "understand", "ex_trade_frequency": "weekly", "ex_risk": "moderate", "ex_return_range": "modest",
     "ex_success": ["better_decisions", "discipline"],
-    "bl_every_trade_profitable": False, "bl_losses_possible": True, "bl_auto_guarantees": False,
+    "bl_every_trade_profitable": False, "bl_losses_possible": True, "bl_drawdowns_normal": True, "bl_auto_guarantees": False,
     "bl_css_compensates": False,
-    "objective_ranking": ["steady_growth", "learning", "preservation"],
+    "objective_ranking": ["steady_growth", "long_term_wealth", "preservation"],
     "ack_attribution": True, "ack_no_guarantee": True, "ack_recommendation_not_authority": True,
     "ack_responsibility": True,
 }
@@ -199,6 +200,34 @@ def test_store_file_is_private_and_not_named_by_user(tmp_path):
     assert oct(files[0].stat().st_mode & 0o777) == "0o600"
 
 
+def test_every_question_has_purpose_and_dimension():
+    for s in STAGES:
+        for q in s.get("questions", []):
+            assert len(q.get("purpose", "")) >= 20, q["id"]
+            assert q.get("dimension"), q["id"]
+
+
+def test_every_question_is_used_by_rules_or_record():
+    """No orphan questions: each answer feeds the Passport (rules), contact/consent records, or an acknowledgement."""
+    import inspect
+    from backend.app.onboarding import rules
+    src = inspect.getsource(rules)
+    record_only = {"full_name", "email", "phone", "country", "consent_service_notifications", "consent_marketing",
+                   "ack_risk_intro", "ack_attribution", "ack_no_guarantee", "ack_recommendation_not_authority",
+                   "ack_responsibility"}
+    quiz = {q["id"] for s in STAGES for q in s.get("questions", []) if q["type"] == "quiz"}   # via quiz_feedback
+    for s in STAGES:
+        for q in s.get("questions", []):
+            if q["id"] in record_only or q["id"] in quiz:
+                continue
+            assert f'"{q["id"]}"' in src, f"{q['id']} is asked but never used"
+
+
+def test_no_duplicate_prompts():
+    prompts = [q["prompt"].strip().lower() for s in STAGES for q in s.get("questions", [])]
+    assert len(prompts) == len(set(prompts))
+
+
 def test_store_rejects_path_tricks(tmp_path):
     with pytest.raises(ValueError):
         OnboardingStore(tmp_path).load("../etc/passwd")
@@ -220,7 +249,7 @@ def test_auto_check_appears_only_for_auto_interest(svc):
 
 
 def test_hidden_stage_answers_are_pruned(svc):
-    walk(svc, "pr", dict(BASE, assistance_preference="auto_interest"), stop_before="features")
+    walk(svc, "pr", dict(BASE, assistance_preference="auto_interest"), stop_before="support")
     svc.back("pr"); svc.back("pr")                            # back to the assistance step
     svc.submit("pr", "assistance", {"assistance_preference": "discover"})
     doc = svc.store.load(user_key("pr"))
@@ -289,7 +318,9 @@ def test_no_code_path_grants_authority():
     ({"assistance_preference": "auto_interest", "auto_understanding": "guaranteed"}, "AUTO_MISUNDERSTANDING"),
     ({"bl_css_compensates": True}, "COMPENSATION_EXPECTATION"),
     ({"ex_return_range": "double_plus"}, "UNREALISTIC_RETURN"),
-    ({"ex_drawdown": "none"}, "ZERO_DRAWDOWN_EXPECTATION"),
+    ({"bl_drawdowns_normal": False}, "ZERO_DRAWDOWN_EXPECTATION"),
+    ({"holding_periods": ["intraday"], "monitoring_availability": "end_of_day"}, "HOLDING_TIME_MISMATCH"),
+    ({"rc_living_dependence": "yes", "objective_ranking": ["supplement", "steady_growth", "preservation"]}, "INCOME_DEPENDENCE"),
     ({"ex_trade_frequency": "many_daily"}, "FREQUENCY_TIME_MISMATCH"),
 ])
 def test_expectation_mismatches_are_calibrated_not_rewarded(svc, overrides, code):
@@ -326,20 +357,87 @@ def test_risk_capacity_and_tolerance_are_distinct(svc):
     assert p2["risk_posture"]["level"] == "LOW"
 
 
-def test_behavioural_considerations(svc):
-    p = complete(svc, "bh", bh_size_after_loss="often", bh_exit_rule="rarely")
-    names = [b["consideration"] for b in p["behavioural_considerations"]]
-    assert "Risk of chasing losses" in names and "Exits not usually planned in advance" in names
+def test_development_areas_from_habits_gaps_and_barriers(svc):
+    p = complete(svc, "bh", bh_size_after_loss="often", bh_exit_rule="rarely", kq_drawdown="not_sure",
+                 barriers=["emotions"])
+    areas = {d["area"]: d["source"] for d in p["development_areas"]}
+    assert areas["Chasing losses"] == "decision habits" and areas["Planning exits"] == "decision habits"
+    assert areas["Drawdown"] == "knowledge check"
+    assert any(src == "your barriers" for src in areas.values())
+    assert "Plans exits in advance" not in [s["strength"] for s in p["strengths"]]
 
 
 def test_every_recommendation_is_explainable(svc):
     p = complete(svc, "why", bl_every_trade_profitable=True, bh_size_after_loss="often")
     for section in (p["risk_capacity"], p["risk_tolerance"], p["mode"], p["experience"]):
         assert section["because"], section
-    for item in p["expectations_calibration"] + p["behavioural_considerations"]:
+    for item in p["expectations_calibration"] + p["development_areas"] + p["strengths"] + p["dimensions"]:
         assert item["because"]
         for b in item["because"]:
             assert b["question_id"] and "answer" in b
+
+
+def test_passport_dimensions_states_and_traceability(svc):
+    p = complete(svc, "dims")
+    names = [d["dimension"] for d in p["dimensions"]]
+    assert names == ["Market Knowledge", "Experience", "Risk Discipline", "Decision Style", "CSS Familiarity",
+                     "Support Preference"]
+    levelled = {d["dimension"]: d["state"] for d in p["dimensions"]}
+    for n in ("Market Knowledge", "Experience", "Risk Discipline", "CSS Familiarity"):
+        assert levelled[n] in ("Foundation", "Developing", "Experienced")
+    assert levelled["Experience"] == "Experienced" and levelled["CSS Familiarity"] == "Developing"
+    assert levelled["Decision Style"] == "Pattern-led" and levelled["Support Preference"] == "Key points"
+    for d in p["dimensions"]:
+        assert d["because"] and d["basis"] and d["summary"]
+    beginner = complete(svc, "dims2", experience_by_class={c: "none" for c in ALL_CLASSES}, css_familiarity="new",
+                        kq_stop="a", kq_drawdown="not_sure", kq_exposure="a", kq_volatility="b", kq_risk_reward="a",
+                        bh_exit_rule="rarely", bh_size_after_loss="often", bh_after_losses="trade_more")
+    st = {d["dimension"]: d["state"] for d in beginner["dimensions"]}
+    assert st["Experience"] == "Foundation" and st["Market Knowledge"] == "Foundation"
+    assert st["Risk Discipline"] == "Foundation" and st["CSS Familiarity"] == "Foundation"
+
+
+def test_passport_never_implies_suitability_or_auto(svc):
+    p = complete(svc, "suit", assistance_preference="auto_interest")
+    blob = json.dumps(p).lower()
+    assert "does not make anyone suitable for live trading" in p["suitability_note"].lower()
+    assert p["mode"]["recommended"] != "AUTO" and p["execution_authority_granted"] is False
+    for bad in ("you are suitable", "approved for live", "ready for live", "profitability score", "potential score",
+                "suitability score", "readiness score"):
+        assert bad not in blob
+
+
+def test_passport_reports_markets_engagement_and_loss_tolerance(svc):
+    p = complete(svc, "mk", monitoring_availability="within_minutes")
+    assert p["preferred_markets"] == ["Stocks (equities)", "ETFs"]
+    assert p["engagement"]["style"] == "Active monitor" and p["engagement"]["because"]
+    assert p["loss_tolerance"]["capacity_band"] == "15–30%" and p["loss_tolerance"]["realistic_about_drawdowns"]
+    assert p["objectives"]["priorities"][0] == "Steady growth"
+
+
+# ---------------------------------------------------------------- version migration
+def test_v1_session_migrates_keeping_valid_answers(svc):
+    walk(svc, "mig", BASE)
+    svc.complete("mig")
+    doc = svc.store.load(user_key("mig"))
+    s = doc["session"]
+    s["questionnaire_version"] = "TP-Q-1.0.0"
+    s["answers"]["ex_role"] = {"value": "propose", "answered_at": "2026-01-01T00:00:00+00:00", "stage_id": "expectations",
+                               "questionnaire_version": "TP-Q-1.0.0", "source": "user"}       # removed in v2
+    s["answers"]["objective_ranking"]["value"] = ["steady_growth", "learning", "preservation"]  # option removed in v2
+    del s["answers"]["css_familiarity"]                                                          # new in v2
+    svc.store.save(user_key("mig"), doc)
+    v = svc.view("mig")
+    assert v["questionnaire_version"] == QUESTIONNAIRE_VERSION and v["status"] == "reviewing"
+    assert v["stage"]["id"] == "objective"                     # first step that now needs an answer
+    doc = svc.store.load(user_key("mig"))
+    a = doc["session"]["answers"]
+    assert "ex_role" not in a and "objective_ranking" not in a
+    assert a["email"]["migrated_from"] == "TP-Q-1.0.0"
+    ev = next(e for e in doc["session"]["events"] if e["kind"] == "questionnaire_migrated")
+    assert "ex_role" in ev["dropped"] and "email" in ev["kept"]
+    walk(svc, "mig", BASE)
+    assert svc.complete("mig")["passport"]["questionnaire_version"] == QUESTIONNAIRE_VERSION
 
 
 # ---------------------------------------------------------------- profile updates

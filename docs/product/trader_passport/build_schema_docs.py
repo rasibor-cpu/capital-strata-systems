@@ -25,6 +25,11 @@ for i, s in enumerate(STAGES, 1):
     qs = "<br>".join(f"`{q['id']}` ({q['type']}{', required' if q.get('required') else ''}{', sensitive' if q.get('sensitive') else ''}): {q['prompt']}"
                      for q in s.get("questions", [])) or "—"
     lines.append(f"| {i} | `{s['id']}` — {s['title']} | {s['kind']} | {cond.replace('|', '/')} | {qs.replace('|', '/')} |")
+lines += ["", "## Why each question is asked", "", "| Question | Feeds | Purpose (shown to the user as \"Why we ask\") |",
+          "|---|---|---|"]
+for s_ in STAGES:
+    for q in s_.get("questions", []):
+        lines.append(f"| `{q['id']}` | {q.get('dimension', '—')} | {q.get('purpose', '—').replace('|', '/')} |")
 lines += ["", "## Options", ""]
 for s in STAGES:
     for q in s.get("questions", []):
