@@ -5,6 +5,23 @@ from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
 from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
 
 
+def _seed_paper_session_with_pnl_snapshot() -> None:
+    from decimal import Decimal
+
+    from backend.app.persistence.services.pnl_runtime_service import PnlRuntimeService
+    from backend.app.persistence.services.session_runtime_service import SessionRuntimeService
+
+    session_id = SessionRuntimeService().create_runtime_session(
+        mode="paper", broker_name="css_paper", broker_mode="paper"
+    )
+    PnlRuntimeService().create_snapshot(
+        session_id=session_id, broker_name="css_paper", broker_mode="paper",
+        equity=Decimal("100000"), cash_balance=Decimal("100000"),
+        buying_power=Decimal("100000"), unrealized_pnl=Decimal("0"),
+        realized_pnl=Decimal("0"), open_positions=0,
+    )
+
+
 TRADER = {
     "user_id": "00017",
     "display_name": "CSS Trader",
@@ -80,6 +97,10 @@ def test_mobile_live_order_kill_switch_does_not_block_paper_tickets(
             canonical_lifecycle=CanonicalTradeLifecycle(outcome_repository)
         ),
     )
+
+    # Explicit canonical preconditions in the per-test isolated runtime DB
+    # (previously satisfied only by state leaked from other tests/runs).
+    _seed_paper_session_with_pnl_snapshot()
 
     import uuid
     result = mobile_app.execute_mobile_trade_ticket(

@@ -65,6 +65,7 @@ backend/runtime/*
 !backend/runtime/governed_pilot_profile.py
 !backend/runtime/pilot_authorization_ledger.py
 !backend/runtime/pilot_min_size_exception.py
+!backend/runtime/pilot_dual_control.py
 !backend/runtime/broker_startup_selection.py
 !backend/runtime/coinbase_readiness.py
 !backend/runtime/coinbase_live_adapter.py

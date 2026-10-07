@@ -4,6 +4,14 @@ DISABLED BY DEFAULT. ``PILOT_MIN_SIZE_EXCEPTION_ENABLED`` is a code constant;
 enabling it is a governed source change requiring owner approval, not a
 runtime/env toggle.
 
+Owner decision 2026-10-07: design approved, activation NOT approved. It may not
+be enabled until CSS-061 regression is reconciled, CSS-062 pilot security review,
+CSS-063 broker/account/reconciliation safeguards and CSS-064 governed endurance
+have passed, AntiBleed call-site currency semantics are explicit and verified,
+exposure reservation is concurrency-safe, dual-control authorization is in place,
+live-order wiring is independently reviewed, and a separate owner activation
+decision is recorded. See docs/governance/CSS_PROGRAM_REGISTER.md.
+
 Scope (only the ``trade_size_too_small`` rule is affected):
 - AntiBleed's expected-move-vs-cost, net-edge and cooldown rules still apply;
 - the capability is minted only from a ledger-recorded one-time pilot

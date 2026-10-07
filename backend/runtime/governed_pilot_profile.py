@@ -9,9 +9,10 @@ Hardening (PR #104):
 - every construction path (``__init__``, ``dataclasses.replace``,
   ``from_mapping``) runs the same fail-closed validation;
 - unknown/unapproved configuration fields are rejected;
-- the approved profile is HMAC-SHA256 signed over a canonical digest and the
-  signature is re-verified on every evaluation, so in-memory tampering
-  (e.g. ``object.__setattr__`` on the frozen instance) fails closed;
+- the profile is bound to the exact release/candidate commit SHA and requires
+  dual-control approval (see ``pilot_dual_control``): two independently
+  attributable HMAC approvals over the canonical profile digest, re-verified on
+  every evaluation, so in-memory tampering fails closed;
 - the effective ceiling is ``min(profile ceiling, canonical order-limit cap)``
   so a profile can never raise the existing CAD 20 governance cap;
 - any unexpected exception during evaluation returns a blocked decision.
@@ -19,7 +20,6 @@ Hardening (PR #104):
 from __future__ import annotations
 
 import hashlib
-import hmac
 import json
 import re
 from dataclasses import dataclass, fields
@@ -36,9 +36,9 @@ PILOT_CURRENCIES = frozenset({"CAD"})
 PILOT_ASSET_CLASSES = frozenset({"EQUITY", "ETF", "FX_SPOT", "CRYPTO_SPOT"})
 MAX_APPROVAL_WINDOW = timedelta(hours=24)
 MAX_RECONCILIATION_AGE_SECONDS = 30
-MIN_SIGNING_KEY_BYTES = 32
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9._:\-]{1,64}$")
 _CENT = Decimal("0.01")
+_COMMIT_SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class PilotConfigurationError(ValueError):
@@ -87,7 +87,9 @@ class GovernedPilotProfile:
     """The monetary ceiling is an operator-approved *value*, not a code constant."""
 
     approval_id: str
-    approver_id: str
+    sponsor_id: str
+    release_approver_id: str
+    release_sha: str
     scope: str
     broker_id: str
     account_id: str
@@ -103,10 +105,14 @@ class GovernedPilotProfile:
 
     def __post_init__(self) -> None:
         # Runs for direct construction and dataclasses.replace(), not only from_mapping().
-        for name in ("approval_id", "approver_id", "broker_id", "account_id", "instrument", "session_id"):
+        for name in ("approval_id", "sponsor_id", "release_approver_id", "broker_id", "account_id", "instrument", "session_id"):
             value = getattr(self, name)
             if not isinstance(value, str) or value != value.strip() or not _IDENTIFIER.fullmatch(value):
                 raise PilotConfigurationError(f"{name}: invalid identifier")
+        if self.sponsor_id == self.release_approver_id:
+            raise PilotConfigurationError("dual control requires two distinct approvers")
+        if not isinstance(self.release_sha, str) or not _COMMIT_SHA.fullmatch(self.release_sha):
+            raise PilotConfigurationError("release_sha must be an exact 40-hex commit")
         if self.instrument != self.instrument.upper():
             raise PilotConfigurationError("instrument must be normalized upper-case")
         if self.scope != PILOT_SCOPE:
@@ -145,7 +151,9 @@ class GovernedPilotProfile:
             raise PilotConfigurationError("missing required approval fields")
         return cls(
             approval_id=_identifier(values["approval_id"], "approval_id"),
-            approver_id=_identifier(values["approver_id"], "approver_id"),
+            sponsor_id=_identifier(values["sponsor_id"], "sponsor_id"),
+            release_approver_id=_identifier(values["release_approver_id"], "release_approver_id"),
+            release_sha=str(values["release_sha"]).strip(),
             scope=str(values["scope"]).strip(),
             broker_id=_identifier(values["broker_id"], "broker_id"),
             account_id=_identifier(values["account_id"], "account_id"),
@@ -179,29 +187,6 @@ class GovernedPilotProfile:
         return min(self.max_aggregate_exposure, canonical_exposure_cap_cad())
 
 
-def _check_key(signing_key: Any) -> bytes:
-    if not isinstance(signing_key, (bytes, bytearray)) or len(signing_key) < MIN_SIGNING_KEY_BYTES:
-        raise PilotConfigurationError("signing key must be >= 32 bytes")
-    return bytes(signing_key)
-
-
-def sign_profile(profile: GovernedPilotProfile, signing_key: bytes) -> str:
-    """Approval-side signature. The key belongs in the secret store, never in config."""
-    if type(profile) is not GovernedPilotProfile:
-        raise PilotConfigurationError("approved profile required")
-    return hmac.new(_check_key(signing_key), profile.digest().encode("ascii"), hashlib.sha256).hexdigest()
-
-
-def verify_profile_signature(profile: Any, signature: Any, signing_key: Any) -> bool:
-    try:
-        if type(profile) is not GovernedPilotProfile or not isinstance(signature, str):
-            return False
-        profile.__post_init__()  # re-validate: catches object.__setattr__ tampering
-        return hmac.compare_digest(sign_profile(profile, signing_key), signature)
-    except Exception:
-        return False
-
-
 @dataclass(frozen=True)
 class PilotPreflightDecision:
     approved: bool
@@ -213,8 +198,10 @@ class PilotPreflightDecision:
 def evaluate_pilot_preflight(
     profile: GovernedPilotProfile | None,
     *,
-    signature: str,
-    signing_key: bytes,
+    approvals: Any,
+    key_provider: Any,
+    key_registry: Any,
+    running_release_sha: str,
     broker_id: str,
     account_id: str,
     asset_class: str,
@@ -246,7 +233,7 @@ def evaluate_pilot_preflight(
 
 
 def _evaluate(
-    profile, signature, signing_key, broker_id, account_id, asset_class, instrument, currency,
+    profile, approvals, key_provider, key_registry, running_release_sha, broker_id, account_id, asset_class, instrument, currency,
     session_id, current_exposure_cad, pending_orders_cad, proposed_order_cad, estimated_fees_cad,
     reconciled, reconciled_at, expected_net_edge_bps, required_net_edge_bps,
     orders_already_submitted, margin_requested, now,
@@ -254,12 +241,18 @@ def _evaluate(
     zero = Decimal("0")
     if type(profile) is not GovernedPilotProfile:
         return PilotPreflightDecision(False, "PILOT_BLOCKED", zero)
-    if not verify_profile_signature(profile, signature, signing_key):
-        return PilotPreflightDecision(False, "PILOT_SIGNATURE_INVALID", zero)
+    from backend.runtime.pilot_dual_control import keys_currently_usable, verify_dual_control
+
+    if not verify_dual_control(profile, approvals, provider=key_provider, registry=key_registry):
+        return PilotPreflightDecision(False, "PILOT_DUAL_CONTROL_INVALID", zero)
     digest = profile.digest()
     now = now or datetime.now(timezone.utc)
     if not isinstance(now, datetime) or now.tzinfo is None or now < profile.issued_at or now >= profile.expires_at:
         return PilotPreflightDecision(False, "PILOT_EXPIRED_OR_CLOCK_INVALID", zero, digest)
+    if not keys_currently_usable(approvals, key_registry, now):
+        return PilotPreflightDecision(False, "PILOT_APPROVAL_KEY_REVOKED_OR_RETIRED", zero, digest)
+    if running_release_sha != profile.release_sha:
+        return PilotPreflightDecision(False, "PILOT_RELEASE_MISMATCH", zero, digest)
     if (broker_id != profile.broker_id or account_id != profile.account_id
             or str(asset_class).strip().upper() != profile.asset_class
             or str(instrument).strip().upper() != profile.instrument

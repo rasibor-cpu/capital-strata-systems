@@ -6,14 +6,15 @@ import pytest
 
 import backend.runtime.pilot_min_size_exception as exc_mod
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
-from backend.runtime.governed_pilot_profile import GovernedPilotProfile, sign_profile
 from backend.runtime.pilot_authorization_ledger import PilotAuthorizationLedger
 from backend.runtime.pilot_min_size_exception import (
     PilotMinSizeException, PilotMinSizeExceptionError, issue_pilot_min_size_exception,
 )
 
-KEY = b"k" * 32
-SESSION = "proc-session-1"
+from pilot_dual_control_fixtures import (
+    RELEASE_SHA, SESSION, EphemeralTestSecretProvider, approvals, profile, registry,
+)
+
 GOOD = dict(expected_move_bps=80.0, fee_bps=5.0, spread_bps=5.0, slippage_bps=5.0)
 
 
@@ -28,18 +29,13 @@ def enabled(monkeypatch):
 
 
 def receipt_for(tmp_path, approval_id="change-001", instrument="ABC"):
-    now = datetime.now(timezone.utc)
-    p = GovernedPilotProfile.from_mapping({
-        "approval_id": approval_id, "approver_id": "owner-1",
-        "scope": "PILOT_PREFLIGHT_ONE_ORDER", "broker_id": "broker-a",
-        "account_id": "acct-a", "asset_class": "EQUITY", "instrument": instrument,
-        "currency": "CAD", "max_aggregate_exposure": "20.00",
-        "issued_at": (now - timedelta(minutes=1)).isoformat(),
-        "expires_at": (now + timedelta(minutes=10)).isoformat(),
-        "session_id": SESSION,
-    })
+    p = profile(approval_id=approval_id, instrument=instrument)
+    provider = EphemeralTestSecretProvider()
     ledger = PilotAuthorizationLedger(tmp_path / "ledger")
-    return ledger, ledger.consume(p, signature=sign_profile(p, KEY), signing_key=KEY, session_id=SESSION)
+    return ledger, ledger.consume(
+        p, approvals=approvals(p, provider), key_provider=provider, key_registry=registry(),
+        session_id=SESSION, running_release_sha=RELEASE_SHA,
+    )
 
 
 # ---- ordinary orders can never bypass the minimum-size control -------------

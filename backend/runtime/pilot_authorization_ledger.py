@@ -27,8 +27,8 @@ from typing import Any
 from backend.runtime.governed_pilot_profile import (
     GovernedPilotProfile,
     PilotConfigurationError,
-    verify_profile_signature,
 )
+from backend.runtime.pilot_dual_control import keys_currently_usable, verify_dual_control
 
 
 GENESIS_HASH = "0" * 64
@@ -131,26 +131,36 @@ class PilotAuthorizationLedger:
         self,
         profile: GovernedPilotProfile,
         *,
-        signature: str,
-        signing_key: bytes,
+        approvals: Any,
+        key_provider: Any,
+        key_registry: Any,
         session_id: str,
+        running_release_sha: str,
         now: datetime | None = None,
     ) -> PilotConsumptionReceipt:
-        """Atomically consume a signed approval exactly once, bound to this session."""
-        if not verify_profile_signature(profile, signature, signing_key):
-            raise PilotConfigurationError("profile signature invalid")
+        """Atomically consume a dual-control approval exactly once, bound to session and release."""
+        if not verify_dual_control(profile, approvals, provider=key_provider, registry=key_registry):
+            raise PilotConfigurationError("dual-control approval invalid")
+        approvals = tuple(approvals)
         now = now or datetime.now(timezone.utc)
         if now.tzinfo is None or not profile.issued_at <= now < profile.expires_at:
             raise PilotConfigurationError("approval expired or clock invalid")
+        if not keys_currently_usable(approvals, key_registry, now):
+            raise PilotConfigurationError("approval key revoked, retired or out of window")
         if session_id != profile.session_id:
             raise PilotConfigurationError("approval bound to a different process session")
+        if running_release_sha != profile.release_sha:
+            raise PilotConfigurationError("approval bound to a different release")
         self.verify_chain()  # refuse to consume against a tampered ledger
         self._claim(profile.approval_id, "CONSUMED")
         body = {
             "event": "CONSUMED", "approval_id": profile.approval_id,
             "profile_digest": profile.digest(), "session_id": session_id,
             "instrument": profile.instrument,
+            "release_sha": profile.release_sha,
             "effective_ceiling_cad": str(profile.effective_ceiling_cad()),
+            # Attributable approvals: role, approver, key id/version, time, digest. No key material.
+            "approvals": sorted((a.evidence() for a in approvals), key=lambda e: e["role"]),
             "at": now.isoformat(),
         }
         entry_hash = self._append(body)

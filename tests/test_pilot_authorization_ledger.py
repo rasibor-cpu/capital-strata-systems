@@ -7,71 +7,86 @@ from pathlib import Path
 
 import pytest
 
-from backend.runtime.governed_pilot_profile import (
-    GovernedPilotProfile, PilotConfigurationError, sign_profile,
-)
+from backend.runtime.governed_pilot_profile import PilotConfigurationError
 from backend.runtime.pilot_authorization_ledger import (
     PilotAuthorizationLedger, PilotReplayError,
 )
+from pilot_dual_control_fixtures import (
+    RELEASE_SHA, SESSION, EphemeralTestSecretProvider, approvals, profile, registry,
+)
 
-KEY = b"k" * 32
-SESSION = "proc-session-1"
-
-
-def make_profile(approval_id="change-001"):
-    now = datetime.now(timezone.utc)
-    return GovernedPilotProfile.from_mapping({
-        "approval_id": approval_id, "approver_id": "owner-1",
-        "scope": "PILOT_PREFLIGHT_ONE_ORDER", "broker_id": "broker-a",
-        "account_id": "acct-a", "asset_class": "EQUITY", "instrument": "ABC",
-        "currency": "CAD", "max_aggregate_exposure": "20.00",
-        "issued_at": (now - timedelta(minutes=1)).isoformat(),
-        "expires_at": (now + timedelta(minutes=10)).isoformat(),
-        "session_id": SESSION,
-    })
+PROVIDER = EphemeralTestSecretProvider()
 
 
-def consume(ledger, p, **kw):
-    return ledger.consume(p, signature=sign_profile(p, KEY), signing_key=KEY, session_id=SESSION, **kw)
+def consume(ledger, p, *, key_registry=None, session_id=SESSION, release=RELEASE_SHA, pair=None, **kw):
+    return ledger.consume(
+        p, approvals=approvals(p, PROVIDER) if pair is None else pair, key_provider=PROVIDER,
+        key_registry=key_registry or registry(), session_id=session_id,
+        running_release_sha=release, **kw,
+    )
 
 
 def test_consume_exactly_once(tmp_path):
     ledger = PilotAuthorizationLedger(tmp_path)
-    p = make_profile()
+    p = profile()
     receipt = consume(ledger, p)
     assert ledger.receipt_is_recorded(receipt)
     with pytest.raises(PilotReplayError):
         consume(ledger, p)
 
 
+def test_journal_records_attributable_approvals_without_key_material(tmp_path):
+    ledger = PilotAuthorizationLedger(tmp_path)
+    p = profile()
+    consume(ledger, p)
+    entry = ledger.verify_chain()[-1]
+    assert entry["release_sha"] == RELEASE_SHA
+    assert [a["role"] for a in entry["approvals"]] == ["PILOT_SPONSOR", "RELEASE_SECURITY_APPROVER"]
+    assert {a["key_id"] for a in entry["approvals"]} == {"sponsor-k1", "release-k1"}
+    raw = ledger.journal.read_text()
+    for key_id in ("sponsor-k1", "release-k1"):
+        assert PROVIDER.get_key(key_id).hex() not in raw
+
+
 def test_restart_cannot_reuse_consumed_approval(tmp_path):
-    p = make_profile()
+    p = profile()
     consume(PilotAuthorizationLedger(tmp_path), p)
     restarted = PilotAuthorizationLedger(tmp_path)  # new instance == process restart
     with pytest.raises(PilotReplayError):
         consume(restarted, p)
 
 
-def test_new_session_cannot_consume(tmp_path):
+def test_new_session_or_release_cannot_consume(tmp_path):
     ledger = PilotAuthorizationLedger(tmp_path)
-    p = make_profile()
+    p = profile()
     with pytest.raises(PilotConfigurationError):
-        ledger.consume(p, signature=sign_profile(p, KEY), signing_key=KEY, session_id="proc-session-2")
+        consume(ledger, p, session_id="proc-session-2")
+    with pytest.raises(PilotConfigurationError):
+        consume(ledger, p, release="b" * 40)
+    assert not ledger.is_claimed(p.approval_id)
+
+
+def test_single_approval_or_revoked_key_cannot_consume(tmp_path):
+    ledger = PilotAuthorizationLedger(tmp_path)
+    p = profile()
+    with pytest.raises(PilotConfigurationError):
+        consume(ledger, p, pair=approvals(p, PROVIDER)[:1])
+    with pytest.raises(PilotConfigurationError):
+        consume(ledger, p, key_registry=registry(**{"sponsor-k1": "REVOKED"}))
+    assert not ledger.is_claimed(p.approval_id)
 
 
 def test_revoked_approval_cannot_be_consumed(tmp_path):
     ledger = PilotAuthorizationLedger(tmp_path)
-    p = make_profile()
-    ledger.revoke(p.approval_id, revoked_by="owner-1", reason="test")
+    p = profile()
+    ledger.revoke(p.approval_id, revoked_by="robert-asibor", reason="test")
     with pytest.raises(PilotReplayError):
         consume(ledger, p)
 
 
-def test_invalid_signature_or_expiry_rejected(tmp_path):
+def test_expired_approval_rejected(tmp_path):
     ledger = PilotAuthorizationLedger(tmp_path)
-    p = make_profile()
-    with pytest.raises(PilotConfigurationError):
-        ledger.consume(p, signature="0" * 64, signing_key=KEY, session_id=SESSION)
+    p = profile()
     with pytest.raises(PilotConfigurationError):
         consume(ledger, p, now=datetime.now(timezone.utc) + timedelta(hours=1))
     assert not ledger.is_claimed(p.approval_id)
@@ -79,7 +94,7 @@ def test_invalid_signature_or_expiry_rejected(tmp_path):
 
 def test_tampered_journal_fails_closed(tmp_path):
     ledger = PilotAuthorizationLedger(tmp_path)
-    receipt = consume(ledger, make_profile("a-1"))
+    receipt = consume(ledger, profile(approval_id="a-1"))
     lines = ledger.journal.read_text().splitlines()
     record = json.loads(lines[0])
     record["effective_ceiling_cad"] = "9999.00"
@@ -88,12 +103,12 @@ def test_tampered_journal_fails_closed(tmp_path):
         ledger.verify_chain()
     assert not ledger.receipt_is_recorded(receipt)
     with pytest.raises(PilotReplayError):
-        consume(ledger, make_profile("a-2"))
+        consume(ledger, profile(approval_id="a-2"))
 
 
 def test_forged_receipt_not_recognised(tmp_path):
     ledger = PilotAuthorizationLedger(tmp_path)
-    receipt = consume(ledger, make_profile())
+    receipt = consume(ledger, profile())
     forged = dataclasses.replace(receipt, effective_ceiling_cad="5000.00")
     assert not ledger.receipt_is_recorded(forged)
     assert not ledger.receipt_is_recorded({"entry_hash": receipt.entry_hash})
@@ -101,20 +116,15 @@ def test_forged_receipt_not_recognised(tmp_path):
 
 _RACE = """
 import sys
-from datetime import datetime, timedelta, timezone
-from backend.runtime.governed_pilot_profile import GovernedPilotProfile, sign_profile
+sys.path.insert(0, "tests")
 from backend.runtime.pilot_authorization_ledger import PilotAuthorizationLedger, PilotReplayError
-now = datetime.now(timezone.utc)
-p = GovernedPilotProfile.from_mapping({
-    "approval_id": "race-001", "approver_id": "owner-1", "scope": "PILOT_PREFLIGHT_ONE_ORDER",
-    "broker_id": "broker-a", "account_id": "acct-a", "asset_class": "EQUITY", "instrument": "ABC",
-    "currency": "CAD", "max_aggregate_exposure": "20.00",
-    "issued_at": (now - timedelta(minutes=1)).isoformat(),
-    "expires_at": (now + timedelta(minutes=10)).isoformat(), "session_id": "proc-session-1"})
-key = b"k" * 32
+from pilot_dual_control_fixtures import RELEASE_SHA, SESSION, EphemeralTestSecretProvider, approvals, profile, registry
+provider = EphemeralTestSecretProvider()
+p = profile(approval_id="race-001")
 try:
     PilotAuthorizationLedger(sys.argv[1]).consume(
-        p, signature=sign_profile(p, key), signing_key=key, session_id="proc-session-1")
+        p, approvals=approvals(p, provider), key_provider=provider, key_registry=registry(),
+        session_id=SESSION, running_release_sha=RELEASE_SHA)
     print("ok")
 except PilotReplayError:
     print("replay")

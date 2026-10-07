@@ -52,7 +52,12 @@ def temp_dir():
 
 
 @pytest.fixture
-def setup_platform(temp_dir):
+def setup_platform(temp_dir, monkeypatch):
+    # Hermetic readiness: canonical_readiness checks for ".env" in the CWD. Use a
+    # fixture .env in the test's temp dir instead of the developer/host checkout.
+    monkeypatch.chdir(temp_dir)
+    with open(os.path.join(temp_dir, ".env"), "w", encoding="utf-8") as handle:
+        handle.write("# test fixture: hermetic readiness check\n")
     # Setup Metrics
     m_reg = MetricsRegistry()
     m_tel = TelemetryCollector()
