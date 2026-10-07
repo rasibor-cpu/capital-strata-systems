@@ -1,31 +1,36 @@
 """Dual-control approval for a governed pilot profile. No execution side effects.
 
-Owner decision (2026-10-07): a pilot authorization requires two independently
-attributable approvals before it can become executable:
+Owner decisions (2026-10-07):
+- two independently attributable approvals are required:
+  ``PILOT_SPONSOR`` (Business Owner / Pilot Sponsor) and
+  ``RELEASE_SECURITY_APPROVER`` (a different human with a different key);
+- secrets come only from the approved Windows-native external secret interface
+  (Windows Credential Manager / DPAPI, ``backend/security/windows_credential_provider.py``).
 
-- ``PILOT_SPONSOR``              -- Business Owner / Pilot Sponsor
-- ``RELEASE_SECURITY_APPROVER``  -- independent release/security role
+Signatures are Ed25519. Each approver's *private* signing key lives only in that
+approver's own Credential Manager (DPAPI-protected, per user). The runtime and
+this repository hold only verification metadata: key id, role, holder, status,
+validity window and the *public* key. The verifier therefore cannot forge an
+approval, and neither approver can sign for the other.
 
-Key custody:
-- key material is owner-controlled and is obtained only through a
-  ``PilotSecretProvider`` (the approved external secret interface). This module
-  holds no key, generates no key, and never logs or serialises key material;
-- evidence carries the key *identifier/version* only;
-- the key registry (metadata only: key_id, role, status, validity) supports
-  rotation; RETIRED / REVOKED / out-of-window / unknown keys fail closed;
-- each role must sign with a key registered to that role, and the two approvals
-  must use distinct approvers and distinct keys;
-- each approval is an HMAC-SHA256 over the exact profile digest, which binds
-  account, broker, instrument, asset class, ceiling, currency, validity window,
-  session and release/candidate SHA. Replay is prevented by the one-time ledger.
+- RETIRED / REVOKED / unknown / out-of-window / wrong-role / wrong-holder keys fail closed;
+- each approval signs the exact profile digest (account, broker, instrument,
+  asset class, ceiling, currency, validity window, session, release SHA);
+- replay is prevented by the one-time ledger;
+- production activation additionally requires ``production_enrollment_status``
+  to report ready (both roles designated to distinct humans and enrolled).
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
+import json
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey, Ed25519PublicKey
 
 from backend.runtime.governed_pilot_profile import (
     GovernedPilotProfile,
@@ -40,13 +45,17 @@ ROLE_RELEASE_SECURITY = "RELEASE_SECURITY_APPROVER"
 REQUIRED_ROLES = frozenset({ROLE_SPONSOR, ROLE_RELEASE_SECURITY})
 KEY_STATUS_ACTIVE = "ACTIVE"
 KEY_STATUSES = frozenset({KEY_STATUS_ACTIVE, "RETIRED", "REVOKED"})
-MIN_KEY_BYTES = 32
+SEED_BYTES = 32
+_PUBLIC_KEY_HEX = re.compile(r"^[0-9a-f]{64}$")
+_SIGNATURE_HEX = re.compile(r"^[0-9a-f]{128}$")
+ENROLLMENT_SCHEMA = "css.pilot_approver_enrollment.v1"
+DEFAULT_ENROLLMENT_PATH = Path(__file__).resolve().parents[2] / "config" / "governance" / "pilot_approver_enrollment.json"
 
 
-class PilotSecretProvider(Protocol):
-    """Approved external secret interface. Implementations live outside this repo's custody."""
+class PilotSigningKeyProvider(Protocol):
+    """Approved external secret interface, used only on the approver's own machine/profile."""
 
-    def get_key(self, key_id: str) -> bytes:  # pragma: no cover - protocol
+    def get_signing_seed(self, key_id: str) -> bytes:  # pragma: no cover - protocol
         ...
 
 
@@ -54,43 +63,65 @@ class PilotSecretProvider(Protocol):
 class PilotKeyRecord:
     key_id: str
     role: str
+    holder_id: str
     status: str
     not_before: datetime
     not_after: datetime
+    public_key_hex: str
+
+    def public_key(self) -> Ed25519PublicKey:
+        return Ed25519PublicKey.from_public_bytes(bytes.fromhex(self.public_key_hex))
 
 
 class PilotKeyRegistry:
-    """Key metadata only (never material). Supports rotation via multiple versions per role."""
+    """Verification metadata only (never private material). Rotation = multiple versions per role."""
+
+    FIELDS = frozenset({"key_id", "role", "holder_id", "status", "not_before", "not_after", "public_key_hex"})
 
     def __init__(self, records: Iterable[PilotKeyRecord]) -> None:
         self._records: dict[str, PilotKeyRecord] = {}
+        owners: dict[str, tuple[str, str]] = {}
         for record in records:
             if type(record) is not PilotKeyRecord or record.key_id in self._records:
                 raise PilotConfigurationError("invalid or duplicate key record")
+            owner = (record.role, record.holder_id)
+            if owners.setdefault(record.public_key_hex, owner) != owner:
+                raise PilotConfigurationError("one public key registered to two roles or holders")
+            record.public_key()  # must parse
             self._records[record.key_id] = record
 
     @classmethod
     def from_mapping(cls, entries: Iterable[Mapping[str, Any]]) -> "PilotKeyRegistry":
-        allowed = {"key_id", "role", "status", "not_before", "not_after"}
         records = []
         for entry in entries:
-            if not isinstance(entry, Mapping) or set(entry) != allowed:
-                raise PilotConfigurationError("key record must have exactly the approved fields")
+            if not isinstance(entry, Mapping) or set(entry) != cls.FIELDS:
+                raise PilotConfigurationError("key record must have exactly the approved metadata fields")
             role = str(entry["role"]).strip()
             status = str(entry["status"]).strip().upper()
+            public_key_hex = str(entry["public_key_hex"]).strip()
             if role not in REQUIRED_ROLES or status not in KEY_STATUSES:
                 raise PilotConfigurationError("unknown key role or status")
+            if not _PUBLIC_KEY_HEX.fullmatch(public_key_hex):
+                raise PilotConfigurationError("public_key_hex must be a 32-byte lowercase hex Ed25519 key")
             not_before = _timestamp(entry["not_before"], "not_before")
             not_after = _timestamp(entry["not_after"], "not_after")
             if not not_before < not_after:
                 raise PilotConfigurationError("key validity window invalid")
-            records.append(PilotKeyRecord(_identifier(entry["key_id"], "key_id"), role, status, not_before, not_after))
+            records.append(PilotKeyRecord(
+                _identifier(entry["key_id"], "key_id"), role, _identifier(entry["holder_id"], "holder_id"),
+                status, not_before, not_after, public_key_hex))
         return cls(records)
 
-    def usable(self, key_id: str, role: str, at: datetime) -> bool:
+    def record(self, key_id: str) -> PilotKeyRecord | None:
+        return self._records.get(key_id)
+
+    def records(self) -> tuple[PilotKeyRecord, ...]:
+        return tuple(self._records.values())
+
+    def usable(self, key_id: str, role: str, holder_id: str, at: datetime) -> bool:
         record = self._records.get(key_id)
-        return (record is not None and record.role == role and record.status == KEY_STATUS_ACTIVE
-                and record.not_before <= at < record.not_after)
+        return (record is not None and record.role == role and record.holder_id == holder_id
+                and record.status == KEY_STATUS_ACTIVE and record.not_before <= at < record.not_after)
 
 
 @dataclass(frozen=True)
@@ -110,20 +141,36 @@ class PilotApproval:
             "profile_digest": self.profile_digest,
         }
 
+    def to_dict(self) -> dict[str, str]:
+        return {**self.evidence(), "signature": self.signature}
+
+    @classmethod
+    def from_mapping(cls, values: Mapping[str, Any]) -> "PilotApproval":
+        allowed = {"role", "approver_id", "key_id", "approved_at", "profile_digest", "signature"}
+        if not isinstance(values, Mapping) or set(values) != allowed:
+            raise PilotConfigurationError("approval must have exactly the approved fields")
+        signature = str(values["signature"])
+        if not _SIGNATURE_HEX.fullmatch(signature):
+            raise PilotConfigurationError("signature must be a 64-byte hex Ed25519 signature")
+        return cls(str(values["role"]), _identifier(values["approver_id"], "approver_id"),
+                   _identifier(values["key_id"], "key_id"), _timestamp(values["approved_at"], "approved_at"),
+                   str(values["profile_digest"]), signature)
+
 
 def _approval_message(role: str, approver_id: str, key_id: str, approved_at: datetime, digest: str) -> bytes:
-    return "|".join((role, approver_id, key_id, approved_at.astimezone(timezone.utc).isoformat(), digest)).encode("utf-8")
-
-
-def _fetch_key(provider: Any, key_id: str) -> bytes:
-    key = provider.get_key(key_id)
-    if not isinstance(key, (bytes, bytearray)) or len(key) < MIN_KEY_BYTES:
-        raise PilotConfigurationError("secret provider returned unusable key")
-    return bytes(key)
+    return "|".join(("css.pilot_approval.v1", role, approver_id, key_id,
+                     approved_at.astimezone(timezone.utc).isoformat(), digest)).encode("utf-8")
 
 
 def _expected_approver(profile: GovernedPilotProfile, role: str) -> str:
     return profile.sponsor_id if role == ROLE_SPONSOR else profile.release_approver_id
+
+
+def public_key_hex_from_seed(seed: bytes) -> str:
+    from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
+
+    key = Ed25519PrivateKey.from_private_bytes(bytes(seed))
+    return key.public_key().public_bytes(Encoding.Raw, PublicFormat.Raw).hex()
 
 
 def sign_pilot_approval(
@@ -132,30 +179,26 @@ def sign_pilot_approval(
     role: str,
     approver_id: str,
     key_id: str,
-    provider: PilotSecretProvider,
+    provider: PilotSigningKeyProvider,
     approved_at: datetime | None = None,
 ) -> PilotApproval:
-    """Approval-side signing; runs where the approver's key is available, never in the agent."""
+    """Runs on the approver's own Windows profile, where their key is held. Never in the agent."""
     if type(profile) is not GovernedPilotProfile or role not in REQUIRED_ROLES:
         raise PilotConfigurationError("approved profile and known role required")
     if approver_id != _expected_approver(profile, role):
         raise PilotConfigurationError("approver is not the designated holder of this role")
+    seed = provider.get_signing_seed(key_id)
+    if not isinstance(seed, (bytes, bytearray)) or len(seed) != SEED_BYTES:
+        raise PilotConfigurationError("secret provider returned unusable signing key")
     approved_at = _timestamp(approved_at or datetime.now(timezone.utc), "approved_at")
     digest = profile.digest()
-    signature = hmac.new(_fetch_key(provider, key_id),
-                         _approval_message(role, approver_id, key_id, approved_at, digest),
-                         hashlib.sha256).hexdigest()
+    signature = Ed25519PrivateKey.from_private_bytes(bytes(seed)).sign(
+        _approval_message(role, approver_id, key_id, approved_at, digest)).hex()
     return PilotApproval(role, approver_id, key_id, approved_at, digest, signature)
 
 
-def verify_dual_control(
-    profile: Any,
-    approvals: Any,
-    *,
-    provider: Any,
-    registry: Any,
-) -> bool:
-    """True only if exactly one valid approval per required role. Never raises."""
+def verify_dual_control(profile: Any, approvals: Any, *, registry: Any) -> bool:
+    """True only if exactly one valid approval per required role, by distinct humans/keys. Never raises."""
     try:
         if type(profile) is not GovernedPilotProfile or type(registry) is not PilotKeyRegistry:
             return False
@@ -168,6 +211,7 @@ def verify_dual_control(
         if len({a.approver_id for a in approvals}) != 2 or len({a.key_id for a in approvals}) != 2:
             return False
         digest = profile.digest()
+        public_keys = set()
         for approval in approvals:
             if approval.profile_digest != digest:
                 return False
@@ -177,19 +221,55 @@ def verify_dual_control(
                 return False
             if not profile.issued_at <= approval.approved_at < profile.expires_at:
                 return False
-            if not registry.usable(approval.key_id, approval.role, approval.approved_at):
+            if not registry.usable(approval.key_id, approval.role, approval.approver_id, approval.approved_at):
                 return False
-            expected = hmac.new(_fetch_key(provider, approval.key_id),
-                                _approval_message(approval.role, approval.approver_id, approval.key_id,
-                                                  approval.approved_at, digest),
-                                hashlib.sha256).hexdigest()
-            if not isinstance(approval.signature, str) or not hmac.compare_digest(expected, approval.signature):
+            record = registry.record(approval.key_id)
+            public_keys.add(record.public_key_hex)
+            if not isinstance(approval.signature, str) or not _SIGNATURE_HEX.fullmatch(approval.signature):
                 return False
-        return True
-    except Exception:
+            record.public_key().verify(
+                bytes.fromhex(approval.signature),
+                _approval_message(approval.role, approval.approver_id, approval.key_id, approval.approved_at, digest),
+            )
+        return len(public_keys) == 2
+    except (InvalidSignature, Exception):
         return False
 
 
 def keys_currently_usable(approvals: Iterable[PilotApproval], registry: PilotKeyRegistry, now: datetime) -> bool:
     """Revocation/retirement after signing must also block use (checked at evaluation/consumption)."""
-    return all(registry.usable(a.key_id, a.role, now) for a in approvals)
+    return all(registry.usable(a.key_id, a.role, a.approver_id, now) for a in approvals)
+
+
+# ---- production enrollment gate ----------------------------------------------
+
+def production_enrollment_status(path: str | Path = DEFAULT_ENROLLMENT_PATH, *, now: datetime | None = None) -> dict[str, Any]:
+    """Production activation stays blocked until both roles are designated to distinct humans and enrolled.
+
+    Reads the committed enrollment record (designations + public-key metadata only). Never raises.
+    """
+    blockers: list[str] = []
+    now = now or datetime.now(timezone.utc)
+    try:
+        data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or data.get("schema") != ENROLLMENT_SCHEMA:
+            raise PilotConfigurationError("unknown enrollment schema")
+        if set(data) - {"schema", "designations", "keys", "notes"}:
+            raise PilotConfigurationError("unapproved enrollment fields")
+        designations = data.get("designations") or {}
+        registry = PilotKeyRegistry.from_mapping(data.get("keys") or [])
+    except Exception as exc:
+        return {"ready": False, "blockers": [f"enrollment_unreadable:{type(exc).__name__}"], "designations": {}}
+    holders: dict[str, str] = {}
+    for role in sorted(REQUIRED_ROLES):
+        entry = designations.get(role)
+        holder = entry.get("holder_id") if isinstance(entry, Mapping) else None
+        if not holder:
+            blockers.append(f"{role.lower()}_not_designated")
+            continue
+        holders[role] = holder
+        if not any(registry.usable(r.key_id, role, holder, now) for r in registry.records() if r.role == role):
+            blockers.append(f"{role.lower()}_key_not_enrolled")
+    if len(holders) == 2 and len(set(holders.values())) != 2:
+        blockers.append("roles_not_held_by_distinct_humans")
+    return {"ready": not blockers, "blockers": blockers, "designations": holders}

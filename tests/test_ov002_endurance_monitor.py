@@ -19,6 +19,16 @@ from backend.certification.ov002_endurance_monitor import (
 from backend.certification.ov002_continuity import build_process_identity_record
 
 
+
+# Observed-flag block published by /api/v1/live-execution-authority (CSS-064 contract).
+SAFE_OBSERVED_FLAGS = {
+    "execution_allowed": False,
+    "live_trading_blocked": True,
+    "broker_execution_armed": False,
+    "advisory_only": True,
+    "observed": True,
+}
+
 def _identity(pid: int, role: str, now: datetime) -> dict:
     return build_process_identity_record(
         pid=pid,
@@ -44,6 +54,7 @@ def test_safety_assertions_pass_with_mocks() -> None:
         "/api/v1/live-execution-authority": (
             200,
             {
+                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,
@@ -101,6 +112,7 @@ def test_initialize_and_once_snapshot(tmp_path: Path) -> None:
         "/api/v1/live-execution-authority": (
             200,
             {
+                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,
@@ -157,6 +169,7 @@ def _http_responses() -> dict[str, tuple[int, dict]]:
         "/api/v1/live-execution-authority": (
             200,
             {
+                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,

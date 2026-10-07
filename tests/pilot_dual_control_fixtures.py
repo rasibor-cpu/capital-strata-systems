@@ -1,8 +1,8 @@
 """Test-only fixtures for governed pilot dual control.
 
-Keys here are ephemeral random bytes generated per test run. They are not, and
-must never be used as, a production pilot key; production keys are obtained
-only through the owner-controlled external secret interface.
+Signing seeds here are ephemeral random bytes generated per test run. They are
+not, and must never be used as, production pilot keys; production signing keys
+live only in each approver's own Windows Credential Manager (DPAPI).
 """
 from __future__ import annotations
 
@@ -11,39 +11,50 @@ from datetime import datetime, timedelta, timezone
 
 from backend.runtime.governed_pilot_profile import GovernedPilotProfile
 from backend.runtime.pilot_dual_control import (
-    ROLE_RELEASE_SECURITY, ROLE_SPONSOR, PilotKeyRegistry, sign_pilot_approval,
+    ROLE_RELEASE_SECURITY, ROLE_SPONSOR, PilotKeyRegistry, public_key_hex_from_seed, sign_pilot_approval,
 )
 
 RELEASE_SHA = "a" * 40
 SPONSOR = "robert-asibor"
-RELEASE_APPROVER = "release-security-1"
+RELEASE_APPROVER = "test-release-approver"  # test-only placeholder; production approver is NOT designated
 SESSION = "unique-process-session"
+KEY_ROLES = {"sponsor-k1": (ROLE_SPONSOR, SPONSOR), "sponsor-k2": (ROLE_SPONSOR, SPONSOR),
+             "release-k1": (ROLE_RELEASE_SECURITY, RELEASE_APPROVER)}
 
 
 class EphemeralTestSecretProvider:
-    """In-memory stand-in for the external secret interface (tests only)."""
+    """In-memory stand-in for the Windows Credential Manager provider (tests only)."""
 
-    def __init__(self, key_ids=("sponsor-k1", "release-k1")):
-        self._keys = {key_id: secrets.token_bytes(32) for key_id in key_ids}
+    def __init__(self, key_ids=("sponsor-k1", "release-k1", "sponsor-k2")):
+        self._seeds = {key_id: secrets.token_bytes(32) for key_id in key_ids}
 
-    def get_key(self, key_id):
-        return self._keys[key_id]
+    def get_signing_seed(self, key_id):
+        return self._seeds[key_id]
+
+    def public_key_hex(self, key_id):
+        return public_key_hex_from_seed(self._seeds[key_id])
 
     def __repr__(self):
-        return f"EphemeralTestSecretProvider(key_ids={sorted(self._keys)})"
+        return f"EphemeralTestSecretProvider(key_ids={sorted(self._seeds)})"
 
 
-def registry(**status_overrides):
+def registry_entries(provider, **status_overrides):
     now = datetime.now(timezone.utc)
-    entries = [
-        {"key_id": "sponsor-k1", "role": ROLE_SPONSOR, "status": "ACTIVE"},
-        {"key_id": "release-k1", "role": ROLE_RELEASE_SECURITY, "status": "ACTIVE"},
-    ]
-    for entry in entries:
-        entry["status"] = status_overrides.get(entry["key_id"], entry["status"])
-        entry["not_before"] = (now - timedelta(days=1)).isoformat()
-        entry["not_after"] = (now + timedelta(days=30)).isoformat()
-    return PilotKeyRegistry.from_mapping(entries)
+    entries = []
+    for key_id in ("sponsor-k1", "release-k1"):
+        role, holder = KEY_ROLES[key_id]
+        entries.append({
+            "key_id": key_id, "role": role, "holder_id": holder,
+            "status": status_overrides.get(key_id, "ACTIVE"),
+            "not_before": (now - timedelta(days=1)).isoformat(),
+            "not_after": (now + timedelta(days=30)).isoformat(),
+            "public_key_hex": provider.public_key_hex(key_id),
+        })
+    return entries
+
+
+def registry(provider, **status_overrides):
+    return PilotKeyRegistry.from_mapping(registry_entries(provider, **status_overrides))
 
 
 def mapping(**overrides):

@@ -13,12 +13,16 @@
 > CSS-070.
 > **Safety boundary (unchanged):** `execution_allowed=false`, `live_trading_blocked=true`,
 > `broker_execution_armed=false`, `advisory_only=true`.
-> **Mirror updated:** 2026-10-07, branch `feature/governed-configurable-pilot-limit`.
+> **Mirror updated:** 2026-10-07 (second update), branch `feature/governed-configurable-pilot-limit`.
 
 ## CSS-001 to CSS-060
 
-Titles, acceptance criteria and statuses for these items live in the MPR and have not been copied into
-the repository. No status is asserted here.
+**Sync blocked: source file not available to the engineering agent.** The owner designated
+`Master_Portfolio_Register_v1.4_Current_Reconciled.xlsx` as the authority (2026-10-07). That file is
+not in this repository, any attached repository or branch, or any connected document source, so its
+titles, statuses and gates cannot be mirrored without inventing them. These rows stay `UNSYNCED` until
+the file is supplied (for example, committed under `docs/governance/source/` or uploaded to the session).
+No status is asserted here.
 
 | ID | Title | Acceptance criterion | Status | Evidence / reference | Blocker | Next gate |
 |---|---|---|---|---|---|---|
@@ -90,9 +94,9 @@ Acceptance criteria below quote the owner instruction of 2026-10-07. Verify the 
 | ID | Title | Acceptance criterion | Status | Evidence / reference | Blocker | Next gate |
 |---|---|---|---|---|---|---|
 | CSS-061 | Full regression on candidate baseline | Full regression on the candidate baseline; every failure reconciled with evidence and disposition; P0/P1 findings reconciled | **ACTIVE** | CSS-061 failure ledger below; `tests/conftest.py::_css_runtime_db_isolation` | 24 real-host-dependent failures remain off-host (23 OV-002, 1 phase163 reboot detection); clean-checkout regression not yet run on a frozen candidate | Real-host OV-002 run; fix the harness-defect tests; re-run full regression on the frozen RC |
-| CSS-062 | Security review | Security review of authorization scope, replay resistance, configuration tampering, secrets, execution gates and auditability | **ACTIVE** | `docs/governance/CONFIGURABLE_CAD_PILOT_IMPLEMENTATION.md`; tests `test_governed_pilot_profile.py`, `test_pilot_dual_control.py`, `test_pilot_authorization_ledger.py`, `test_antibleed_pilot_min_size_exception.py` | No independent reviewer yet; production secret interface not selected; monitor's fail-open `advisory_only` default | Independent release/security review of the pilot path |
+| CSS-062 | Security review | Security review of authorization scope, replay resistance, configuration tampering, secrets, execution gates and auditability | **ACTIVE** | `docs/governance/CONFIGURABLE_CAD_PILOT_IMPLEMENTATION.md`; tests `test_governed_pilot_profile.py`, `test_pilot_dual_control.py`, `test_pilot_authorization_ledger.py`, `test_antibleed_pilot_min_size_exception.py` | No independent reviewer yet; RELEASE_SECURITY_APPROVER not designated or enrolled; sponsor key not enrolled (`production_enrollment_status` = not ready). Resolved this increment: secret interface selected (Windows Credential Manager/DPAPI, Ed25519); monitor fail-open `advisory_only`/`fail_closed` defaults removed | Independent release/security review of the pilot path |
 | CSS-063 | Broker safeguards | Broker reconciliation, account/balance verification, order-state reconciliation, stale/retry behaviour, failure recovery and fail-closed execution, each with reproducible evidence. Questrade stays read-only; no live-certified broker without evidence | **BLOCKED** | — (no new evidence this increment) | Needs broker sandbox/real-account read-only evidence and owner-held credentials | Broker reconciliation evidence plan |
-| CSS-064 | Resilience / endurance | Governed endurance and recovery run: exact SHA, start/end timestamps, supervisor identity, process inventory, restart/failure counters, checkpoints, recovery events, final manifest. Observation is not certification | **BLOCKED** (pending governed real-host run) | `docs/governance/CSS064_ENDURANCE_RUN_PACKAGE.md`; `scripts/css064_endurance_package.py`; `tests/test_css064_endurance_package.py`. The ~19.7 h runtime is OBSERVATION ONLY. OV-002 Attempt 2 is INVALIDATED (`docs/release/CSS_OV002_ATTEMPT2_INVALIDATION_REPORT.md`) | Run not executed; `broker_execution_armed` endpoint exposure unverified | Operator runs the package on the Windows host, then independent review |
+| CSS-064 | Resilience / endurance | Governed endurance and recovery run: exact SHA, start/end timestamps, supervisor identity, process inventory, restart/failure counters, checkpoints, recovery events, final manifest. Observation is not certification | **BLOCKED** (pending governed real-host run) | `docs/governance/CSS064_ENDURANCE_RUN_PACKAGE.md` (exact Windows command sequence); `scripts/css064_endurance_package.py`; `backend/runtime/safety_flag_observation.py` (all four flags now exposed on `/api/v1/live-execution-authority`); strict OV-002 flag capture; tests `test_css064_endurance_package.py`, `test_safety_flag_observation.py`. The ~19.7 h runtime is OBSERVATION ONLY. OV-002 Attempt 2 is INVALIDATED (`docs/release/CSS_OV002_ATTEMPT2_INVALIDATION_REPORT.md`) | Run not executed on the real host; flag exposure verified in-process only, so it must be confirmed on the host (runbook step 4) | Operator runs the package on the Windows host, then independent review |
 | CSS-065 | Evidence reconciliation | Reconcile all prior failed, invalidated or observational evidence. Do not reuse invalidated OV-002 or stale evidence | NOT STARTED (gated) | — | Waits on CSS-061–064 evidence | — |
 | CSS-066 | Blocker matrix | Current blocker matrix with exact status and evidence links | NOT STARTED (gated) | Existing historical matrix `docs/release/CSS_RELEASE_BLOCKER_MATRIX.md` is not current | Waits on CSS-065 | — |
 | CSS-067 | Zero P0 | Zero unresolved P0 release blockers | NOT STARTED (gated) | — | Waits on CSS-066 | — |
@@ -101,6 +105,8 @@ Acceptance criteria below quote the owner instruction of 2026-10-07. Verify the 
 | CSS-070 | LIVE-READY Stage 1 | Issue LIVE-READY only when all acceptance evidence is reproducible and internally consistent | NOT STARTED (gated) | — | CSS-061–069 | — |
 
 ## CSS-071 to CSS-075 (controlled live validation, after CSS-070)
+
+Sync is blocked for the same reason as CSS-001 to CSS-060: the MPR v1.4 file is not available to the engineering agent.
 
 | ID | Title | Acceptance criterion | Status | Evidence / reference | Blocker | Next gate |
 |---|---|---|---|---|---|---|
@@ -115,7 +121,7 @@ Acceptance criteria below quote the owner instruction of 2026-10-07. Verify the 
 | Workstream | Status | Evidence | Blocker | Next gate |
 |---|---|---|---|---|
 | PR #104 pilot preflight hardening (profile validation, unknown-field rejection, scope binding, release-SHA binding) | IMPLEMENTED — VERIFYING | `backend/runtime/governed_pilot_profile.py`; `tests/test_governed_pilot_profile.py` | Not wired to the order path (by design); CSS-062 review | CSS-062 |
-| Dual-control pilot authorization (owner decision 2026-10-07) | IMPLEMENTED — VERIFYING | `backend/runtime/pilot_dual_control.py`; `tests/test_pilot_dual_control.py` | Production secret interface and key registry not provisioned (owner custody); release/security approver identity to be designated | Owner provisions the secret interface; CSS-062 |
+| Dual-control pilot authorization (owner decisions 2026-10-07) | IMPLEMENTED — VERIFYING | `backend/runtime/pilot_dual_control.py` (Ed25519); `backend/security/windows_credential_provider.py` (Credential Manager/DPAPI); `config/governance/pilot_approver_enrollment.json`; `tests/test_pilot_dual_control.py` | Production activation blocked by the enrollment gate: release/security approver not designated; no production key enrolled (deliberately not provisioned) | Owner designates the independent approver; both humans enroll on their own Windows profiles; CSS-062 review |
 | One-time authorization ledger (replay/restart) | IMPLEMENTED — VERIFYING | `backend/runtime/pilot_authorization_ledger.py`; `tests/test_pilot_authorization_ledger.py` | Local POSIX filesystem assumption | CSS-062 / CSS-064 host check |
 | AntiBleed CAD 20 minimum-size exception | IMPLEMENTED — VERIFYING / **DISABLED** (`PILOT_MIN_SIZE_EXCEPTION_ENABLED = False`) | `backend/runtime/pilot_min_size_exception.py`; `tests/test_antibleed_pilot_min_size_exception.py` | Activation gates below | Separate owner activation decision |
 

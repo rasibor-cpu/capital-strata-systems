@@ -33,7 +33,7 @@ def receipt_for(tmp_path, approval_id="change-001", instrument="ABC"):
     provider = EphemeralTestSecretProvider()
     ledger = PilotAuthorizationLedger(tmp_path / "ledger")
     return ledger, ledger.consume(
-        p, approvals=approvals(p, provider), key_provider=provider, key_registry=registry(),
+        p, approvals=approvals(p, provider), key_registry=registry(provider),
         session_id=SESSION, running_release_sha=RELEASE_SHA,
     )
 

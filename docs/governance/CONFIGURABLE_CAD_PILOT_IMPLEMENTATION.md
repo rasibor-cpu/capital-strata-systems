@@ -21,26 +21,31 @@ handling is certified.
 | Replay / duplicate / restart reuse | `PilotAuthorizationLedger`: atomic `O_EXCL` claim per approval, `flock`-serialised, fsync'd, SHA-256 hash-chained journal; revocation burns the claim; tampered journal fails closed | `tests/test_pilot_authorization_ledger.py` (incl. 6-process race) |
 | Evaluation never raises | any unexpected error -> `PILOT_BLOCKED_EVALUATION_ERROR` | `test_malformed_inputs_fail_closed_without_raising` |
 
-## Stage 3 — dual-control authorization (owner decision 2026-10-07)
-- **Distinct approvers:** the profile names `sponsor_id` (Business Owner / Pilot Sponsor) and
-  `release_approver_id` (independent release/security role). They must be different people.
+## Stage 3 — dual-control authorization (owner decisions 2026-10-07)
+- **Distinct approvers:** the profile names `sponsor_id` (Business Owner / Pilot Sponsor: Robert Asibor)
+  and `release_approver_id` (an independent release/security human). They must be different people.
 - **Exact release binding:** the profile carries `release_sha`, an exact 40-hex candidate commit, and
   preflight and consumption require `running_release_sha == release_sha`.
-- **Signed digest:** each approval signs the canonical profile digest, which binds account, broker,
-  instrument, asset class, ceiling, currency, validity window, session and release SHA.
-- **Key custody:**
-  - Key material comes only from a `PilotSecretProvider`, the owner-approved external secret interface.
-    No provider implementation, key or key file is in this repository.
-  - Tests use ephemeral random keys, labelled test-only.
-  - Evidence and the ledger journal record key IDs/versions only, never key material.
-- **Key registry:** metadata only (key ID, role, status, validity). Rotation works through multiple
-  versions per role. RETIRED, REVOKED, unknown, out-of-window and wrong-role keys fail closed, including
-  a key revoked after signing.
-- **Replay:** prevented by the one-time ledger. The ledger records both approvals' attributable evidence.
-- **Still needed (owner):**
-  - Select and provision the production secret interface.
-  - Provision the key registry entries.
-  - Designate the release/security approver identity.
+- **Ed25519 signatures (asymmetric):** each approver signs the canonical profile digest with a private
+  key held only in **their own** Windows Credential Manager. Credential Manager encrypts it with DPAPI
+  under that user; adapter: `backend/security/windows_credential_provider.py`. The runtime verifies
+  with public keys only, so it cannot forge an approval and neither approver can sign for the other.
+  - This replaces the stage-2b HMAC design. With HMAC, the verifier had to hold both approvers'
+    secrets, which defeats independence.
+- **Repository holds metadata only:** `config/governance/pilot_approver_enrollment.json` contains
+  designations plus key ID, role, holder, status, validity and **public** key. Registry parsing
+  rejects any extra field, so private material can't be added there.
+- **Key lifecycle:**
+  - Rotation is a new key ID; `enroll` never overwrites an existing credential.
+  - RETIRED, REVOKED, unknown, out-of-window, wrong-role and wrong-holder keys fail closed, including a
+    key revoked after it signed.
+  - One public key can't be registered to two humans or roles.
+- **Production enrollment gate:** `production_enrollment_status()` reports `ready=false` until both
+  roles are designated to distinct humans and each has an ACTIVE enrolled key. Committed state:
+  sponsor = `robert-asibor` (key not enrolled); release/security approver **not designated**. Any
+  future live wiring must require `ready=true`.
+- **Tests:** use ephemeral random seeds and a placeholder test approver. Neither is a production key
+  or identity.
 
 ## AntiBleedGuard minimum-size incompatibility
 AntiBleed's global minimum (50.0) is **unchanged**. A governed exception path exists

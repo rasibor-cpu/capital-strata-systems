@@ -132,14 +132,13 @@ class PilotAuthorizationLedger:
         profile: GovernedPilotProfile,
         *,
         approvals: Any,
-        key_provider: Any,
         key_registry: Any,
         session_id: str,
         running_release_sha: str,
         now: datetime | None = None,
     ) -> PilotConsumptionReceipt:
         """Atomically consume a dual-control approval exactly once, bound to session and release."""
-        if not verify_dual_control(profile, approvals, provider=key_provider, registry=key_registry):
+        if not verify_dual_control(profile, approvals, registry=key_registry):
             raise PilotConfigurationError("dual-control approval invalid")
         approvals = tuple(approvals)
         now = now or datetime.now(timezone.utc)

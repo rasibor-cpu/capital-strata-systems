@@ -199,7 +199,6 @@ def evaluate_pilot_preflight(
     profile: GovernedPilotProfile | None,
     *,
     approvals: Any,
-    key_provider: Any,
     key_registry: Any,
     running_release_sha: str,
     broker_id: str,
@@ -233,7 +232,7 @@ def evaluate_pilot_preflight(
 
 
 def _evaluate(
-    profile, approvals, key_provider, key_registry, running_release_sha, broker_id, account_id, asset_class, instrument, currency,
+    profile, approvals, key_registry, running_release_sha, broker_id, account_id, asset_class, instrument, currency,
     session_id, current_exposure_cad, pending_orders_cad, proposed_order_cad, estimated_fees_cad,
     reconciled, reconciled_at, expected_net_edge_bps, required_net_edge_bps,
     orders_already_submitted, margin_requested, now,
@@ -243,7 +242,7 @@ def _evaluate(
         return PilotPreflightDecision(False, "PILOT_BLOCKED", zero)
     from backend.runtime.pilot_dual_control import keys_currently_usable, verify_dual_control
 
-    if not verify_dual_control(profile, approvals, provider=key_provider, registry=key_registry):
+    if not verify_dual_control(profile, approvals, registry=key_registry):
         return PilotPreflightDecision(False, "PILOT_DUAL_CONTROL_INVALID", zero)
     digest = profile.digest()
     now = now or datetime.now(timezone.utc)

@@ -17,7 +17,7 @@ PROVIDER = EphemeralTestSecretProvider()
 def evaluate(p, approval_pair=None, **overrides):
     data = dict(
         approvals=approvals(p, PROVIDER) if approval_pair is None else approval_pair,
-        key_provider=PROVIDER, key_registry=registry(), running_release_sha=RELEASE_SHA,
+        key_registry=registry(PROVIDER), running_release_sha=RELEASE_SHA,
         broker_id="broker-a", account_id="acct-a", asset_class="EQUITY", instrument="ABC",
         currency="CAD", session_id="unique-process-session", current_exposure_cad="2",
         pending_orders_cad="1", proposed_order_cad="15",
@@ -121,7 +121,7 @@ def test_dual_control_required_and_tamper_evident():
     pair = approvals(p, PROVIDER)
     assert evaluate(p, pair).approved
     assert evaluate(p, pair[:1]).reason == "PILOT_DUAL_CONTROL_INVALID"
-    assert not evaluate(p, pair, key_provider=EphemeralTestSecretProvider()).approved
+    assert not evaluate(p, approvals(p, EphemeralTestSecretProvider())).approved  # unregistered keys
     # A re-issued profile does not carry the old approvals.
     narrowed = dataclasses.replace(p, max_aggregate_exposure=Decimal("19.00"))
     assert evaluate(narrowed, pair).reason == "PILOT_DUAL_CONTROL_INVALID"
@@ -136,7 +136,7 @@ def test_release_identity_binding():
 
 
 def test_key_revoked_after_approval_blocks():
-    decision = evaluate(profile(), key_registry=registry(**{"release-k1": "REVOKED"}))
+    decision = evaluate(profile(), key_registry=registry(PROVIDER, **{"release-k1": "REVOKED"}))
     assert not decision.approved
 
 

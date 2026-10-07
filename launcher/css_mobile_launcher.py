@@ -5184,13 +5184,59 @@ async def launcher_live_readiness_state():
     }
 
 
+def _observed_mobile_trading_mode() -> Optional[str]:
+    """Missing controls file == mobile default (READ_ONLY); unreadable == not observed (None)."""
+    try:
+        if not os.path.exists(MOBILE_CONTROLS_FILE):
+            return "MOBILE_READ_ONLY"
+        with open(MOBILE_CONTROLS_FILE, "r", encoding="utf-8") as fh:
+            raw = fh.read().strip()
+        data = json.loads(raw) if raw else {}
+        if not isinstance(data, dict):
+            return None
+        return str(data.get("mobile_trading_mode") or "MOBILE_READ_ONLY")
+    except Exception:
+        return None
+
+
+def get_launcher_observed_safety_flags(authority_feed: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """CSS-064: the four safety flags observed from runtime sources (read-only).
+
+    Unreadable sources yield None flags, which evidence consumers treat as failures.
+    """
+    from backend.runtime.safety_flag_observation import derive_safety_flags
+
+    try:
+        from backend.runtime.runtime_mode import RuntimeModeResolver
+        from dashboard.runtime.api.runtime_mode import _resolve_from_state
+
+        runtime_mode = _resolve_from_state(_executive_brief_readiness_mc_state(), RuntimeModeResolver())
+    except Exception:
+        runtime_mode = None
+    if authority_feed is None:
+        try:
+            authority_feed = get_launcher_live_execution_authority_feed()
+        except Exception:
+            authority_feed = None
+    legacy = sys.modules.get("scripts.css_live_dashboard")
+    legacy_armed = getattr(legacy, "BROKER_EXECUTION_ARMED", None) if legacy is not None else None
+    return derive_safety_flags(
+        runtime_mode=runtime_mode,
+        authority=authority_feed,
+        mobile_trading_mode=_observed_mobile_trading_mode(),
+        legacy_broker_execution_armed=legacy_armed,  # None = legacy dashboard not loaded in-process
+    )
+
+
 @launcher_router.get("/api/v1/live-execution-authority")
 async def launcher_live_execution_authority():
+    feed = get_launcher_live_execution_authority_feed()
     return {
         "section": "live_execution_authority",
-        "data": get_launcher_live_execution_authority_feed(),
+        "data": feed,
         "advisory_only": True,
         "execution_allowed": False,
+        "safety_flags": get_launcher_observed_safety_flags(feed),
     }
 
 

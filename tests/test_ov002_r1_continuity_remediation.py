@@ -32,6 +32,16 @@ from backend.certification.ov002_endurance_monitor import (
 from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
 
 
+
+# Observed-flag block published by /api/v1/live-execution-authority (CSS-064 contract).
+SAFE_OBSERVED_FLAGS = {
+    "execution_allowed": False,
+    "live_trading_blocked": True,
+    "broker_execution_armed": False,
+    "advisory_only": True,
+    "observed": True,
+}
+
 def _identity(pid: int, role: str, now: datetime) -> dict:
     return build_process_identity_record(
         pid=pid,
@@ -57,6 +67,7 @@ def _http_ok():
         "/api/v1/live-execution-authority": (
             200,
             {
+                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,

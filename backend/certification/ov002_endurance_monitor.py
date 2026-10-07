@@ -592,6 +592,16 @@ def capture_safety_assertions() -> dict[str, Any]:
     data = authority.get("data") if isinstance(authority.get("data"), dict) else authority
     live = data.get("live_execution_authority") if isinstance(data.get("live_execution_authority"), dict) else {}
 
+    # CSS-064: the four flags must be *observed*. A missing or non-boolean value is
+    # "not_observed" and fails the assertion; nothing is inferred safe by default.
+    observed = authority.get("safety_flags") if isinstance(authority.get("safety_flags"), dict) else {}
+    not_observed = [
+        name for name in ("execution_allowed", "live_trading_blocked", "broker_execution_armed", "advisory_only")
+        if type(observed.get(name)) is not bool
+    ]
+    if type(runtime.get("advisory_only")) is not bool:
+        not_observed.append("runtime_mode.advisory_only")
+
     execution_allowed = bool(
         runtime.get("execution_allowed")
         or runtime.get("execution_enabled")
@@ -599,14 +609,20 @@ def capture_safety_assertions() -> dict[str, Any]:
         or live.get("execution_authority")
     )
     can_live = bool(data.get("can_live_execute") or live.get("can_live_execute"))
-    advisory = bool(runtime.get("advisory_only", True) and data.get("advisory_only", True))
-    fail_closed = bool(runtime.get("fail_closed", True))
+    advisory = (runtime.get("advisory_only") is True and data.get("advisory_only", True) is True
+                and observed.get("advisory_only") is True)
+    fail_closed = runtime.get("fail_closed") is True  # missing is not inferred safe
     mode = str(runtime.get("runtime_mode") or "UNKNOWN")
 
     checks = {
         "execution_allowed_false": execution_allowed is False,
         "can_live_execute_false": can_live is False,
-        "live_trading_blocked": (not can_live) and (not execution_allowed),
+        "live_trading_blocked": (not can_live) and (not execution_allowed)
+        and observed.get("live_trading_blocked") is True,
+        "observed_execution_allowed_false": observed.get("execution_allowed") is False,
+        "broker_execution_armed_false": observed.get("broker_execution_armed") is False,
+        "advisory_only_observed_true": advisory,
+        "all_flags_observed": not not_observed,
         "advisory_or_disabled_mode": mode in {"DISABLED", "PAPER", "LIVE_READ_ONLY"} or advisory,
         "fail_closed": fail_closed,
         "health_reachable": health_code == 200,
@@ -626,6 +642,9 @@ def capture_safety_assertions() -> dict[str, Any]:
         "fail_closed": fail_closed,
         "execution_allowed": execution_allowed,
         "can_live_execute": can_live,
+        "observed_safety_flags": {k: observed.get(k) for k in
+                                  ("execution_allowed", "live_trading_blocked", "broker_execution_armed", "advisory_only")},
+        "not_observed": not_observed,
         "health": health if isinstance(health, dict) else {"status_code": health_code},
         "checks": checks,
         "authority_reason": data.get("authority_reason") or live.get("authority_reason"),

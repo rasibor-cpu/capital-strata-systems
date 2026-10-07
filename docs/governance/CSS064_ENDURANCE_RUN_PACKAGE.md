@@ -25,31 +25,69 @@ executed on the real host and independently reviewed.
 The disposition is at best `CERTIFICATION_CANDIDATE_INDEPENDENT_REVIEW_REQUIRED`. It is never "CERTIFIED".
 If the preflight file is absent, the disposition is `OBSERVATION_ONLY`.
 
-## Procedure (operator on the real Windows host)
-1. **Freeze the candidate.** Check out the exact candidate commit. `git status --porcelain` must be empty.
-   Record the SHA.
-2. **Start the runtime** with the standard launcher and supervisor, in advisory/paper mode only. Confirm
-   that `/api/runtime-mode` and `/api/v1/live-execution-authority` respond on `CSS_OV002_HEALTH_BASE`
-   (default `http://127.0.0.1:8765`).
-3. **Run the preflight.** It must exit 0 (`certifying: true`). If any flag reports `not_observed`, stop:
-   that is an evidence gap to fix, not something to waive.
-   ```
-   python scripts/css064_endurance_package.py preflight --package-dir <PKG> --expected-sha <SHA> --operator-id <ID>
-   ```
-4. **Initialise and run the monitor** in the same package directory, for at least 72 wall-clock hours.
-   Do not restart, edit, pull or redeploy during the run.
-   ```
-   python scripts/css_ov002_72h_endurance.py --output-dir <PKG> --target-hours 72
-   ```
-   Resume after a monitor-only interruption with `--resume-dir <PKG>`. A runtime restart invalidates the
-   attempt; do not resume it as certifying.
-5. **Finalize.** It must exit 0, then archive `<PKG>` unchanged, together with the manifest digest.
-   ```
-   python scripts/css064_endurance_package.py finalize --package-dir <PKG>
-   ```
-6. **Independent review.** The reviewer re-hashes every file against `CSS064_FINAL_MANIFEST.json`,
-   checks there are zero invalidation markers, checks `head_at_finalize == expected_sha`, and records the
-   result in the Master Portfolio Register. Only then may CSS-064 move to DONE.
+## Procedure: exact Windows command sequence (operator on the real host, PowerShell)
+
+Placeholders: `<FROZEN_SHA>` is the frozen candidate commit (given in the release note for this run) and
+`<OPERATOR_ID>` is the operator's identifier. Evidence is written **outside** the repository, so the
+worktree stays clean.
+
+```powershell
+# 0. Variables
+$Repo = "C:\rasib\source\capital-strata-systems"
+$Sha  = "<FROZEN_SHA>"
+New-Item -ItemType Directory -Force -Path "C:\CSS_Evidence" | Out-Null
+$Pkg  = "C:\CSS_Evidence\CSS064_" + (Get-Date).ToUniversalTime().ToString("yyyyMMddTHHmmssZ")
+$env:CSS_OV002_HEALTH_BASE = "http://127.0.0.1:8765"
+
+# 1. Freeze the candidate (must print the SHA and an EMPTY status)
+Set-Location $Repo
+git fetch origin feature/governed-configurable-pilot-limit
+git checkout --detach $Sha
+git rev-parse HEAD
+git status --porcelain
+
+# 2. Environment + real-host regression slice (CSS-061 evidence; all must pass on Windows)
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pytest -q tests/test_ov002_endurance_monitor.py tests/test_ov002_r1_continuity_remediation.py tests/test_ov002_r1_r1_blocker_repairs.py tests/test_phase163_endurance_validation.py tests/test_safety_flag_observation.py tests/test_css064_endurance_package.py *> "$Pkg-host-regression.txt"
+.venv\Scripts\python.exe -m pytest -q *> "$Pkg-full-regression.txt"
+
+# 3. Start the runtime (advisory/paper only) in a SEPARATE window and leave it running
+#    (equivalent to double-clicking launch_css.bat)
+Start-Process -FilePath "$Repo\launch_css.bat" -WorkingDirectory $Repo
+
+# 4. Confirm the four flags are explicitly exposed and safe (expect observed=true,
+#    execution_allowed=false, live_trading_blocked=true, broker_execution_armed=false, advisory_only=true)
+(Invoke-RestMethod "$env:CSS_OV002_HEALTH_BASE/api/v1/live-execution-authority").safety_flags | ConvertTo-Json
+
+# 5. Pre-run gate (must exit 0 with certifying=true; any not_observed => STOP and report)
+.venv\Scripts\python.exe scripts\css064_endurance_package.py preflight --package-dir $Pkg --expected-sha $Sha --operator-id <OPERATOR_ID>
+if ($LASTEXITCODE -ne 0) { throw "CSS-064 preflight not certifying - do not start the run" }
+
+# 6. 72-hour monitor (same package dir). Do not restart, edit, pull or redeploy during the run.
+.venv\Scripts\python.exe scripts\css_ov002_72h_endurance.py --output-dir $Pkg --target-hours 72
+#    Only if the MONITOR process itself was interrupted (runtime untouched):
+#    .venv\Scripts\python.exe scripts\css_ov002_72h_endurance.py --resume-dir $Pkg --target-hours 72
+
+# 7. Finalize (writes CSS064_FINAL_MANIFEST.json; never overwrites)
+.venv\Scripts\python.exe scripts\css064_endurance_package.py finalize --package-dir $Pkg
+Get-FileHash "$Pkg\CSS064_FINAL_MANIFEST.json" -Algorithm SHA256
+
+# 8. Archive the package directory and the two regression logs unchanged; send for independent review.
+```
+
+### Stop conditions
+- **Wrong checkout:** step 1 prints a different SHA or a non-empty status. Stop.
+- **Real-host tests fail:** step 2 fails any test in the real-host slice. Record the output; that is
+  CSS-061 evidence, not something to fix during the run.
+- **Flags not exposed or unsafe:** step 4 shows `observed: false`, a `null` flag or any unsafe value.
+- **Preflight not certifying:** step 5 exits non-zero.
+- **Run invalidated:** an `INVALIDATION*.json` appears in `$Pkg`. The attempt is invalidated; do not
+  resume it as certifying.
+
+### Independent review
+The reviewer re-hashes every file against `CSS064_FINAL_MANIFEST.json`, checks there are zero
+invalidation markers, checks `head_at_finalize == expected_sha`, and records the result in the Master
+Portfolio Register. Only then may CSS-064 move to DONE.
 
 ## Acceptance (engineering mirror; the authority's wording prevails)
 - **Duration:** at least 72 h continuous wall-clock on the frozen SHA, with zero unexpected runtime
@@ -58,12 +96,17 @@ If the preflight file is absent, the disposition is `OBSERVATION_ONLY`.
   finalize.
 - **Custody:** a complete hashed manifest that an independent reviewer has reproduced.
 
-## Known gaps to resolve before running
-1. **`broker_execution_armed` exposure unverified.** The runtime endpoints are not yet confirmed to expose
-   it. The preflight fails closed with `not_observed` until they do.
-2. **Fail-open advisory default in the monitor.** `capture_safety_assertions` treats a missing
-   `advisory_only` as `True`. The CSS-064 preflight and finalize do not inherit this default, but the
-   monitor's per-snapshot assertion should be made strict (CSS-062 follow-up).
-3. **Reboot detection is Windows-only.** `CanonicalEnduranceEvidence.get_host_boot_time` uses Windows
-   `GetTickCount64`. On other hosts it returns 0.0 and silently disables reboot detection. That doesn't
-   matter on the Windows host, but the package refuses non-Windows hosts for this reason.
+## Pre-run gaps (status as of this commit)
+1. **`broker_execution_armed` exposure: RESOLVED in code.**
+   - `/api/v1/live-execution-authority` on the :8765 launcher now publishes `safety_flags`, derived by
+     `backend/runtime/safety_flag_observation.py` from runtime-mode resolution, the broker authority
+     feed, the mobile trading-mode control and the legacy arming global.
+   - An unreadable source yields `null` (not observed).
+   - Before this change, only `execution_allowed` and `advisory_only` were exposed, and as literals.
+   - Verified in-process with FastAPI TestClient (`tests/test_safety_flag_observation.py`). It must
+     still be confirmed on the real host at step 4.
+2. **Fail-open `advisory_only` default in the OV-002 monitor: FIXED.**
+   - `capture_safety_assertions` now reports a missing or non-boolean `advisory_only`, any missing
+     observed flag, or a missing `fail_closed` as `not_observed` / failed.
+3. **Reboot detection remains Windows-only** (`GetTickCount64`). The package refuses non-Windows
+   hosts.

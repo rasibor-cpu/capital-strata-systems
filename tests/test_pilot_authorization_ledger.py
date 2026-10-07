@@ -20,8 +20,8 @@ PROVIDER = EphemeralTestSecretProvider()
 
 def consume(ledger, p, *, key_registry=None, session_id=SESSION, release=RELEASE_SHA, pair=None, **kw):
     return ledger.consume(
-        p, approvals=approvals(p, PROVIDER) if pair is None else pair, key_provider=PROVIDER,
-        key_registry=key_registry or registry(), session_id=session_id,
+        p, approvals=approvals(p, PROVIDER) if pair is None else pair,
+        key_registry=key_registry or registry(PROVIDER), session_id=session_id,
         running_release_sha=release, **kw,
     )
 
@@ -45,7 +45,7 @@ def test_journal_records_attributable_approvals_without_key_material(tmp_path):
     assert {a["key_id"] for a in entry["approvals"]} == {"sponsor-k1", "release-k1"}
     raw = ledger.journal.read_text()
     for key_id in ("sponsor-k1", "release-k1"):
-        assert PROVIDER.get_key(key_id).hex() not in raw
+        assert PROVIDER.get_signing_seed(key_id).hex() not in raw
 
 
 def test_restart_cannot_reuse_consumed_approval(tmp_path):
@@ -72,7 +72,7 @@ def test_single_approval_or_revoked_key_cannot_consume(tmp_path):
     with pytest.raises(PilotConfigurationError):
         consume(ledger, p, pair=approvals(p, PROVIDER)[:1])
     with pytest.raises(PilotConfigurationError):
-        consume(ledger, p, key_registry=registry(**{"sponsor-k1": "REVOKED"}))
+        consume(ledger, p, key_registry=registry(PROVIDER, **{"sponsor-k1": "REVOKED"}))
     assert not ledger.is_claimed(p.approval_id)
 
 
@@ -123,7 +123,7 @@ provider = EphemeralTestSecretProvider()
 p = profile(approval_id="race-001")
 try:
     PilotAuthorizationLedger(sys.argv[1]).consume(
-        p, approvals=approvals(p, provider), key_provider=provider, key_registry=registry(),
+        p, approvals=approvals(p, provider), key_registry=registry(provider),
         session_id=SESSION, running_release_sha=RELEASE_SHA)
     print("ok")
 except PilotReplayError:
