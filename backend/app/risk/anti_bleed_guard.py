@@ -79,6 +79,8 @@ class AntiBleedGuard:
         spread_bps: float,
         slippage_bps: float,
         side: str = "UNKNOWN",
+        *,
+        pilot_min_size_exception: Any = None,
     ) -> Dict[str, Any]:
 
         total_cost_bps = fee_bps + spread_bps + slippage_bps
@@ -114,7 +116,17 @@ class AntiBleedGuard:
             return self._reject(decision, "insufficient_net_edge")
 
         if trade_size < self.minimum_profitable_trade_size:
-            return self._reject(decision, "trade_size_too_small")
+            # Only a governed, single-use, process-bound pilot capability can relax
+            # this one rule (disabled by default); edge/cost/cooldown still apply.
+            if pilot_min_size_exception is None or cooldown_active:
+                return self._reject(decision, "trade_size_too_small")
+            from backend.runtime.pilot_min_size_exception import apply_pilot_min_size_exception
+
+            if not apply_pilot_min_size_exception(
+                pilot_min_size_exception, symbol=symbol, trade_size=trade_size
+            ):
+                return self._reject(decision, "trade_size_too_small")
+            decision["pilot_min_size_exception_id"] = pilot_min_size_exception.exception_id
 
         if cooldown_active:
             return self._reject(decision, "cooldown_active")
