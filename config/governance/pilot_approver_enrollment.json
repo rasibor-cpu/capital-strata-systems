@@ -1,0 +1,9 @@
+{
+  "schema": "css.pilot_approver_enrollment.v1",
+  "notes": "Designations and PUBLIC key metadata only. Private signing keys live solely in each approver's own Windows Credential Manager (DPAPI). Production activation is blocked until production_enrollment_status() reports ready.",
+  "designations": {
+    "PILOT_SPONSOR": {"holder_id": "robert-asibor", "designated_by": "owner decision 2026-10-07"},
+    "RELEASE_SECURITY_APPROVER": null
+  },
+  "keys": []
+}

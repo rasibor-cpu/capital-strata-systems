@@ -307,3 +307,20 @@ def _css_dashboard_global_state_isolation():
         else:
             setattr(dashboard, name, value)
 
+
+
+@pytest.fixture(autouse=True)
+def _css_runtime_db_isolation(monkeypatch, tmp_path_factory):
+    """Give every test its own runtime SQLite DB (CSS-061 shared-state leak fix).
+
+    backend.app.persistence.db keeps a process-wide singleton connection to the
+    repo-relative data/css_runtime.db. Without isolation, sessions, trades and
+    PnL snapshots written by one test (or a previous run) silently satisfy the
+    preconditions of later tests, making results depend on order and on
+    whatever runtime state was left on disk.
+    """
+    db = importlib.import_module("backend.app.persistence.db")
+    db.close_connection()
+    monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path_factory.mktemp("css_runtime_db") / "css_runtime.db")
+    yield
+    db.close_connection()

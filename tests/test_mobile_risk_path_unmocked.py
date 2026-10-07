@@ -3,7 +3,22 @@ from unittest.mock import patch
 from dashboard.mobile.mobile_app import execute_mobile_trade_ticket
 from engine.risk.broker_margin_contract import BrokerMarginSnapshot
 
-def test_mobile_risk_path_unmocked_fails_closed():
+def test_mobile_risk_path_unmocked_fails_closed(monkeypatch, tmp_path):
+    # The orchestrator persists a canonical trade outcome during evaluation; give
+    # it explicit isolated storage instead of relying on leaked runtime state.
+    import backend.intelligence.trade_decision_orchestrator as tdo
+    from backend.analytics.trade_outcome_repository import TradeOutcomeRepository
+    from backend.execution.canonical_trade_lifecycle import CanonicalTradeLifecycle
+
+    outcome_repository = TradeOutcomeRepository(tmp_path / "trade_outcomes.json")
+    outcome_repository.create_storage()
+    trade_runtime_service = tdo.TradeRuntimeService
+    monkeypatch.setattr(
+        tdo,
+        "TradeRuntimeService",
+        lambda: trade_runtime_service(canonical_lifecycle=CanonicalTradeLifecycle(outcome_repository)),
+    )
+
     user_ctx = {"role": "SUPER_USER", "user_id": "test_1", "submit_trade": True}
     form = {
         "broker": "COINBASE",
