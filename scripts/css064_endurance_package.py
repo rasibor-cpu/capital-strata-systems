@@ -23,7 +23,7 @@ from backend.certification.css064_endurance_package import (  # noqa: E402
     MANIFEST_FILE, MIN_TARGET_HOURS, PREFLIGHT_FILE, build_final_manifest, build_preflight,
 )
 
-FLAG_ENDPOINTS = ("/api/runtime-mode", "/api/v1/live-execution-authority", "/health")
+FLAG_ENDPOINTS = ("/api/v1/safety-flags", "/api/runtime-mode", "/api/v1/live-execution-authority", "/health")
 
 
 def fetch_flag_payloads(base_url: str) -> dict:

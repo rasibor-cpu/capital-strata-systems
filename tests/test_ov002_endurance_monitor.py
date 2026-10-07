@@ -20,13 +20,14 @@ from backend.certification.ov002_continuity import build_process_identity_record
 
 
 
-# Observed-flag block published by /api/v1/live-execution-authority (CSS-064 contract).
+# Authoritative safety surface GET /api/v1/safety-flags (CSS-064 contract).
 SAFE_OBSERVED_FLAGS = {
+    "schema": "css.safety_flags.v1",
     "execution_allowed": False,
     "live_trading_blocked": True,
     "broker_execution_armed": False,
     "advisory_only": True,
-    "observed": True,
+    "verdict": "SAFE",
 }
 
 def _identity(pid: int, role: str, now: datetime) -> dict:
@@ -54,7 +55,6 @@ def test_safety_assertions_pass_with_mocks() -> None:
         "/api/v1/live-execution-authority": (
             200,
             {
-                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,
@@ -65,6 +65,7 @@ def test_safety_assertions_pass_with_mocks() -> None:
             },
         ),
         "/health": (200, {"status": "healthy", "service": "css_mobile_launcher"}),
+        "/api/v1/safety-flags": (200, SAFE_OBSERVED_FLAGS),
     }
 
     def _fake(path: str, timeout: float = 8.0):
@@ -112,7 +113,6 @@ def test_initialize_and_once_snapshot(tmp_path: Path) -> None:
         "/api/v1/live-execution-authority": (
             200,
             {
-                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,
@@ -122,6 +122,7 @@ def test_initialize_and_once_snapshot(tmp_path: Path) -> None:
             },
         ),
         "/health": (200, {"status": "healthy"}),
+        "/api/v1/safety-flags": (200, SAFE_OBSERVED_FLAGS),
         "/api/runtime-telemetry": (200, {"schema_version": "test"}),
         "/api/options-income/status": (
             200,
@@ -169,7 +170,6 @@ def _http_responses() -> dict[str, tuple[int, dict]]:
         "/api/v1/live-execution-authority": (
             200,
             {
-                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,
@@ -179,6 +179,7 @@ def _http_responses() -> dict[str, tuple[int, dict]]:
             },
         ),
         "/health": (200, {"status": "healthy"}),
+        "/api/v1/safety-flags": (200, SAFE_OBSERVED_FLAGS),
         "/api/runtime-telemetry": (200, {"schema_version": "test"}),
         "/api/options-income/status": (
             200,

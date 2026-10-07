@@ -27,6 +27,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Mapping
 
+from backend.runtime.safety_flag_observation import (
+    NOT_OBSERVED, SAFETY_FLAGS_ENDPOINT, SAFETY_FLAGS_SCHEMA,
+)
+
 REQUIRED_FLAGS: dict[str, bool] = {
     "execution_allowed": False,
     "live_trading_blocked": True,
@@ -78,16 +82,27 @@ def _find_flag(payload: Any, name: str) -> list[Any]:
 
 
 def observe_safety_flags(payloads: Mapping[str, Any]) -> dict[str, Any]:
-    """Every required flag must be observed, as a real bool, with the safe value, everywhere it appears."""
+    """All four flags must be present at top level of the authoritative surface
+    (GET /api/v1/safety-flags) as exact booleans with the required values, and
+    every other occurrence on any surface must also be safe. Nothing is inferred."""
     flags: dict[str, Any] = {}
     failures: list[str] = []
+    authoritative = payloads.get(SAFETY_FLAGS_ENDPOINT)
+    if not isinstance(authoritative, Mapping) or authoritative.get("schema") != SAFETY_FLAGS_SCHEMA:
+        failures.append("authoritative_surface_unavailable")
+        authoritative = {}
+    elif authoritative.get("verdict") != "SAFE":
+        failures.append(f"authoritative_verdict:{authoritative.get('verdict')}")
     for name, required in REQUIRED_FLAGS.items():
+        primary = authoritative.get(name, NOT_OBSERVED)
+        if type(primary) is not bool:
+            failures.append(f"{name}:not_observed")
+        elif primary is not required:
+            failures.append(f"{name}:unsafe:{primary!r}")
         values = [v for payload in payloads.values() for v in _find_flag(payload, name)]
         flags[name] = values
-        if not values:
-            failures.append(f"{name}:not_observed")
-        elif any(type(v) is not bool or v is not required for v in values):
-            failures.append(f"{name}:unsafe_or_non_boolean:{values!r}")
+        if any(type(v) is not bool or v is not required for v in values):
+            failures.append(f"{name}:unsafe_or_non_boolean_somewhere:{values!r}")
     return {"ok": not failures, "observed": flags, "failures": failures, "observed_at_utc": _now()}
 
 

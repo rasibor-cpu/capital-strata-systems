@@ -81,3 +81,52 @@ def _summary(sources: Mapping[str, Any]) -> dict[str, Any]:
         "mobile_trading_mode": sources.get("mobile_trading_mode"),
         "legacy_broker_execution_armed": sources.get("legacy_broker_execution_armed"),
     }
+
+
+# ---- authoritative read-only status surface (GET /api/v1/safety-flags) --------
+
+SAFETY_FLAGS_ENDPOINT = "/api/v1/safety-flags"
+SAFETY_FLAGS_SCHEMA = "css.safety_flags.v1"
+NOT_OBSERVED = "NOT_OBSERVED"
+REQUIRED_SAFE_VALUES: dict[str, bool] = {
+    "execution_allowed": False,
+    "live_trading_blocked": True,
+    "broker_execution_armed": False,
+    "advisory_only": True,
+}
+
+
+def authoritative_safety_flags_payload(derived: Mapping[str, Any] | None, *, observed_at: str) -> dict[str, Any]:
+    """The single authoritative flag surface. Each flag is an exact bool or ``"NOT_OBSERVED"``.
+
+    ``verdict`` is ``SAFE`` only when all four are observed with the required values;
+    any missing flag gives ``NOT_OBSERVED`` and any other value gives ``UNSAFE``.
+    Never infers a safe value.
+    """
+    derived = derived if isinstance(derived, Mapping) else {}
+    flags: dict[str, Any] = {}
+    not_observed: list[str] = []
+    unsafe: list[str] = []
+    for name, required in REQUIRED_SAFE_VALUES.items():
+        value = derived.get(name)
+        if type(value) is not bool:
+            flags[name] = NOT_OBSERVED
+            not_observed.append(name)
+        else:
+            flags[name] = value
+            if value is not required:
+                unsafe.append(name)
+    verdict = NOT_OBSERVED if not_observed else ("UNSAFE" if unsafe else "SAFE")
+    return {
+        "schema": SAFETY_FLAGS_SCHEMA,
+        **flags,
+        "verdict": verdict,
+        "fail_closed": verdict != "SAFE",
+        "not_observed": not_observed,
+        "unsafe": unsafe,
+        "required": dict(REQUIRED_SAFE_VALUES),
+        "unknown_sources": list(derived.get("unknown_sources") or []),
+        "sources": derived.get("sources"),
+        "read_only": True,
+        "observed_at_utc": observed_at,
+    }

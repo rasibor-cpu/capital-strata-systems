@@ -33,13 +33,14 @@ from backend.runtime.css_runtime_supervisor import CSSRuntimeSupervisor
 
 
 
-# Observed-flag block published by /api/v1/live-execution-authority (CSS-064 contract).
+# Authoritative safety surface GET /api/v1/safety-flags (CSS-064 contract).
 SAFE_OBSERVED_FLAGS = {
+    "schema": "css.safety_flags.v1",
     "execution_allowed": False,
     "live_trading_blocked": True,
     "broker_execution_armed": False,
     "advisory_only": True,
-    "observed": True,
+    "verdict": "SAFE",
 }
 
 def _identity(pid: int, role: str, now: datetime) -> dict:
@@ -67,7 +68,6 @@ def _http_ok():
         "/api/v1/live-execution-authority": (
             200,
             {
-                "safety_flags": SAFE_OBSERVED_FLAGS,
                 "data": {
                     "execution_allowed": False,
                     "can_live_execute": False,
@@ -77,6 +77,7 @@ def _http_ok():
             },
         ),
         "/health": (200, {"status": "healthy"}),
+        "/api/v1/safety-flags": (200, SAFE_OBSERVED_FLAGS),
         "/api/runtime-telemetry": (200, {"schema_version": "test"}),
         "/api/options-income/status": (
             200,

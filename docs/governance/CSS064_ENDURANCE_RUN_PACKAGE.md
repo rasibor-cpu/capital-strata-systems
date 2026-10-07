@@ -55,9 +55,9 @@ git status --porcelain
 #    (equivalent to double-clicking launch_css.bat)
 Start-Process -FilePath "$Repo\launch_css.bat" -WorkingDirectory $Repo
 
-# 4. Confirm the four flags are explicitly exposed and safe (expect observed=true,
-#    execution_allowed=false, live_trading_blocked=true, broker_execution_armed=false, advisory_only=true)
-(Invoke-RestMethod "$env:CSS_OV002_HEALTH_BASE/api/v1/live-execution-authority").safety_flags | ConvertTo-Json
+# 4. Confirm the authoritative safety surface (expect verdict=SAFE, execution_allowed=false,
+#    live_trading_blocked=true, broker_execution_armed=false, advisory_only=true, not_observed=[])
+Invoke-RestMethod "$env:CSS_OV002_HEALTH_BASE/api/v1/safety-flags" | ConvertTo-Json -Depth 4
 
 # 5. Pre-run gate (must exit 0 with certifying=true; any not_observed => STOP and report)
 .venv\Scripts\python.exe scripts\css064_endurance_package.py preflight --package-dir $Pkg --expected-sha $Sha --operator-id <OPERATOR_ID>
@@ -79,7 +79,8 @@ Get-FileHash "$Pkg\CSS064_FINAL_MANIFEST.json" -Algorithm SHA256
 - **Wrong checkout:** step 1 prints a different SHA or a non-empty status. Stop.
 - **Real-host tests fail:** step 2 fails any test in the real-host slice. Record the output; that is
   CSS-061 evidence, not something to fix during the run.
-- **Flags not exposed or unsafe:** step 4 shows `observed: false`, a `null` flag or any unsafe value.
+- **Flags not exposed or unsafe:** step 4 returns 404, a `verdict` other than `SAFE`, any `NOT_OBSERVED`
+  flag or any unsafe value.
 - **Preflight not certifying:** step 5 exits non-zero.
 - **Run invalidated:** an `INVALIDATION*.json` appears in `$Pkg`. The attempt is invalidated; do not
   resume it as certifying.
@@ -97,6 +98,15 @@ Portfolio Register. Only then may CSS-064 move to DONE.
 - **Custody:** a complete hashed manifest that an independent reviewer has reproduced.
 
 ## Pre-run gaps (status as of this commit)
+0. **Authoritative surface: `GET /api/v1/safety-flags`** (schema `css.safety_flags.v1`).
+   - Returns all four flags at top level, each an exact boolean or `"NOT_OBSERVED"`, plus
+     `verdict` (`SAFE` / `UNSAFE` / `NOT_OBSERVED`), `fail_closed`, `not_observed` and `unsafe`.
+   - It is GET-only (other methods return 405).
+   - The CSS-064 preflight/finalize and the OV-002 monitor accept flags **only** from this surface.
+     Flags found elsewhere can make a check fail but can never satisfy it.
+   - **Requires restarting the server onto the frozen SHA.** A server running an earlier build returns
+     404 here, and the preflight then fails closed. On 2026-10-07 the running Windows server exposed
+     none of the four flags on `/health`, `/status`, `/mission-control` or `/mobile`.
 1. **`broker_execution_armed` exposure: RESOLVED in code.**
    - `/api/v1/live-execution-authority` on the :8765 launcher now publishes `safety_flags`, derived by
      `backend/runtime/safety_flag_observation.py` from runtime-mode resolution, the broker authority

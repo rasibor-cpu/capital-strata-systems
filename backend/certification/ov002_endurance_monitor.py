@@ -585,6 +585,7 @@ def capture_safety_assertions() -> dict[str, Any]:
     status_code, runtime = _http_json("/api/runtime-mode")
     auth_code, authority = _http_json("/api/v1/live-execution-authority")
     health_code, health = _http_json("/health")
+    flags_code, flags_payload = _http_json("/api/v1/safety-flags")
 
     runtime = runtime if isinstance(runtime, dict) else {}
     authority = authority if isinstance(authority, dict) else {}
@@ -594,7 +595,9 @@ def capture_safety_assertions() -> dict[str, Any]:
 
     # CSS-064: the four flags must be *observed*. A missing or non-boolean value is
     # "not_observed" and fails the assertion; nothing is inferred safe by default.
-    observed = authority.get("safety_flags") if isinstance(authority.get("safety_flags"), dict) else {}
+    # Authoritative surface only (GET /api/v1/safety-flags, schema css.safety_flags.v1).
+    observed = (flags_payload if isinstance(flags_payload, dict)
+                and flags_payload.get("schema") == "css.safety_flags.v1" else {})
     not_observed = [
         name for name in ("execution_allowed", "live_trading_blocked", "broker_execution_armed", "advisory_only")
         if type(observed.get(name)) is not bool
@@ -623,6 +626,8 @@ def capture_safety_assertions() -> dict[str, Any]:
         "broker_execution_armed_false": observed.get("broker_execution_armed") is False,
         "advisory_only_observed_true": advisory,
         "all_flags_observed": not not_observed,
+        "safety_flags_surface_reachable": flags_code == 200 and bool(observed),
+        "safety_flags_verdict_safe": observed.get("verdict") == "SAFE",
         "advisory_or_disabled_mode": mode in {"DISABLED", "PAPER", "LIVE_READ_ONLY"} or advisory,
         "fail_closed": fail_closed,
         "health_reachable": health_code == 200,
@@ -645,6 +650,7 @@ def capture_safety_assertions() -> dict[str, Any]:
         "observed_safety_flags": {k: observed.get(k) for k in
                                   ("execution_allowed", "live_trading_blocked", "broker_execution_armed", "advisory_only")},
         "not_observed": not_observed,
+        "safety_flags_verdict": observed.get("verdict"),
         "health": health if isinstance(health, dict) else {"status_code": health_code},
         "checks": checks,
         "authority_reason": data.get("authority_reason") or live.get("authority_reason"),

@@ -1,14 +1,17 @@
 import json
 
+import pytest
+
 from backend.certification.css064_endurance_package import (
     DISPOSITION_CANDIDATE, DISPOSITION_NOT_CERTIFIABLE, DISPOSITION_OBSERVATION, PREFLIGHT_FILE,
     build_final_manifest, build_preflight, observe_safety_flags,
 )
 
 SHA = "c" * 40
-SAFE = {"/api/runtime-mode": {"execution_allowed": False, "advisory_only": True},
-        "/api/v1/live-execution-authority": {"data": {"live_trading_blocked": True,
-                                                      "broker_execution_armed": False}}}
+AUTHORITATIVE = {"schema": "css.safety_flags.v1", "execution_allowed": False, "live_trading_blocked": True,
+                 "broker_execution_armed": False, "advisory_only": True, "verdict": "SAFE"}
+SAFE = {"/api/v1/safety-flags": AUTHORITATIVE,
+        "/api/runtime-mode": {"execution_allowed": False, "advisory_only": True}}
 
 
 def clean_git(_root):
@@ -34,8 +37,23 @@ def test_preflight_certifying_only_when_all_checks_pass():
 def test_missing_flag_is_not_assumed_safe():
     result = observe_safety_flags({"/api/runtime-mode": {"execution_allowed": False}})
     assert not result["ok"]
+    assert "authoritative_surface_unavailable" in result["failures"]
     assert "advisory_only:not_observed" in result["failures"]
     assert "broker_execution_armed:not_observed" in result["failures"]
+
+
+def test_flags_outside_authoritative_surface_cannot_satisfy_preflight():
+    # All four flags safe, but only on non-authoritative surfaces -> still fails closed.
+    scattered = {"/api/runtime-mode": {"execution_allowed": False, "advisory_only": True},
+                 "/api/v1/live-execution-authority": {"live_trading_blocked": True, "broker_execution_armed": False}}
+    assert not observe_safety_flags(scattered)["ok"]
+
+
+@pytest.mark.parametrize("name", ["execution_allowed", "live_trading_blocked", "broker_execution_armed", "advisory_only"])
+def test_authoritative_not_observed_flag_fails(name):
+    payload = {**AUTHORITATIVE, name: "NOT_OBSERVED", "verdict": "NOT_OBSERVED"}
+    result = observe_safety_flags({**SAFE, "/api/v1/safety-flags": payload})
+    assert not result["ok"] and f"{name}:not_observed" in result["failures"]
 
 
 def test_unsafe_or_non_boolean_or_conflicting_flags_fail():

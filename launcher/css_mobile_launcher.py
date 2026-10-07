@@ -5228,6 +5228,22 @@ def get_launcher_observed_safety_flags(authority_feed: Optional[Dict[str, Any]] 
     )
 
 
+@launcher_router.get("/api/v1/safety-flags")
+async def launcher_safety_flags():
+    """CSS-064 authoritative read-only safety surface: all four flags, exact or NOT_OBSERVED."""
+    from datetime import datetime, timezone
+
+    from backend.runtime.safety_flag_observation import authoritative_safety_flags_payload
+
+    try:
+        derived = get_launcher_observed_safety_flags()
+    except Exception:
+        derived = None
+    return authoritative_safety_flags_payload(
+        derived, observed_at=datetime.now(timezone.utc).isoformat()
+    )
+
+
 @launcher_router.get("/api/v1/live-execution-authority")
 async def launcher_live_execution_authority():
     feed = get_launcher_live_execution_authority_feed()
