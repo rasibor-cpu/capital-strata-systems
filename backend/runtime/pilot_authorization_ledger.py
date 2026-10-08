@@ -14,10 +14,10 @@ submission path and does not alter execution_allowed / live_trading_blocked.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
+import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -85,12 +85,46 @@ class PilotAuthorizationLedger:
 
     @contextmanager
     def _locked(self):
-        with (self.root / "journal.lock").open("a") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
-                yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        """Cross-platform process lock for the authorization journal.
+
+        Windows is the governed production host, so POSIX-only fcntl cannot be
+        imported unconditionally. The lock file is one byte and is held for the
+        entire verify+append critical section.
+        """
+        lock_path = self.root / "journal.lock"
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with lock_path.open("a+b") as lock:
+            lock.seek(0, os.SEEK_END)
+            if lock.tell() == 0:
+                lock.write(b"0")
+                lock.flush()
+                os.fsync(lock.fileno())
+            lock.seek(0)
+
+            if os.name == "nt":
+                import msvcrt
+                acquired = False
+                deadline = time.monotonic() + 10.0
+                while not acquired:
+                    try:
+                        msvcrt.locking(lock.fileno(), msvcrt.LK_NBLCK, 1)
+                        acquired = True
+                    except OSError:
+                        if time.monotonic() >= deadline:
+                            raise PilotReplayError("authorization ledger lock timeout")
+                        time.sleep(0.02)
+                try:
+                    yield
+                finally:
+                    lock.seek(0)
+                    msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+                try:
+                    yield
+                finally:
+                    fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
     def _append(self, body: dict[str, Any]) -> str:
         with self._locked():
