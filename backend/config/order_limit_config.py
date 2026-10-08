@@ -27,11 +27,11 @@ class CanonicalOrderLimitConfig:
     """
 
     live_order_default_notional_usd: Decimal = Decimal("1.00")
-    live_pilot_max_total_cad: Decimal = Decimal("20.00")
+    live_pilot_max_total_cad: Decimal = Decimal("40.00")
     live_pilot_max_position_cad: Decimal = Decimal("20.00")
     live_pilot_daily_loss_cad: Decimal = Decimal("2.00")
     live_pilot_session_loss_cad: Decimal = Decimal("4.00")
-    live_pilot_max_concurrent_positions: int = 1
+    live_pilot_max_concurrent_positions: int = 2
     live_pilot_max_orders_per_session: int = 10
     paper_order_default_notional_usd: Decimal = Decimal("1000.00")
     paper_order_max_notional_usd: Decimal = Decimal("1000000.00")
@@ -97,13 +97,13 @@ class CanonicalOrderLimitConfig:
 
     def validate(self) -> None:
         _at_most(self.live_order_default_notional_usd, Decimal("1.00"), "live_order_default_notional_usd")
-        _at_most(self.live_pilot_max_total_cad, Decimal("20.00"), "live_pilot_max_total_cad")
+        _at_most(self.live_pilot_max_total_cad, Decimal("40.00"), "live_pilot_max_total_cad")
         _at_most(self.live_pilot_max_position_cad, Decimal("20.00"), "live_pilot_max_position_cad")
         _at_most(self.live_pilot_daily_loss_cad, Decimal("2.00"), "live_pilot_daily_loss_cad")
         _at_most(self.live_pilot_session_loss_cad, Decimal("4.00"), "live_pilot_session_loss_cad")
         _count_at_most(
             self.live_pilot_max_concurrent_positions,
-            1,
+            2,
             "live_pilot_max_concurrent_positions",
         )
         _count_at_most(
