@@ -31,6 +31,8 @@ from backend.config.order_limit_config import DEFAULT_ORDER_LIMIT_CONFIG
 
 
 PILOT_SCOPE = "PILOT_PREFLIGHT_ONE_ORDER"
+PILOT_SCOPE_MICRO = "PILOT_PREFLIGHT_MICRO_ENVELOPE"
+PILOT_SCOPES = frozenset({PILOT_SCOPE, PILOT_SCOPE_MICRO})
 PILOT_CURRENCIES = frozenset({"CAD"})
 # Cash, unlevered, non-derivative only. Options/futures/margin products are excluded.
 PILOT_ASSET_CLASSES = frozenset({"EQUITY", "ETF", "FX_SPOT", "CRYPTO_SPOT"})
@@ -115,7 +117,7 @@ class GovernedPilotProfile:
             raise PilotConfigurationError("release_sha must be an exact 40-hex commit")
         if self.instrument != self.instrument.upper():
             raise PilotConfigurationError("instrument must be normalized upper-case")
-        if self.scope != PILOT_SCOPE:
+        if self.scope not in PILOT_SCOPES:
             raise PilotConfigurationError("unapproved authorization scope")
         if self.asset_class not in PILOT_ASSET_CLASSES:
             raise PilotConfigurationError("asset class not approved for pilot")
@@ -133,8 +135,16 @@ class GovernedPilotProfile:
                 raise PilotConfigurationError(f"{name}: timezone-aware datetime required")
         if not self.issued_at < self.expires_at <= self.issued_at + MAX_APPROVAL_WINDOW:
             raise PilotConfigurationError("approval window invalid or exceeds 24h")
-        if type(self.max_order_count) is not int or self.max_order_count != 1:
-            raise PilotConfigurationError("pilot is restricted to one order")
+        if type(self.max_order_count) is not int or self.max_order_count < 1:
+            raise PilotConfigurationError("max_order_count must be a positive integer")
+        if self.scope == PILOT_SCOPE and self.max_order_count != 1:
+            raise PilotConfigurationError("one-order pilot scope requires max_order_count=1")
+        if self.scope == PILOT_SCOPE_MICRO:
+            canonical_max_orders = DEFAULT_ORDER_LIMIT_CONFIG.live_pilot_max_orders_per_session
+            if self.max_order_count > canonical_max_orders:
+                raise PilotConfigurationError(
+                    f"micro-envelope order count exceeds canonical ceiling {canonical_max_orders}"
+                )
         if self.allow_margin is not False:
             raise PilotConfigurationError("margin is prohibited")
 
@@ -265,8 +275,10 @@ def _evaluate(
     age = (now - reconciled_at).total_seconds()
     if age < 0 or age > MAX_RECONCILIATION_AGE_SECONDS:
         return PilotPreflightDecision(False, "RECONCILIATION_STALE", zero, digest)
-    if type(orders_already_submitted) is not int or orders_already_submitted != 0:
-        return PilotPreflightDecision(False, "PILOT_ORDER_ALREADY_USED", zero, digest)
+    if type(orders_already_submitted) is not int or orders_already_submitted < 0:
+        return PilotPreflightDecision(False, "PILOT_ORDER_COUNT_INVALID", zero, digest)
+    if orders_already_submitted >= profile.max_order_count:
+        return PilotPreflightDecision(False, "PILOT_ORDER_BUDGET_EXHAUSTED", zero, digest)
     try:
         current = _money(current_exposure_cad, "current_exposure")
         pending = _money(pending_orders_cad, "pending_orders")

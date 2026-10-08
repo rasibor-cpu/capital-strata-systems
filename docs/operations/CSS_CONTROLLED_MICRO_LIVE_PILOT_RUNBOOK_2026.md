@@ -126,9 +126,9 @@ approved path, the operator must observe:
 - Broker selected: Coinbase Advanced
 - Symbol: BTC-USD
 - Order type: limit only
-- Pilot capital not above CAD $15
+- Maximum CAD 20 per parent exposure; maximum 2 concurrent parent exposures; maximum CAD 40 aggregate
 - Slippage guard not above 0.35%
-- No more than one live order
+- Micro child orders permitted only inside a governed parent envelope; no more than 2 concurrent parent exposures
 - No unexpected automation
 - No unsupported asset or order type
 - Broker order status
@@ -148,7 +148,7 @@ After any pilot activity, operators must pause before any further action.
 
 During the pause:
 
-- Do not place a second live order.
+- Do not create a third concurrent parent exposure or exceed the CAD 20 parent envelope.
 - Do not expand scope.
 - Do not change live/paper mode.
 - Do not alter credentials.
@@ -219,7 +219,7 @@ Record:
 - Fee currency
 - Slippage percentage
 - Whether slippage stayed within 0.35%
-- Whether order size stayed within CAD $15
+- Whether each parent exposure stayed within CAD $20 and aggregate concurrent exposure stayed within CAD $40
 
 Any breach requires incident review.
 
@@ -244,9 +244,9 @@ Open an incident review if any of the following occur:
 
 - Order outside BTC-USD
 - Market order instead of limit order
-- Capital above CAD $15
+- Any parent exposure above CAD $20 or aggregate concurrent exposure above CAD $40
 - Slippage above 0.35%
-- More than one live order
+- More than 2 concurrent parent exposures, or child orders outside their governed parent envelope
 - Broker mutation outside approved path
 - Missing audit event
 - Missing replay event
