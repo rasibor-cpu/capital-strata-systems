@@ -161,6 +161,8 @@ class ExecutionGate:
         fee_bps: Any,
         spread_bps: Any,
         slippage_bps: Any,
+        notional_currency: Any = None,
+        pilot_min_size_exception: Any = None,
     ) -> Dict[str, Any]:
         required = {
             "instrument": instrument,
@@ -228,6 +230,15 @@ class ExecutionGate:
                 }
 
         try:
+            # The governed sub-CAD50 pilot exception is CAD-only. Ordinary
+            # AntiBleed evaluation remains currency-agnostic and unchanged.
+            if pilot_min_size_exception is not None:
+                if str(notional_currency or "").strip().upper() != "CAD":
+                    return {
+                        "approved": False,
+                        "reason": "pilot_min_size_currency_not_cad",
+                        "control": "AntiBleedGuard",
+                    }
             decision = self.anti_bleed_guard.evaluate(
                 symbol=str(instrument),
                 side=str(side),
@@ -236,6 +247,7 @@ class ExecutionGate:
                 fee_bps=numeric["fee_bps"],
                 spread_bps=numeric["spread_bps"],
                 slippage_bps=numeric["slippage_bps"],
+                pilot_min_size_exception=pilot_min_size_exception,
             )
         except Exception as exc:
             return {
@@ -317,6 +329,8 @@ class ExecutionGate:
         slippage_bps: Optional[float] = None,
         margin_snapshot: Optional[Any] = None,
         broker_mode: str = "PAPER",
+        notional_currency: Optional[str] = None,
+        pilot_min_size_exception: Optional[Any] = None,
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
@@ -328,6 +342,8 @@ class ExecutionGate:
                 fee_bps=fee_bps,
                 spread_bps=spread_bps,
                 slippage_bps=slippage_bps,
+                notional_currency=notional_currency,
+                pilot_min_size_exception=pilot_min_size_exception,
             )
             debug["anti_bleed_guard"] = anti_bleed_decision
 
