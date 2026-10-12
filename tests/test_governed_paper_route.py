@@ -23,14 +23,11 @@ def setup(tmp_path, broker):
 
 
 @pytest.mark.parametrize("broker", ["IBKR_PAPER", "OANDA_PAPER"])
-def test_governed_paper_routes_only(broker, tmp_path):
+def test_forged_allow_never_reaches_paper_broker_or_reserves(broker, tmp_path):
     a = setup(tmp_path, broker)
-    result = submit_governed_paper_order(**a)
-    assert result["status"] == "FILLED"
-    assert result["broker"] == broker
-    assert a["ledger"].snapshot()[0]["state"] == "COMMITTED"
-    with pytest.raises(GovernedPaperRouteBlocked):
+    with pytest.raises(GovernedPaperRouteBlocked, match="PAPER_AUTHORITY_PROVENANCE_UNVERIFIED"):
         submit_governed_paper_order(**a)
+    assert a["ledger"].snapshot() == []
 
 
 def test_live_broker_refused(tmp_path):
