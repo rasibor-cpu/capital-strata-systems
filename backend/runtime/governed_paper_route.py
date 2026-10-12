@@ -46,6 +46,11 @@ def submit_governed_paper_order(
         raise GovernedPaperRouteBlocked("PAPER_BROKER_NOT_ALLOWED")
     if type(decision_envelope) is not dict or decision_envelope.get("final_decision") != "ALLOW":
         raise GovernedPaperRouteBlocked("DECISION_NOT_ALLOW")
+    # SECURITY: no trusted authorization issuer is wired in this candidate.
+    # An arbitrary caller-supplied ALLOW string cannot prove R7, AntiBleed,
+    # RiskGovernor, the kill switch, order binding or replay protection.
+    # Block even paper submission until independently verified authority exists.
+    raise GovernedPaperRouteBlocked("PAPER_AUTHORITY_PROVENANCE_UNVERIFIED")
     if side not in ("BUY", "SELL") or type(quantity) not in (int, float) or type(limit_price) not in (int, float):
         raise GovernedPaperRouteBlocked("INVALID_ORDER")
     import math
