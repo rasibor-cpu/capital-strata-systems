@@ -17,6 +17,7 @@ from backend.certification.ov002_endurance_monitor import (
     run_monitor_loop,
 )
 from backend.certification.ov002_continuity import build_process_identity_record
+from backend.certification.evidence_machine import REPO_ROOT
 
 
 
@@ -36,7 +37,7 @@ def _identity(pid: int, role: str, now: datetime) -> dict:
         role=role,
         attempt_id="",
         baseline_commit="",
-        repo_root="C:/rasib/source/capital-strata-systems",
+        repo_root=str(REPO_ROOT),
         require_live_fields=True,
     )
 
