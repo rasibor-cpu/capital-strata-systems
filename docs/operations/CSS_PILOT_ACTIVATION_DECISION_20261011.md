@@ -18,7 +18,8 @@ Candidate: `7b527d24f172445908c8f9d8f0da6c2d7bef4cc8` (subject to subsequent doc
 ## Explicit limitations
 - The tests prove *test behavior*, not 72 hours of real monitor observation. No complete, independently reviewed 72-hour operational manifest has been supplied. **Operational endurance is NOT CERTIFIED.**
 - The owner directed that activation preparation proceed without waiting for another endurance run. This is recorded as a business schedule decision, **not** a passed endurance certificate or waiver of fail-closed live execution gates.
-- `config/governance/pilot_approver_enrollment.json` still has `RELEASE_SECURITY_APPROVER: null` and no production public key enrollments. Dual control **NOT READY**.
+- Diana Whyte is designated as `RELEASE_SECURITY_APPROVER` and reportedly accepted the role over WhatsApp; her independent release review and exact-release signature are still pending. The registry has **no production public key enrollments**, so cryptographic dual control remains **NOT READY**.
+- Ehis is proposed as an alternative independent reviewer by the owner, but this is not yet supported by the one-designation schema or independently tested authorization policy. One designated independent signature plus the sponsor signature is the intended governance model, not automatic approval from an unregistered reviewer.
 - AntiBleed micro-size exception remains disabled. Live execution integration, cross-asset brokerage and quantitative risk normalization, kill-switch checks, complete release review, and continuous-runtime certification are outstanding.
 
 ## Activation verdict
