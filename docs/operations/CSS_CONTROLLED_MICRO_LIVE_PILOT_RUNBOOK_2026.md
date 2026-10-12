@@ -19,12 +19,13 @@ or disable kill switches, or enable persistence.
 
 Approved pilot scope for review:
 
-- Broker: Coinbase Advanced
-- Symbol: BTC-USD
-- Order type: limit order only
-- Maximum pilot capital: CAD $15
-- Maximum slippage: 0.35%
-- Maximum live orders: 1
+- Asset-class target: crypto, FX, futures and options; **each instrument and broker route remains paper-only until separately certified**.
+- Maximum CAD 20 per individual trial order / parent exposure; CAD 40 maximum aggregate concurrent exposure across all classes, fees and pending reservations included.
+- Maximum 2 concurrent parent exposures; child orders count against their parent and may not evade its ceiling.
+- Cash exposure, notional/underlying exposure, margin requirement and worst-case loss must be independently evaluated; for any unbounded, unsupported or unquantifiable risk, fail closed.
+- Order type: limit only where asset/broker support and execution-risk review is certified.
+- Maximum slippage: 0.35% where enforceable and independently verified.
+- Initial instrument: none authorized until broker-specific and asset-specific certification.
 - Order automation: prohibited
 - Approval grant endpoint: prohibited
 - Mandatory logging: required
@@ -63,7 +64,7 @@ Before any manual pilot decision, the operator must confirm:
 
 - Manual pilot checklist is generated and reviewed.
 - Pilot readiness status is reviewed.
-- Order-intent package confirms non-executing BTC-USD limit-order scope.
+- Order-intent package confirms non-executing approved-instrument limit-order scope.
 - Coinbase dry-run probe confirms no order submit and no broker mutation.
 - Operator approval gate confirms approval has not been granted by CSS.
 - Approval-grant endpoint does not exist.
@@ -123,9 +124,8 @@ run.
 If a future manual pilot is separately approved and executed through an
 approved path, the operator must observe:
 
-- Broker selected: Coinbase Advanced
-- Symbol: BTC-USD
-- Order type: limit only
+- Broker and instrument are explicitly approved for the selected asset class; no blanket broker approval
+- Order type: limit only when the relevant instrument supports the approved execution controls
 - Maximum CAD 20 per parent exposure; maximum 2 concurrent parent exposures; maximum CAD 40 aggregate
 - Slippage guard not above 0.35%
 - Micro child orders permitted only inside a governed parent envelope; no more than 2 concurrent parent exposures
@@ -242,7 +242,7 @@ Replay and audit records should allow the pilot path to be reconstructed.
 
 Open an incident review if any of the following occur:
 
-- Order outside BTC-USD
+- Order outside the independently certified instrument/asset-class allow-list
 - Market order instead of limit order
 - Any parent exposure above CAD $20 or aggregate concurrent exposure above CAD $40
 - Slippage above 0.35%
