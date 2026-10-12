@@ -219,8 +219,8 @@ def test_windows_provider_fails_closed_off_windows():
 def test_committed_enrollment_blocks_production_activation():
     status = production_enrollment_status(DEFAULT_ENROLLMENT_PATH)
     assert status["ready"] is False
-    assert status["designations"] == {ROLE_SPONSOR: "robert-asibor"}
-    assert set(status["blockers"]) == {"pilot_sponsor_key_not_enrolled", "release_security_approver_not_designated"}
+    assert status["designations"] == {ROLE_SPONSOR: "robert-asibor", ROLE_RELEASE_SECURITY: "diana-whyte"}
+    assert set(status["blockers"]) == {"pilot_sponsor_key_not_enrolled", "release_security_approver_key_not_enrolled"}
     raw = Path(DEFAULT_ENROLLMENT_PATH).read_text()
     assert "seed" not in raw.lower() and "private" not in json.loads(raw)["keys"].__repr__().lower()
 
