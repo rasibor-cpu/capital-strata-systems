@@ -4,27 +4,27 @@ This module implements the closed allow-list of reviewed gate-evaluator
 adapters. Only these named functions may be invoked by the trusted issuer.
 Nothing here grants live-execution, broker, or trading authority.
 
-Design constraints (per CSS-062 review approval):
-- Closed allow-list: NO importlib of caller/config-supplied module paths.
-- Mandatory trusted mode: no caller-selectable "untrusted compatibility" flag.
-- Fail-closed: a missing / raising / non-dict / non-approved evaluator returns
-  denial, never raises out, and never propagates a partial decision.
-- Evaluator construction happens at trusted-application initialization; the
-  per-order request path never supplies evaluator callables, registry paths,
-  public keys, or the expected candidate SHA.
+CSS-062 Blocker 4 fixes (fail-closed gate chain):
+- Every decision must be an EXPLICIT boolean ``True`` (``is True``), never a
+  truthy string/number/None. A truthy non-boolean (e.g. ``"false"``) is a
+  DENIAL.
+- Kill-switch state is read from the AUTHORITATIVE environment/OS source
+  (``os.environ`` / ``CSS_LIVE_ORDER_KILL_SWITCH``), NOT from a
+  request-supplied ``env`` mapping. A caller cannot hide an engaged real
+  environment kill switch.
+- ``TrustedRiskEvaluators`` is a final class; subclass substitution is
+  rejected by the trusted authority.
 
 The four evaluated gates (traced to real production code):
 - R7                      -> backend/governance/css_unified_trade_gate.CSSUnifiedTradeGate
 - AntiBleedGuard           -> backend/app/risk/anti_bleed_guard.AntiBleedGuard
 - RiskGovernor             -> engine/risk/risk_governor.RiskGovernor.validate_trade
 - Kill switch              -> engine/execution/live_order_kill_switch.evaluate_live_order_kill_switch
-
-Each adapter takes the SAME immutable, validated order+CAD-risk context
-(Mapping[str, Any]) and returns a dict with ``approved: bool`` and ``reason: str``.
 """
 
 from __future__ import annotations
 
+import os
 from collections.abc import Mapping
 from typing import Any
 
@@ -60,10 +60,20 @@ def _require_mapping(value: Any, name: str) -> Mapping[str, Any]:
 class TrustedRiskEvaluators:
     """Closed allow-list of four reviewed gate adapters. Mandatory trusted mode.
 
-    Constructed at trusted-application initialization with the fixed adapters.
-    No per-order or per-caller construction, and no caller-selectable
-    untrusted compatibility mode. All decisions are fail-closed.
+    This class is FINAL — the trusted authority rejects any subclass that
+    overrides ``evaluate_all`` or any evaluate method. Construction happens at
+    trusted-application initialization; per-order requests never supply
+    evaluators, registry paths, public keys, or the expected candidate SHA.
     """
+
+    __slots__ = ("_r7_gate", "_antibleed_guard", "_risk_governor", "_kill_switch_fn")
+
+    _FINAL = True  # marker checked by the trusted authority
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        raise TrustedEvaluatorError(
+            "TrustedRiskEvaluators is final and cannot be subclassed (CSS-062 Blocker 2)"
+        )
 
     def __init__(self) -> None:
         # Import the reviewed adapters once at construction. Any import failure
@@ -80,28 +90,12 @@ class TrustedRiskEvaluators:
         self._risk_governor = RiskGovernor()
         self._kill_switch_fn = evaluate_live_order_kill_switch
 
-    def with_isolated_antibleed_state(self, state_file: str) -> "TrustedRiskEvaluators":
-        """Return a copy with an isolated AntiBleedGuard state file (TEST use).
-
-        This is used by tests to avoid the shared artifacts/anti_bleed_state.json
-        cooldown state. It does NOT change any threshold, exception flag, or
-        production behavior.
-        """
-        from backend.app.risk.anti_bleed_guard import AntiBleedGuard
-
-        clone = TrustedRiskEvaluators.__new__(TrustedRiskEvaluators)
-        clone._r7_gate = self._r7_gate
-        clone._antibleed_guard = AntiBleedGuard(state_file=str(state_file))
-        clone._risk_governor = self._risk_governor
-        clone._kill_switch_fn = self._kill_switch_fn
-        return clone
-
     # ---------------------------------------------------------------- R7
     def evaluate_r7(
         self,
         order_context: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """R7 PCNRASS Unified Trade Gate. Fail-closed on any exception."""
+        """R7 PCNRASS Unified Trade Gate. Fail-closed; explicit boolean only."""
         try:
             ctx = _require_mapping(order_context, "r7_order_context")
             candidate = ctx.get("candidate")
@@ -120,11 +114,12 @@ class TrustedRiskEvaluators:
             )
         except Exception:  # fail closed
             return _denial("R7_EVALUATOR_ERROR")
-        approved = bool(getattr(decision, "approved", False))
-        reason = str(getattr(decision, "reason", "unknown")) or "unknown"
+        approved = getattr(decision, "approved", None)
+        reason = getattr(decision, "reason", None)
+        # EXPLICIT boolean only. A truthy non-boolean (e.g. "false") is a denial.
         if approved is True:
-            return {"approved": True, "reason": reason}
-        return _denial(reason)
+            return {"approved": True, "reason": str(reason) if reason else "approved"}
+        return _denial(str(reason) if reason else "r7_denied")
 
     # ---------------------------------------------------------- AntiBleed
     def evaluate_antibleed(
@@ -143,15 +138,13 @@ class TrustedRiskEvaluators:
             side = ctx.get("side", "UNKNOWN")
             if not isinstance(symbol, str) or not symbol.strip():
                 return _denial("ANTIBLEED_ORDER_CONTEXT_INCOMPLETE")
-            if any(
-                not isinstance(v, (int, float)) or v is None
-                for v in (trade_size, expected_move_bps, fee_bps, spread_bps, slippage_bps)
-            ):
-                return _denial("ANTIBLEED_ORDER_CONTEXT_INCOMPLETE")
+            for name in ("trade_size", "expected_move_bps", "fee_bps", "spread_bps", "slippage_bps"):
+                v = ctx.get(name)
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    return _denial("ANTIBLEED_ORDER_CONTEXT_INCOMPLETE")
+                if v != v or v in (float("inf"), float("-inf")):  # NaN / inf check
+                    return _denial("ANTIBLEED_NON_FINITE_INPUT")
             # IMPORTANT: pilot_min_size_exception is NEVER set from the request.
-            # The guard's default (disabled) behavior applies. We do not pass
-            # the exception through, preserving the fail-closed production
-            # AntiBleedGuard policy.
             decision = self._antibleed_guard.evaluate(
                 symbol=str(symbol),
                 trade_size=float(trade_size),
@@ -166,7 +159,8 @@ class TrustedRiskEvaluators:
             return _denial("ANTIBLEED_EVALUATOR_ERROR")
         if not isinstance(decision, Mapping):
             return _denial("ANTIBLEED_EVALUATOR_UNEXPECTED_RESULT")
-        if bool(decision.get("approved", False)) is True:
+        approved = decision.get("approved", None)
+        if approved is True:  # EXPLICIT boolean
             return {"approved": True, "reason": str(decision.get("reason", "approved"))}
         return _denial(str(decision.get("reason", "antibleed_denied")))
 
@@ -188,6 +182,12 @@ class TrustedRiskEvaluators:
             )
             if any(k not in ctx for k in required):
                 return _denial("RISK_GOVERNOR_ORDER_CONTEXT_INCOMPLETE")
+            for k in ("requested_notional", "stop_distance_pct", "equity", "risk_pct"):
+                v = ctx.get(k)
+                if isinstance(v, bool) or not isinstance(v, (int, float)):
+                    return _denial("RISK_GOVERNOR_ORDER_CONTEXT_INCOMPLETE")
+                if v != v or v in (float("inf"), float("-inf")):
+                    return _denial("RISK_GOVERNOR_NON_FINITE_INPUT")
             decision = self._risk_governor.validate_trade(
                 instrument=str(ctx["instrument"]),
                 side=str(ctx["side"]),
@@ -200,7 +200,8 @@ class TrustedRiskEvaluators:
             return _denial("RISK_GOVERNOR_EVALUATOR_ERROR")
         if not isinstance(decision, Mapping):
             return _denial("RISK_GOVERNOR_EVALUATOR_UNEXPECTED_RESULT")
-        if bool(decision.get("ok", False)) is True:
+        ok = decision.get("ok", None)
+        if ok is True:  # EXPLICIT boolean
             return {"approved": True, "reason": str(decision.get("reason", "approved"))}
         return _denial(str(decision.get("reason", "risk_governor_denied")))
 
@@ -209,23 +210,24 @@ class TrustedRiskEvaluators:
         self,
         order_context: Mapping[str, Any],
     ) -> dict[str, Any]:
-        """Live-order kill switch. Any engaged kill switch is a hard denial."""
+        """Live-order kill switch. Reads the AUTHORITATIVE environment, not request input.
+
+        The kill-switch state comes from ``os.environ`` (the authoritative
+        OS environment), NOT from a request-supplied ``env`` mapping. A
+        caller cannot hide an engaged real environment kill switch by
+        supplying an empty/nonempty ``env``.
+        """
         try:
-            ctx = _require_mapping(order_context, "kill_switch_order_context")
-            controls = ctx.get("controls")
-            if controls is not None and not isinstance(controls, Mapping):
-                return _denial("KILL_SWITCH_CONTROLS_INVALID")
-            env = ctx.get("env")
-            if env is not None and not isinstance(env, Mapping):
-                return _denial("KILL_SWITCH_ENV_INVALID")
+            _require_mapping(order_context, "kill_switch_order_context")
+            # Read from the AUTHORITATIVE environment (os.environ).
             decision = self._kill_switch_fn(
-                controls=controls or {},
-                env=env,
+                controls=None,
+                env=os.environ,  # authoritative, NOT request-supplied
             )
         except Exception:
             return _denial("KILL_SWITCH_EVALUATOR_ERROR")
-        blocked = bool(getattr(decision, "blocked", True))
-        if blocked is False:
+        blocked = getattr(decision, "blocked", None)
+        if blocked is False:  # EXPLICIT boolean
             return {"approved": True, "reason": str(getattr(decision, "reason", "kill_switch_clear"))}
         return _denial(str(getattr(decision, "reason", "kill_switch_engaged")))
 

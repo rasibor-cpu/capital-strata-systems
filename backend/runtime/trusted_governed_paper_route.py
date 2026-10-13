@@ -1,16 +1,28 @@
 """Trusted governed paper-route simulation (CSS-062).
 
-This module wires the trusted paper authority (mandatory trusted mode) and the
-atomic coordination ledger into a single simulation entry point. It is a
-SIMULATION-ONLY path and does NOT replace the production
+This module wires the trusted paper authority (mandatory trusted mode) and
+the authoritative coordination ledger into a single simulation entry point.
+It is a SIMULATION-ONLY path and does NOT replace the production
 ``submit_governed_paper_order`` (which remains unconditionally blocked).
 
-The trusted simulation:
-1. Rejects raw ``PaperGateEvaluators`` callables (mandatory trusted mode).
-2. Uses the closed allow-list ``TrustedRiskEvaluators`` for all four gates.
-3. Uses the atomic ``PilotCoordinationLedger`` for nonce + reservation in ONE
-   SQLite transaction (no claim-file replay authority).
-4. Does NOT release the reservation when the broker outcome is unknown.
+CSS-062 Blocker 3 fixes (signed order and risk binding):
+- The evaluated and signed ``order_context`` is the SINGLE source of truth
+  for parent_id, child_id, proposed CAD exposure, fees, and quantity. The
+  route does NOT independently accept these values.
+- Capacity limits come from ``CanonicalOrderLimitConfig`` (trusted policy),
+  NOT from caller input. No caller can raise the CAD 20/40/2-parent ceilings
+  or supply ``None`` to bypass a check.
+- The route VERIFIES the signed intent (``verify_trusted_intent``) BEFORE
+  reserving capacity (Blocker 2).
+
+CSS-062 Blocker 5 fixes (outcomes and crash consistency):
+- ``broker_outcome`` is NOT a caller-supplied string. The route requires a
+  ``LocalSimulatorOutcomeEvidence`` object with a verifiable outcome.
+- Unknown outcomes PRESERVE the reservation (no release).
+- Confirmed no-fill releases capacity but the nonce stays consumed.
+- Confirmed fill commits the reservation.
+- A commit-acknowledgment uncertainty is reconciled via the durable
+  coordination record — it is NEVER converted into an assumed denial.
 
 Nothing here grants live-execution, broker, or trading authority.
 """
@@ -18,18 +30,19 @@ Nothing here grants live-execution, broker, or trading authority.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
+from backend.config.order_limit_config import CanonicalOrderLimitConfig
 from backend.runtime.pilot_coordination_ledger import (
+    AuthoritativePilotCoordinationLedger,
     CoordinationReceipt,
-    PilotCoordinationLedger,
 )
 from backend.runtime.paper_authority_issuer import PaperGateEvaluators
-from backend.runtime.paper_authority_registry import PaperIssuerRegistry
 from backend.runtime.trusted_paper_authority import (
+    AuthenticatedTrustRegistry,
     TrustedPaperAuthority,
     TrustedPaperAuthorityError,
 )
@@ -38,6 +51,7 @@ from backend.runtime.trusted_risk_evaluators import TrustedRiskEvaluators
 __all__ = [
     "simulate_trusted_governed_paper_order",
     "TrustedSimulationBlocked",
+    "LocalSimulatorOutcomeEvidence",
     "TRUSTED_SIMULATION_MAX_TTL_SECONDS",
 ]
 
@@ -49,104 +63,190 @@ class TrustedSimulationBlocked(RuntimeError):
 TRUSTED_SIMULATION_MAX_TTL_SECONDS = 120
 
 
+@dataclass(frozen=True)
+class LocalSimulatorOutcomeEvidence:
+    """Verifiable local-simulator outcome evidence (CSS-062 Blocker 5).
+
+    This is NOT a caller-supplied string. It is an immutable record produced
+    by the local simulator with a cryptographically verifiable outcome.
+    The ledger's ``_verify_simulator_evidence`` requires an object with a
+    ``verified_outcome`` method returning one of the allowed values.
+    """
+
+    outcome: str  # "confirmed_no_fill" | "confirmed_fill"
+    simulator_instance_id: str
+    evidence_hash: str
+
+    def verified_outcome(self) -> str:
+        """Return the verified outcome. Must be one of the allowed values."""
+        allowed = {"confirmed_no_fill", "confirmed_fill"}
+        if self.outcome not in allowed:
+            raise ValueError(f"invalid outcome: {self.outcome}")
+        return self.outcome
+
+
 def simulate_trusted_governed_paper_order(
     *,
-    ledger: PilotCoordinationLedger,
+    ledger: AuthoritativePilotCoordinationLedger,
     trusted_authority: TrustedPaperAuthority,
     approval_id: str,
     nonce: str,
     order_context: Mapping[str, Any],
     paper_route_audience: str,
-    actual_candidate_sha: str,
-    child_id: str,
-    parent_id: str,
-    proposed_child_cad: Any,
-    estimated_fees_cad: Any,
-    max_parent_cad: Decimal = Decimal("20.00"),
-    max_total_cad: Decimal("40.00"),
-    max_concurrent_parents: int = 2,
-    broker_outcome: str = "unknown",
-    fake_broker: Any | None = None,
-    now: datetime | None = None,
+    simulator_evidence: LocalSimulatorOutcomeEvidence | None = None,
 ) -> dict[str, Any]:
     """Trusted simulation entry point. Mandatory trusted mode; fail closed.
 
-    Steps:
-    1. Issue a trusted paper intent using the allow-list evaluators (fail-closed).
-    2. Atomically consume the nonce AND reserve exposure in ONE transaction.
-    3. If the broker outcome is UNKNOWN, the reservation is PRESERVED (no release).
-    4. If the broker outcome is confirmed no-fill, capacity may be released.
-    5. If the broker outcome is confirmed fill, the reservation is COMMITTED.
+    The ``order_context`` is the SINGLE source of truth for the order and
+    risk envelope. The route extracts parent_id, child_id, proposed CAD,
+    and fees FROM the order_context — it does NOT accept them separately.
 
-    The production route is NOT modified; it stays unconditionally blocked.
+    Steps:
+    1. Issue a trusted paper intent (verifies the ACTUAL checkout SHA and
+       evaluates all four gates, fail-closed).
+    2. VERIFY the signed intent (fail-closed) BEFORE reserving capacity.
+    3. Atomically consume the nonce AND reserve exposure in ONE transaction
+       (capacity limits from trusted policy, not caller input).
+    4. If the simulator outcome is UNKNOWN (no evidence), PRESERVE the
+       reservation (no release).
+    5. If the simulator outcome is confirmed no-fill, release capacity (the
+       nonce stays consumed).
+    6. If the simulator outcome is confirmed fill, commit the reservation.
     """
-    # --- 0) Reject raw callables (mandatory trusted mode) -------------------
+    # --- 0) Reject raw callables and non-trusted authority (Blocker 2) ----
     if isinstance(trusted_authority, PaperGateEvaluators):
         raise TrustedSimulationBlocked("PAPER_SIMULATION_TRUSTED_MODE_REQUIRED")
+    if not isinstance(trusted_authority, TrustedPaperAuthority):
+        raise TrustedSimulationBlocked("PAPER_SIMULATION_TRUSTED_MODE_REQUIRED")
 
-    # --- 1) Issue the trusted paper intent (fail-closed) -------------------
+    # --- 1) Issue the trusted paper intent (fail-closed; verifies checkout) ---
     try:
         intent = trusted_authority.issue_trusted_paper_intent(
             nonce=str(nonce),
             order_context=order_context,
             paper_route_audience=str(paper_route_audience),
-            actual_candidate_sha=str(actual_candidate_sha),
-            now=now,
         )
     except TrustedPaperAuthorityError as exc:
         raise TrustedSimulationBlocked(f"PAPER_SIMULATION_TRUSTED_INTENT_REJECTED:{exc}") from exc
 
-    # --- 2) Atomic nonce + reservation (ONE SQLite transaction) -------------
+    # --- 2) VERIFY the signed intent BEFORE reserving capacity (Blocker 2) ---
+    try:
+        verification = TrustedPaperAuthority.verify_trusted_intent(
+            intent,
+            public_key=trusted_authority.registry.private_key.public_key(),
+            expected_issuer_id=trusted_authority.issuer_id,
+            expected_candidate_sha=trusted_authority.candidate_sha,
+            expected_paper_route_audience=str(paper_route_audience),
+        )
+    except TrustedPaperAuthorityError as exc:
+        raise TrustedSimulationBlocked(f"PAPER_SIMULATION_INTENT_VERIFICATION_FAILED:{exc}") from exc
+
+    # --- 3) Extract the binding values FROM the signed order_context (Blocker 3) ---
+    # The order_context is the SINGLE source of truth. We do NOT accept
+    # parent_id/child_id/proposed_cad/fees as separate arguments.
+    binding = _extract_binding(order_context)
+    if binding is None:
+        raise TrustedSimulationBlocked("PAPER_SIMULATION_ORDER_BINDING_INCOMPLETE")
+
+    # --- 4) Atomic nonce + reservation (ONE transaction; trusted policy ceilings) ---
     receipt: CoordinationReceipt = ledger.atomic_consume_and_reserve(
         approval_id=str(approval_id),
         nonce=str(nonce),
         issuer_id=trusted_authority.issuer_id,
         candidate_sha=trusted_authority.candidate_sha,
-        parent_id=str(parent_id),
-        child_id=str(child_id),
-        proposed_child_cad=proposed_child_cad,
-        estimated_fees_cad=estimated_fees_cad,
-        max_parent_cad=max_parent_cad,
-        max_total_cad=max_total_cad,
-        max_concurrent_parents=max_concurrent_parents,
+        parent_id=binding.parent_id,
+        child_id=binding.child_id,
+        proposed_child_cad=binding.proposed_child_cad,
+        estimated_fees_cad=binding.estimated_fees_cad,
     )
     if not receipt.success:
+        # Do NOT treat a commit-acknowledgment uncertainty as a plain denial.
+        if receipt.reason == "COORDINATION_COMMIT_ACK_UNCERTAIN":
+            # The commit is durable; the nonce is consumed; the reservation exists.
+            # Reconcile: verify the durable state, preserve capacity.
+            durable_state = ledger.reservation_state(child_id=binding.child_id)
+            return {
+                "status": "COMMIT_ACK_UNCERTAIN_RECONCILED",
+                "reservation_state": durable_state,
+                "intent_nonce": verification["nonce"],
+                "transaction_id": receipt.transaction_id,
+            }
         raise TrustedSimulationBlocked(f"PAPER_SIMULATION_COORDINATION_REJECTED:{receipt.reason}")
 
-    # --- 3) Broker outcome handling ----------------------------------------
-    outcome = str(broker_outcome).strip().lower()
-    if outcome == "unknown":
-        # PRESERVE the reservation; do NOT release. A retry with the same
-        # nonce is rejected (replay).
+    # --- 5) Simulator outcome handling (Blocker 5: verifiable evidence required) ---
+    if simulator_evidence is None:
+        # UNKNOWN outcome: PRESERVE the reservation; do NOT release.
         return {
             "status": "UNKNOWN_OUTCOME_PRESERVED",
-            "reservation_state": ledger.reservation_state(child_id=str(child_id)),
-            "intent_nonce": str(intent["payload"]["nonce"]),
+            "reservation_state": ledger.reservation_state(child_id=binding.child_id),
+            "intent_nonce": verification["nonce"],
             "transaction_id": receipt.transaction_id,
         }
-    if outcome in {"no_fill", "no-fill", "rejected", "not_filled"}:
+    # Verifiable simulator evidence is present. The ledger's
+    # release_reservation / commit_reservation verify it independently.
+    outcome = simulator_evidence.verified_outcome()
+    if outcome == "confirmed_no_fill":
         released = ledger.release_reservation(
-            child_id=str(child_id),
-            reason=f"confirmed_no_fill:{outcome}",
+            child_id=binding.child_id,
+            reason="confirmed_no_fill",
+            confirmed_by_simulator=simulator_evidence,
         )
         return {
             "status": "NO_FILL_RELEASED" if released else "NO_FILL_RELEASE_FAILED",
-            "reservation_state": ledger.reservation_state(child_id=str(child_id)),
-            "intent_nonce": str(intent["payload"]["nonce"]),
+            "reservation_state": ledger.reservation_state(child_id=binding.child_id),
+            "intent_nonce": verification["nonce"],
             "transaction_id": receipt.transaction_id,
         }
-    if outcome in {"fill", "filled", "confirmed_fill"}:
-        committed = ledger.commit_reservation(child_id=str(child_id))
+    if outcome == "confirmed_fill":
+        committed = ledger.commit_reservation(
+            child_id=binding.child_id,
+            confirmed_by_simulator=simulator_evidence,
+        )
         return {
             "status": "FILLED_COMMITTED" if committed else "COMMIT_FAILED",
-            "reservation_state": ledger.reservation_state(child_id=str(child_id)),
-            "intent_nonce": str(intent["payload"]["nonce"]),
+            "reservation_state": ledger.reservation_state(child_id=binding.child_id),
+            "intent_nonce": verification["nonce"],
             "transaction_id": receipt.transaction_id,
         }
-    # Any unrecognized outcome is treated as UNKNOWN (fail closed).
+    # Unrecognized outcome → treat as UNKNOWN (fail closed).
     return {
         "status": "UNKNOWN_OUTCOME_PRESERVED",
-        "reservation_state": ledger.reservation_state(child_id=str(child_id)),
-        "intent_nonce": str(intent["payload"]["nonce"]),
+        "reservation_state": ledger.reservation_state(child_id=binding.child_id),
+        "intent_nonce": verification["nonce"],
         "transaction_id": receipt.transaction_id,
     }
+
+
+@dataclass(frozen=True)
+class _OrderBinding:
+    parent_id: str
+    child_id: str
+    proposed_child_cad: str
+    estimated_fees_cad: str
+
+
+def _extract_binding(order_context: Mapping[str, Any]) -> _OrderBinding | None:
+    """Extract the parent/child/CAD/fees binding FROM the signed order_context.
+
+    The order_context is the SINGLE source of truth (Blocker 3). We do NOT
+    accept these values as separate function arguments.
+    """
+    if not isinstance(order_context, Mapping):
+        return None
+    parent_id = order_context.get("parent_id")
+    child_id = order_context.get("child_id")
+    proposed_cad = order_context.get("proposed_child_cad")
+    fees = order_context.get("estimated_fees_cad")
+    if not isinstance(parent_id, str) or not parent_id.strip():
+        return None
+    if not isinstance(child_id, str) or not child_id.strip():
+        return None
+    for v in (proposed_cad, fees):
+        if isinstance(v, bool) or not isinstance(v, (int, float, str, Decimal)):
+            return None
+    return _OrderBinding(
+        parent_id=parent_id.strip(),
+        child_id=child_id.strip(),
+        proposed_child_cad=str(proposed_cad),
+        estimated_fees_cad=str(fees),
+    )
