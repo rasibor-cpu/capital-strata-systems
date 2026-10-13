@@ -68,6 +68,10 @@ jobs:
             tests/test_trusted_paper_authority.py \
             tests/test_pilot_coordination_ledger.py \
             tests/test_trusted_governed_paper_route.py \
-            -q --no-header -p no:cacheprovider
+            tests/test_css062_independent_review.py \
+            tests/test_governed_paper_route.py \
+            tests/test_pilot_exposure_reservation.py \
+            tests/engine/test_live_order_kill_switch.py \
+            -q --no-header -p no:cacheprovider -rxX
         env:
           PYTHONPATH: .

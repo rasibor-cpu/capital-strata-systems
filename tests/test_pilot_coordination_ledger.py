@@ -72,19 +72,21 @@ def _submit(
     )
 
 
-def _evidence_no_fill() -> LocalSimulatorOutcomeEvidence:
+def _evidence_no_fill(child_id: str = "c1") -> LocalSimulatorOutcomeEvidence:
     return LocalSimulatorOutcomeEvidence(
         outcome="confirmed_no_fill",
         simulator_instance_id="sim-001",
         evidence_hash="abc123",
+        child_id=child_id,
     )
 
 
-def _evidence_fill() -> LocalSimulatorOutcomeEvidence:
+def _evidence_fill(child_id: str = "c1") -> LocalSimulatorOutcomeEvidence:
     return LocalSimulatorOutcomeEvidence(
         outcome="confirmed_fill",
         simulator_instance_id="sim-001",
         evidence_hash="def456",
+        child_id=child_id,
     )
 
 

@@ -17,7 +17,10 @@ CSS-062 Blocker 3 fixes (signed order and risk binding):
 
 CSS-062 Blocker 5 fixes (outcomes and crash consistency):
 - ``broker_outcome`` is NOT a caller-supplied string. The route requires a
-  ``LocalSimulatorOutcomeEvidence`` object with a verifiable outcome.
+  ``LocalSimulatorOutcomeEvidence`` record of that exact type, bound to the
+  child_id, whose outcome must match the transition (fill -> commit only,
+  no-fill -> release only). It is a typed in-process record, NOT a
+  cryptographic attestation (see its docstring).
 - Unknown outcomes PRESERVE the reservation (no release).
 - Confirmed no-fill releases capacity but the nonce stays consumed.
 - Confirmed fill commits the reservation.
@@ -36,9 +39,12 @@ from pathlib import Path
 from typing import Any
 
 from backend.config.order_limit_config import CanonicalOrderLimitConfig
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+
 from backend.runtime.pilot_coordination_ledger import (
     AuthoritativePilotCoordinationLedger,
     CoordinationReceipt,
+    LocalSimulatorOutcomeEvidence,
 )
 from backend.runtime.paper_authority_issuer import PaperGateEvaluators
 from backend.runtime.trusted_paper_authority import (
@@ -63,26 +69,8 @@ class TrustedSimulationBlocked(RuntimeError):
 TRUSTED_SIMULATION_MAX_TTL_SECONDS = 120
 
 
-@dataclass(frozen=True)
-class LocalSimulatorOutcomeEvidence:
-    """Verifiable local-simulator outcome evidence (CSS-062 Blocker 5).
-
-    This is NOT a caller-supplied string. It is an immutable record produced
-    by the local simulator with a cryptographically verifiable outcome.
-    The ledger's ``_verify_simulator_evidence`` requires an object with a
-    ``verified_outcome`` method returning one of the allowed values.
-    """
-
-    outcome: str  # "confirmed_no_fill" | "confirmed_fill"
-    simulator_instance_id: str
-    evidence_hash: str
-
-    def verified_outcome(self) -> str:
-        """Return the verified outcome. Must be one of the allowed values."""
-        allowed = {"confirmed_no_fill", "confirmed_fill"}
-        if self.outcome not in allowed:
-            raise ValueError(f"invalid outcome: {self.outcome}")
-        return self.outcome
+# ``LocalSimulatorOutcomeEvidence`` now lives in pilot_coordination_ledger
+# (the ledger enforces its exact type) and is re-exported here unchanged.
 
 
 def simulate_trusted_governed_paper_order(
@@ -131,20 +119,28 @@ def simulate_trusted_governed_paper_order(
 
     # --- 2) VERIFY the signed intent BEFORE reserving capacity (Blocker 2) ---
     try:
+        # Verify against the PINNED public key recorded in the registry, not a
+        # key derived from the signer's own private key object.
+        pinned_public_key = Ed25519PublicKey.from_public_bytes(
+            bytes.fromhex(trusted_authority.registry.public_key_hex)
+        )
         verification = TrustedPaperAuthority.verify_trusted_intent(
             intent,
-            public_key=trusted_authority.registry.private_key.public_key(),
+            public_key=pinned_public_key,
             expected_issuer_id=trusted_authority.issuer_id,
             expected_candidate_sha=trusted_authority.candidate_sha,
             expected_paper_route_audience=str(paper_route_audience),
         )
-    except TrustedPaperAuthorityError as exc:
+    except (TrustedPaperAuthorityError, ValueError) as exc:
         raise TrustedSimulationBlocked(f"PAPER_SIMULATION_INTENT_VERIFICATION_FAILED:{exc}") from exc
 
     # --- 3) Extract the binding values FROM the signed order_context (Blocker 3) ---
-    # The order_context is the SINGLE source of truth. We do NOT accept
-    # parent_id/child_id/proposed_cad/fees as separate arguments.
-    binding = _extract_binding(order_context)
+    # Independent review fix: read the binding from the VERIFIED, SIGNED
+    # payload copy — never re-read the caller's (possibly mutable) Mapping
+    # after signing.
+    signed_payload = intent.get("payload") if isinstance(intent, Mapping) else None
+    signed_context = signed_payload.get("order_context") if isinstance(signed_payload, Mapping) else None
+    binding = _extract_binding(signed_context)
     if binding is None:
         raise TrustedSimulationBlocked("PAPER_SIMULATION_ORDER_BINDING_INCOMPLETE")
 
@@ -159,18 +155,19 @@ def simulate_trusted_governed_paper_order(
         proposed_child_cad=binding.proposed_child_cad,
         estimated_fees_cad=binding.estimated_fees_cad,
     )
+    # Do NOT treat a commit-acknowledgment uncertainty as a plain denial, and
+    # do NOT act on a simulator outcome in that state: the ledger proved THIS
+    # transaction durable, so the reservation is preserved for reconciliation.
+    # (Independent review fix: the ledger reports this with success=True, so
+    # the check must not be nested under ``not receipt.success``.)
+    if receipt.reason == "COORDINATION_COMMIT_ACK_UNCERTAIN":
+        return {
+            "status": "COMMIT_ACK_UNCERTAIN_RECONCILED",
+            "reservation_state": ledger.reservation_state(child_id=binding.child_id),
+            "intent_nonce": verification["nonce"],
+            "transaction_id": receipt.transaction_id,
+        }
     if not receipt.success:
-        # Do NOT treat a commit-acknowledgment uncertainty as a plain denial.
-        if receipt.reason == "COORDINATION_COMMIT_ACK_UNCERTAIN":
-            # The commit is durable; the nonce is consumed; the reservation exists.
-            # Reconcile: verify the durable state, preserve capacity.
-            durable_state = ledger.reservation_state(child_id=binding.child_id)
-            return {
-                "status": "COMMIT_ACK_UNCERTAIN_RECONCILED",
-                "reservation_state": durable_state,
-                "intent_nonce": verification["nonce"],
-                "transaction_id": receipt.transaction_id,
-            }
         raise TrustedSimulationBlocked(f"PAPER_SIMULATION_COORDINATION_REJECTED:{receipt.reason}")
 
     # --- 5) Simulator outcome handling (Blocker 5: verifiable evidence required) ---

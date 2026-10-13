@@ -1,12 +1,45 @@
 # CSS-062 — Trusted Evaluator Ownership and Atomic Nonce/Reservation Specification
 
-**Status:** Implementation specification (NOT implemented, NOT wired into live or production paper execution).
+**Status (updated 2026-10-13, independent acceptance review of PR #109):** The simulation-only controls described here are **implemented** on branch `css-agent/css062-trusted-atomic-2026-10-13` (see §0). They are **NOT** integrated into production paper execution, broker execution, or live trading, and **no such integration is approved**. `submit_governed_paper_order` remains unconditionally blocked (`PAPER_AUTHORITY_PROVENANCE_UNVERIFIED`).
 **Scope:** Engineering design specification for the trusted-authorization-issuer and atomic-transaction boundary required to complete CSS-062 (independent pilot security review).
 **Approval required:** Separate owner approval before any live or production-paper wiring. This document does NOT authorize any release, trading, or deployment.
 
 ---
 
-## 1. Problem
+## 0. Implementation status (independent review, 2026-10-13)
+
+Two categories are kept strictly separate below. Nothing in category B exists or is approved.
+
+### A. Implemented — simulation-only controls (local SQLite + in-process signer, no broker)
+
+| Control | Module | Status | Notes / divergence from the §2–§3 design |
+|---|---|---|---|
+| Closed allow-list of trusted gate adapters (R7, AntiBleed, RiskGovernor, kill switch) | `backend/runtime/trusted_risk_evaluators.py` | Implemented | Hard-coded final class `TrustedRiskEvaluators` instead of the §2.2 JSON registry. `config/governance/trusted_evaluators.json`, `TrustedEvaluatorBundle` and `trusted_only` (§2.3–§2.4) were **not** built; owner to confirm the class-based allow-list supersedes them. |
+| Fail-closed decisions (explicit `is True`, NaN/inf denied, kill switch from `os.environ`) | same | Implemented | |
+| Signed trusted intent (Ed25519) bound to issuer, candidate SHA, audience, nonce, TTL ≤120 s, full order context, gate decisions | `backend/runtime/trusted_paper_authority.py` | Implemented | Signing key and registry are **test-generated ephemeral keys only**. See B-1. |
+| Running-checkout SHA check | same | Implemented (limited) | Reads `.git/HEAD`; does not detect uncommitted working-tree changes; `repo_root` is caller-supplied. |
+| Atomic nonce consumption + reservation | `backend/runtime/pilot_coordination_ledger.py` | Implemented | **Supersedes §3.3–§3.4:** one `BEGIN IMMEDIATE` SQLite transaction in the same DB as `pilot_reservations`; no `.claim` files, no separate JSONL journal. Nonce unique per issuer and never reusable. |
+| CAD 20 / 40 / 2-parent ceilings from `CanonicalOrderLimitConfig` (validate() caps at those values) | same | Implemented | |
+| Legacy reconciliation (`reconcile_legacy`, `verify_consistency`) | same | Implemented | Review fix: no duplicate legacy records for trusted-path reservations. |
+| Commit-ack uncertainty | same + route | Implemented | Review fix: durability proven by this transaction's unique `transaction_id`, not by `approval_id` existence; route preserves the reservation and does not act on an outcome in that state. |
+| Simulator outcome handling | same + `trusted_governed_paper_route.py` | Implemented (limited) | Review fix: exact `LocalSimulatorOutcomeEvidence` type, bound to `child_id`, fill→commit only, no-fill→release only. It is an in-process typed record, **not** a cryptographic attestation. |
+| Binding of reserved amount to the signed payload | `trusted_governed_paper_route.py` | Implemented | Review fix: binding read from the verified signed payload; verification uses the pinned public key. |
+
+### B. NOT implemented and NOT approved — production / paper-broker integration
+
+| # | Item | Required before | Owner |
+|---|---|---|---|
+| B-1 | Owner-provisioned trust registry: owner-generated Ed25519 issuer key held outside the repo, owner-signed manifest pinning issuer_id, public key and reviewed SHA, and code that verifies that manifest against an owner root of trust. Today any caller can construct an `AuthenticatedTrustRegistry` with its own key. | Any non-simulation use | Owner |
+| B-2 | Reserved CAD derived from the evaluated notional via verified broker instrument and FX-rate evidence (the older `simulate_governed_paper_order` path had this; the trusted route does not). | Any non-simulation use | Owner design decision |
+| B-3 | Authenticated broker/simulator outcome evidence. | Any paper-broker integration | Owner design decision |
+| B-4 | Exclusive writer: legacy `PilotExposureReservationLedger.transition()` can still change reservations in the same DB without evidence; the older untrusted `simulate_governed_paper_order` (raw `PaperGateEvaluators`) is still callable. Retire or gate both. | Any non-simulation use | Owner decision |
+| B-5 | Wiring into `submit_governed_paper_order`. | Separate owner approval | Owner |
+| B-6 | Production approver key enrollment (`config/governance/pilot_approver_enrollment.json` has `keys: []`). | Production | Sponsor + Release Security Approver on Windows (§5) |
+| B-7 | CSS-061, CSS-063, CSS-064, CSS-069 and the §5 Windows-host evidence. | Production | Owner |
+
+---
+
+## 1. Problem (original, pre-implementation — retained for traceability)
 
 PR #107 added `simulate_governed_paper_order` as **scaffolding**. Two gaps remain:
 
@@ -15,7 +48,7 @@ PR #107 added `simulate_governed_paper_order` as **scaffolding**. Two gaps remai
 
 ---
 
-## 2. Trusted evaluator ownership (design)
+## 2. Trusted evaluator ownership (original design — see §0 for what was built)
 
 ### 2.1 Contract
 
@@ -93,13 +126,13 @@ The issuer must reject a `PaperGateEvaluators` (raw callables) when `trusted_onl
 
 ---
 
-## 3. Atomic nonce/reservation transaction (design)
+## 3. Atomic nonce/reservation transaction (original design — superseded by the single-SQLite-transaction implementation in §0)
 
 ### 3.1 Goal
 
 Consume the nonce AND create the exposure reservation as **one atomic unit**, so a crash cannot leave one applied and the other not.
 
-### 3.2 Why the current design is not atomic
+### 3.2 Why the pre-CSS-062 design was not atomic
 
 - `PilotAuthorizationLedger._claim()` creates `<approval_id>.claim` with `O_CREAT|O_EXCL` and fsyncs a JSONL journal (SHA-256 hash chain).
 - `PilotExposureReservationLedger.reserve()` opens a separate SQLite DB with `BEGIN IMMEDIATE`.

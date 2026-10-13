@@ -254,6 +254,7 @@ def test_verified_no_fill_releases_capacity(ledger, authority):
             outcome="confirmed_no_fill",
             simulator_instance_id="sim-001",
             evidence_hash="abc",
+            child_id="c1",
         ),
     )
     assert result["status"] == "NO_FILL_RELEASED"
@@ -270,6 +271,7 @@ def test_verified_fill_commits(ledger, authority):
             outcome="confirmed_fill",
             simulator_instance_id="sim-001",
             evidence_hash="def",
+            child_id="c1",
         ),
     )
     assert result["status"] == "FILLED_COMMITTED"

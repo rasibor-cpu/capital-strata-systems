@@ -45,9 +45,43 @@ from backend.runtime.pilot_exposure_reservation import PilotExposureReservationL
 __all__ = [
     "AuthoritativePilotCoordinationLedger",
     "CoordinationReceipt",
+    "LocalSimulatorOutcomeEvidence",
     "PilotCoordinationError",
     "PilotCoordinationReplayError",
 ]
+
+_SIMULATOR_OUTCOMES = frozenset({"confirmed_no_fill", "confirmed_fill"})
+
+
+@dataclass(frozen=True)
+class LocalSimulatorOutcomeEvidence:
+    """Typed local-simulator outcome record (CSS-062 Blocker 5).
+
+    Independent review (2026-10-13) corrections:
+    - The ledger accepts ONLY this exact type (no duck-typed objects).
+    - The record is bound to one ``child_id``; it cannot release or commit a
+      different reservation.
+    - The outcome must match the requested transition: ``confirmed_no_fill``
+      may only RELEASE, ``confirmed_fill`` may only COMMIT.
+
+    LIMITATION (documented, not hidden): this is an in-process typed record,
+    NOT a cryptographic attestation. ``evidence_hash`` is carried for audit
+    but is not authenticated. Whoever constructs the record asserts the
+    outcome. That is acceptable only for the local simulation path; any
+    paper-broker or production integration requires authenticated broker
+    outcome evidence, which is not implemented here.
+    """
+
+    outcome: str  # "confirmed_no_fill" | "confirmed_fill"
+    simulator_instance_id: str
+    evidence_hash: str
+    child_id: str
+
+    def verified_outcome(self) -> str:
+        """Return the outcome if it is one of the allowed values, else raise."""
+        if type(self.outcome) is not str or self.outcome not in _SIMULATOR_OUTCOMES:
+            raise ValueError(f"invalid outcome: {self.outcome!r}")
+        return self.outcome
 
 
 class PilotCoordinationError(RuntimeError):
@@ -201,8 +235,12 @@ class AuthoritativePilotCoordinationLedger:
                     parent = str(row["parent_id"])
                     reserved = str(row["reserved_cad"])
                     state = str(row["state"])
+                    # Independent review fix: a reservation already coordinated
+                    # by the trusted path (any issuer) must NOT receive a
+                    # second synthetic legacy record.
                     coord = conn.execute(
-                        "SELECT state FROM pilot_coordination WHERE child_id=? AND issuer_id='legacy'",
+                        "SELECT state FROM pilot_coordination WHERE child_id=? "
+                        "ORDER BY CASE state WHEN 'COMMITTED' THEN 0 ELSE 1 END LIMIT 1",
                         (child,),
                     ).fetchone()
                     if coord is not None and str(coord["state"]) == "COMMITTED":
@@ -473,12 +511,23 @@ class AuthoritativePilotCoordinationLedger:
             # Unique-constraint violation (nonce or approval_id already committed).
             # The nonce is NEVER reusable, even after ROLLED_BACK.
             return CoordinationReceipt(False, f"COORDINATION_REPLAY_REJECTED:{exc}", approval_id, nonce, child_id, "0.00", transaction_id)
+        except PilotCoordinationError as exc:
+            # e.g. a corrupt stored amount read inside the transaction (rolled back).
+            return CoordinationReceipt(
+                False, f"COORDINATION_STATE_INVALID:{exc}", approval_id, nonce, child_id, "0.00", transaction_id
+            )
         except sqlite3.Error as exc:
             # A SQLite error AFTER COMMIT is ambiguous: the transaction may
             # actually be durable. Reconcile before returning a denial.
-            # Check whether the coordination record exists (durable).
+            # Independent review fix: durability must be proven for THIS
+            # transaction (its unique transaction_id in the committed audit
+            # record), not merely the existence of the approval_id — otherwise
+            # a replayed approval_id that hits a SQLite error would be
+            # reported as a success.
             try:
-                durable = self.approval_exists(approval_id)
+                durable = self._transaction_is_durable(
+                    approval_id=approval_id, transaction_id=transaction_id
+                )
             except Exception:
                 durable = False
             if durable:
@@ -509,7 +558,9 @@ class AuthoritativePilotCoordinationLedger:
         refused (fail closed).
         """
         child_id = str(child_id).strip()
-        if not self._verify_simulator_evidence(confirmed_by_simulator):
+        if not self._verify_simulator_evidence(
+            confirmed_by_simulator, child_id=child_id, required_outcome="confirmed_no_fill"
+        ):
             return False
         try:
             with self._transaction() as conn:
@@ -539,7 +590,9 @@ class AuthoritativePilotCoordinationLedger:
     def commit_reservation(self, *, child_id: str, confirmed_by_simulator: Any = None) -> bool:
         """Transition an OPEN reservation to COMMITTED (verified simulator evidence)."""
         child_id = str(child_id).strip()
-        if not self._verify_simulator_evidence(confirmed_by_simulator):
+        if not self._verify_simulator_evidence(
+            confirmed_by_simulator, child_id=child_id, required_outcome="confirmed_fill"
+        ):
             return False
         try:
             with self._transaction() as conn:
@@ -557,21 +610,54 @@ class AuthoritativePilotCoordinationLedger:
         except (PilotCoordinationError, sqlite3.Error):
             return False
 
-    def _verify_simulator_evidence(self, evidence: Any) -> bool:
-        """Verify local-simulator outcome evidence. Fail closed."""
-        if evidence is None:
+    @staticmethod
+    def _verify_simulator_evidence(
+        evidence: Any,
+        *,
+        child_id: str,
+        required_outcome: str,
+    ) -> bool:
+        """Verify local-simulator outcome evidence for ONE transition. Fail closed.
+
+        - exact type ``LocalSimulatorOutcomeEvidence`` (duck types rejected);
+        - bound to the same ``child_id``;
+        - outcome equals the outcome the transition requires (a fill can
+          never release capacity; a no-fill can never commit).
+        """
+        if type(evidence) is not LocalSimulatorOutcomeEvidence:
             return False
-        # Must have a method that returns a verifiable outcome.
-        method = getattr(evidence, "verified_outcome", None)
-        if not callable(method):
+        if type(evidence.child_id) is not str or evidence.child_id.strip() != child_id:
             return False
         try:
-            outcome = method()
+            outcome = evidence.verified_outcome()
         except Exception:
             return False
-        if not isinstance(outcome, str):
+        return outcome == required_outcome
+
+    def _transaction_is_durable(self, *, approval_id: str, transaction_id: str) -> bool:
+        """True only if THIS transaction's commit record is durable.
+
+        Uses a fresh connection so a broken thread-local connection cannot
+        mask the durable state.
+        """
+        if not transaction_id:
             return False
-        return outcome in {"confirmed_no_fill", "confirmed_fill"}
+        conn = sqlite3.connect(str(self.path), timeout=30.0, isolation_level=None)
+        try:
+            rows = conn.execute(
+                "SELECT details FROM pilot_coordination_audit "
+                "WHERE approval_id=? AND event='ATOMIC_CONSUME_AND_RESERVE_COMMITTED'",
+                (approval_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        for (details,) in rows:
+            try:
+                if json.loads(details).get("transaction_id") == transaction_id:
+                    return True
+            except (ValueError, TypeError, AttributeError):
+                continue
+        return False
 
     def reservation_state(self, *, child_id: str) -> str | None:
         with self._connect() as conn:
