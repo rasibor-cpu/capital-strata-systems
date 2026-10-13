@@ -68,6 +68,10 @@ backend/runtime/*
 !backend/runtime/pilot_dual_control.py
 !backend/runtime/paper_authority_issuer.py
 !backend/runtime/paper_authority_registry.py
+!backend/runtime/trusted_risk_evaluators.py
+!backend/runtime/trusted_paper_authority.py
+!backend/runtime/pilot_coordination_ledger.py
+!backend/runtime/trusted_governed_paper_route.py
 !backend/runtime/safety_flag_observation.py
 !backend/runtime/broker_startup_selection.py
 !backend/runtime/coinbase_readiness.py

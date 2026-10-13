@@ -15,10 +15,12 @@ on:
     branches:
       - governance/cad20-cross-asset-pilot-closeout
       - css-agent/paper-auth-cad-ci-rbac-2026-10-13
+      - css-agent/css062-trusted-atomic-2026-10-13
   pull_request:
     branches:
       - governance/cad20-cross-asset-pilot-closeout
       - feature/css-pilot-micro-envelope
+      - css-agent/css062-trusted-atomic-2026-10-13
   workflow_dispatch:
 
 permissions:
@@ -63,6 +65,9 @@ jobs:
             tests/test_governed_pilot_profile.py \
             tests/test_antibleed_guard_integration.py \
             tests/engine/test_risk_governor.py \
+            tests/test_trusted_paper_authority.py \
+            tests/test_pilot_coordination_ledger.py \
+            tests/test_trusted_governed_paper_route.py \
             -q --no-header -p no:cacheprovider
         env:
           PYTHONPATH: .
