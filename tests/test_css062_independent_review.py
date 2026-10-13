@@ -362,11 +362,7 @@ def test_open_reserved_cad_bound_to_evaluated_notional(ledger, authority):
         _sim(ledger, authority, order_context=ctx)
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="OPEN G5-A: legacy PilotExposureReservationLedger.transition() on the same "
-    "database can release a trusted reservation without simulator evidence",
-)
+# G5-A regression: trusted reservations must be protected from the legacy API.
 def test_open_legacy_api_cannot_release_trusted_reservation(ledger):
     assert _reserve(ledger, "A1", "n1", "c1").success
     legacy = PilotExposureReservationLedger(ledger.path, config=DEFAULT_ORDER_LIMIT_CONFIG)

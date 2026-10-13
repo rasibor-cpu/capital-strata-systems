@@ -192,6 +192,22 @@ class PilotExposureReservationLedger:
             return False
         try:
             with self._transaction() as conn:
+                # CSS-062 G5: legacy transition API has no authenticated outcome
+                # evidence. It must NEVER mutate a trusted-path reservation.
+                # Query inside the same write transaction to prevent TOCTOU.
+                # Absence of the coordination table means a legacy-only DB.
+                coordination_table = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='pilot_coordination'"
+                ).fetchone()
+                if coordination_table is not None:
+                    trusted = conn.execute(
+                        "SELECT 1 FROM pilot_coordination "
+                        "WHERE child_id=? AND issuer_id!='legacy' LIMIT 1",
+                        (str(child_id).strip(),),
+                    ).fetchone()
+                    if trusted is not None:
+                        return False
                 cur = conn.execute(
                     "UPDATE pilot_reservations SET state=? WHERE child_id=? AND state=?",
                     (to_state, str(child_id).strip(), from_state),
