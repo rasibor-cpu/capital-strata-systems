@@ -20,6 +20,8 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from backend.runtime.governed_paper_route import (
     GovernedPaperRouteBlocked,
+    clear_local_simulation_broker_types,
+    register_local_simulation_broker_type,
     simulate_governed_paper_order,
     submit_governed_paper_order,
 )
@@ -41,6 +43,8 @@ NOW = datetime.now(timezone.utc)
 
 
 def _order_request() -> dict:
+    # risk_amount must equal (max_loss + fees) * rate, quantized to cents.
+    # (0.50 + 0.05) * 1.38 = 0.759 -> 0.76.
     return {
         "candidate_sha": CANDIDATE_SHA,
         "broker": "IBKR_PAPER",
@@ -53,7 +57,7 @@ def _order_request() -> dict:
         "limit_price": "5",
         "quote_currency": "USD",
         "risk_currency": "CAD",
-        "risk_amount": "6.25",
+        "risk_amount": "0.76",
     }
 
 
@@ -104,15 +108,31 @@ def _rate() -> VerifiedRateInput:
 class FakeBroker:
     """Fake broker; never contacts any real broker."""
 
-    def __init__(self, fail: bool = False):
+    def __init__(self, fail: bool = False, fail_after_submit: bool = False):
         self.fail = fail
+        self.fail_after_submit = fail_after_submit
         self.submitted = []
 
     def submit_order(self, **kwargs):
         if self.fail:
             raise RuntimeError("fake broker failure")
         self.submitted.append(kwargs)
+        if self.fail_after_submit:
+            # Record the fill, then raise — outcome is unknown.
+            raise RuntimeError("fake broker failure after fill")
         return {"status": "FILLED", "fill_price": kwargs.get("price"), **kwargs}
+
+
+@pytest.fixture(autouse=True)
+def _register_fake_broker_type():
+    """Explicitly allow-list the local simulator type for each test.
+
+    The simulation rejects any broker object whose concrete type is not
+    registered, including real broker adapters.
+    """
+    register_local_simulation_broker_type(FakeBroker)
+    yield
+    clear_local_simulation_broker_types()
 
 
 def _base_kwargs(ledger, authorization_ledger, issuer, registry, fake_broker):
@@ -128,6 +148,8 @@ def _base_kwargs(ledger, authorization_ledger, issuer, registry, fake_broker):
         instrument=_instrument(),
         quote_rate=_rate(),
         trusted_evidence_ids=frozenset({"test-evidence-1"}),
+        # risk_amount in the signed intent must equal (max_loss + fees) * rate,
+        # quantized to cents. (0.50 + 0.05) * 1.38 = 0.759 -> 0.76.
         risk_gross_quote="5.00",
         risk_cash_quote="5.00",
         risk_max_loss_quote="0.50",
@@ -244,6 +266,41 @@ class TestSimulationFailClosed:
             return kwargs
         self._expect_blocked(tmp_path, mutate, "PAPER_SIMULATION_FAKE_BROKER_REQUIRED")
 
+    def test_real_broker_object_rejected(self, tmp_path: Path):
+        """A real broker adapter (or any non-registered type) must be rejected
+        BEFORE any method is invoked on it.
+        """
+        from engine.brokers.ibkr_paper_broker import IbkrPaperBroker
+
+        ledger = PilotExposureReservationLedger(tmp_path / "res.db")
+        auth_ledger = PilotAuthorizationLedger(tmp_path / "auth")
+        issuer, registry = _issuer_and_registry()
+
+        kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, None)
+        kwargs["fake_broker"] = IbkrPaperBroker()  # real broker adapter
+
+        with pytest.raises(GovernedPaperRouteBlocked) as exc:
+            simulate_governed_paper_order(**kwargs)
+        assert "PAPER_SIMULATION_BROKER_NOT_LOCAL_SIMULATOR" in str(exc.value)
+
+    def test_arbitrary_submit_order_object_rejected(self, tmp_path: Path):
+        """Any object with a submit_order method but not allow-listed is rejected."""
+
+        class RogueBroker:
+            def submit_order(self, **kwargs):
+                raise AssertionError("must not be invoked")
+
+        ledger = PilotExposureReservationLedger(tmp_path / "res.db")
+        auth_ledger = PilotAuthorizationLedger(tmp_path / "auth")
+        issuer, registry = _issuer_and_registry()
+
+        kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, None)
+        kwargs["fake_broker"] = RogueBroker()
+
+        with pytest.raises(GovernedPaperRouteBlocked) as exc:
+            simulate_governed_paper_order(**kwargs)
+        assert "PAPER_SIMULATION_BROKER_NOT_LOCAL_SIMULATOR" in str(exc.value)
+
     def test_unenrolled_issuer_rejected(self, tmp_path: Path):
         def mutate(kwargs):
             kwargs["issuer_id"] = "unregistered-issuer"
@@ -313,20 +370,23 @@ class TestSimulationFailClosed:
         assert ledger.snapshot() == []
         assert fake.submitted == []
 
-    def test_fake_broker_failure_reconciles(self, tmp_path: Path):
-        """A failing fake broker must not leave an unresolvable reservation.
-        The reservation is released (or reconciled) and no fill occurs.
+    def test_fake_broker_failure_after_fill_does_not_release_reservation(self, tmp_path: Path):
+        """A simulator that records a fill and then raises has an UNKNOWN
+        outcome; the reservation must NOT be released (the caller reconciles).
         """
         ledger = PilotExposureReservationLedger(tmp_path / "res.db")
         auth_ledger = PilotAuthorizationLedger(tmp_path / "auth")
         issuer, registry = _issuer_and_registry()
-        fake = FakeBroker(fail=True)
+        fake = FakeBroker(fail_after_submit=True)
 
         kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, fake)
         with pytest.raises(GovernedPaperRouteBlocked) as exc:
             simulate_governed_paper_order(**kwargs)
-        assert "PAPER_SUBMISSION_FAILED_RECONCILE" in str(exc.value) or "AMBIGUOUS" in str(exc.value)
-        assert fake.submitted == []
+        assert "PAPER_SUBMISSION_FAILED_RECONCILE" in str(exc.value)
+        # The reservation must still be OPEN (not released) — outcome unknown.
+        snapshot = ledger.snapshot()
+        assert len(snapshot) == 1
+        assert snapshot[0]["state"] == "OPEN"
 
     def test_denied_reservation_blocks_simulation(self, tmp_path: Path):
         """A reservation that exceeds the CAD 20 ceiling must be denied before
@@ -344,9 +404,79 @@ class TestSimulationFailClosed:
         kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, fake)
         with pytest.raises(GovernedPaperRouteBlocked) as exc:
             simulate_governed_paper_order(**kwargs)
-        # Either reservation-denied or the reconcile path surfaces.
+        assert "PILOT_RESERVATION_DENIED" in str(exc.value), str(exc.value)
+        assert fake.submitted == []
+
+    def test_replay_of_same_signed_intent_rejected(self, tmp_path: Path):
+        """Replay the same child_id (with a fresh nonce, since the issuer
+        generates a new nonce per call): must be rejected via the duplicate-child
+        reservation path. The nonce itself is fresh each call, so this is a
+        **child-duplicate** replay, not a nonce replay — a documented
+        limitation of the current scaffolding (no production-grade atomic
+        nonce-reservation boundary yet).
+        """
+        ledger = PilotExposureReservationLedger(tmp_path / "res.db")
+        auth_ledger = PilotAuthorizationLedger(tmp_path / "auth")
+        issuer, registry = _issuer_and_registry()
+        fake = FakeBroker()
+
+        kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, fake)
+        # First submission succeeds.
+        result = simulate_governed_paper_order(**kwargs)
+        assert result["status"] == "FILLED"
+
+        # Replay: fresh nonce, same child_id. The duplicate-child path must reject.
+        with pytest.raises(GovernedPaperRouteBlocked) as exc:
+            simulate_governed_paper_order(**kwargs)
         assert any(
             frag in str(exc.value)
-            for frag in ("PILOT_RESERVATION_DENIED", "PAPER_SIMULATION_AMBIGUOUS_STATE", "PARENT_EXPOSURE_CEILING")
+            for frag in ("PILOT_DUPLICATE_CHILD_RESERVATION", "PILOT_RESERVATION_DENIED")
         ), str(exc.value)
+
+    def test_duplicate_child_does_not_release_existing_open_reservation(self, tmp_path: Path):
+        """A duplicate child whose existing reservation is OPEN must NOT be
+        silently released by this path.
+        """
+        ledger = PilotExposureReservationLedger(tmp_path / "res.db")
+        auth_ledger = PilotAuthorizationLedger(tmp_path / "auth")
+        issuer, registry = _issuer_and_registry()
+        fake = FakeBroker()
+
+        # Create an OPEN reservation for P1/C1 manually.
+        d = ledger.reserve(parent_id="P", child_id="C1", proposed_child_cad=Decimal("5.00"))
+        assert d.approved
+
+        # Now simulate with the SAME child_id C1 but a different parent/risk.
+        kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, fake)
+        kwargs["order_request"] = {**kwargs["order_request"], "child_id": "C1"}
+
+        with pytest.raises(GovernedPaperRouteBlocked) as exc:
+            simulate_governed_paper_order(**kwargs)
+        assert any(
+            frag in str(exc.value)
+            for frag in ("PILOT_DUPLICATE_CHILD_RESERVATION", "PILOT_RESERVATION_DENIED")
+        ), str(exc.value)
+        # The pre-existing OPEN reservation must still be OPEN.
+        snapshot = ledger.snapshot()
+        c1_rows = [row for row in snapshot if row["child_id"] == "C1"]
+        assert len(c1_rows) == 1
+        assert c1_rows[0]["state"] == "OPEN"
+
+    def test_risk_amount_mismatch_rejected(self, tmp_path: Path):
+        """A signed risk_amount that does not match the caller's reservation
+        inputs (max_loss + fees) * rate must be rejected.
+        """
+        ledger = PilotExposureReservationLedger(tmp_path / "res.db")
+        auth_ledger = PilotAuthorizationLedger(tmp_path / "auth")
+        issuer, registry = _issuer_and_registry()
+        fake = FakeBroker()
+
+        kwargs = _base_kwargs(ledger, auth_ledger, issuer, registry, fake)
+        # Sign one risk but reserve a different one.
+        kwargs["risk_max_loss_quote"] = "9.99"
+
+        with pytest.raises(GovernedPaperRouteBlocked) as exc:
+            simulate_governed_paper_order(**kwargs)
+        assert "PAPER_SIMULATION_INTENT_BINDING_MISMATCH:risk_amount" in str(exc.value)
+        assert ledger.snapshot() == []
         assert fake.submitted == []

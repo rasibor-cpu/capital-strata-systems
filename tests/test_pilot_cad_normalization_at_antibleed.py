@@ -187,13 +187,13 @@ class TestAntiBleedCallSiteUsesNormalizedRisk:
     (3) the AntiBleed minimum-size exception stays disabled.
     """
 
-    def test_default_guard_unchanged_thresholds(self):
-        guard = AntiBleedGuard(state_file="/tmp/test-antibleed-state.json")
+    def test_default_guard_unchanged_thresholds(self, tmp_path):
+        guard = AntiBleedGuard(state_file=str(tmp_path / "antibleed_state.json"))
         assert guard.minimum_profitable_trade_size == 50.0
         assert guard.minimum_required_net_edge_bps == 25.0
 
-    def test_sub_threshold_cad_risk_is_authentically_denied(self):
-        guard = AntiBleedGuard(state_file="/tmp/test-antibleed-state.json")
+    def test_sub_threshold_cad_risk_is_authentically_denied(self, tmp_path):
+        guard = AntiBleedGuard(state_file=str(tmp_path / "antibleed_state.json"))
         # A CAD-normalized pilot parent at CAD 6.25 is below the default
         # minimum_profitable_trade_size of 50. The guard must deny it.
         result = guard.evaluate(
@@ -211,8 +211,8 @@ class TestAntiBleedCallSiteUsesNormalizedRisk:
         import backend.runtime.pilot_min_size_exception as exc_mod
         assert exc_mod.PILOT_MIN_SIZE_EXCEPTION_ENABLED is False
 
-    def test_over_threshold_risk_can_be_approved(self):
-        guard = AntiBleedGuard(state_file="/tmp/test-antibleed-state.json")
+    def test_over_threshold_risk_can_be_approved(self, tmp_path):
+        guard = AntiBleedGuard(state_file=str(tmp_path / "antibleed_state.json"))
         # A CAD-normalized risk of 75 exceeds the minimum threshold of 50
         # and meets the net-edge requirement; the guard should approve.
         result = guard.evaluate(

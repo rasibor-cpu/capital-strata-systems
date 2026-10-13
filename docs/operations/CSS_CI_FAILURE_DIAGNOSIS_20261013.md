@@ -22,18 +22,20 @@ branches:
 pull_request:
 
 jobs:
+css-validation:
+runs-on: ubuntu-latest
+
+steps:
 ```
 
-Two YAML errors are visible:
+The specific defect is **incorrect nesting** of the events and jobs/steps
+sections: `branches:` and `- main` are at the same indentation as `push:`
+(making `push:` a scalar), and the `jobs:`/`css-validation:`/`runs-on:`/`steps:`
+block is not nested under `jobs:`. GitHub annotates this as a "workflow file
+issue" and never reaches a test step. (Quoting `on` and a null `pull_request:`
+are themselves valid YAML constructs; the nesting is what is broken.)
 
-1. **Missing indentation under `push:`** — `branches:` and `- main` are at the
-   same indentation as `push:`, so `push:` becomes a scalar and the filter is
-   invalid.
-2. **`pull_request:` has no value** — it is a null mapping with no `branches:`
-   filter, which combined with (1) makes the trigger structure undefined.
-
-The result is that the `jobs.css-validation` never executes. This is a
-**workflow-file defect**, not a test failure.
+This is a **workflow-file defect**, not a test failure.
 
 ## Historical consistency
 
@@ -47,17 +49,22 @@ The five most recent `css_governance.yml` runs on `main` (from `gh run list`) ar
 | `28731274576` | `faf1485d…` | failure | push |
 | `27738418229` | `faf1485d…` | failure | push |
 
-All five share the same conclusion. The older `faf1485d…` runs predate the
-`QT-005` restructure, but the workflow file is malformed at both SHAs.
+All five share the same conclusion. The workflow file at `faf1485d…` was
+separately inspected and is malformed in the same way (same `on:` and
+`jobs:` nesting defect), which supports the same diagnosis for the two older
+runs — though each run's exact failing line is not individually captured here.
+GitHub's "likely" qualification is preserved.
 
 ## What is NOT established
 
 - Whether any specific Python test fails at `main` HEAD — the workflow never
-  reaches a test step.
+  reaches a test step, so no test result exists for those runs.
 - Whether the AI Governance Sweep workflow (`.github/workflows/ai-governance-sweep.yml`)
   has the same defect at `main` HEAD. That workflow was inspected only on the
   CAD-20 candidate branch, where it is well-formed. Its `main`-HEAD state at
   `df566eee` was not individually re-verified during this audit.
+- The exact YAML parser line that fails — GitHub reports only a high-level
+  "workflow file issue" annotation; the failing step log is not retrievable.
 
 ## Proposed fix (NOT applied during this read-only audit)
 
@@ -86,6 +93,6 @@ which is why the separate `css_candidate_pilot_ci.yml` (added on
 ## Limitation
 
 GitHub's "log not found" response prevented direct step-log retrieval; the
-diagnosis is based on the workflow file at the audited SHA and GitHub's own
+diagnosis is based on the workflow file at the audited SHAs and GitHub's own
 "workflow file issue" annotation. The exact failing line of the YAML parser is
 not captured here.
