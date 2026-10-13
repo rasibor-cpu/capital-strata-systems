@@ -1,0 +1,77 @@
+name: CSS Candidate Pilot CI (scoped)
+
+# Scoped candidate validation for the CAD-20 pilot review candidate branch.
+# Runs only the isolated pilot/paper-authorization/dual-control/anti-bleed/
+# exposure/currency tests that are POSIX-runnable (no Windows identity probe,
+# no real broker access, no deployment).
+#
+# This workflow is NOT a full release regression. The Windows-dependent OV-002
+# and phase163 tests remain excluded (they require the real Windows host).
+#
+# Read-only: contents only. No broker secrets. No deploy. No live trading.
+
+on:
+  push:
+    branches:
+      - governance/cad20-cross-asset-pilot-closeout
+      - css-agent/paper-auth-cad-ci-rbac-2026-10-13
+      - css-agent/css062-trusted-atomic-2026-10-13
+  pull_request:
+    branches:
+      - governance/cad20-cross-asset-pilot-closeout
+      - feature/css-pilot-micro-envelope
+      - css-agent/css062-trusted-atomic-2026-10-13
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate-pilot-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set Up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pytest cryptography
+        env:
+          PYTHONPATH: .
+
+      - name: Compile validation (scoped)
+        run: |
+          python -m compileall -q backend/runtime backend/app/risk engine/execution
+        env:
+          PYTHONPATH: .
+
+      - name: Scoped pilot validation (POSIX-runnable only)
+        run: |
+          python -m pytest \
+            tests/test_paper_authority_issuer.py \
+            tests/test_governed_paper_route_simulation.py \
+            tests/test_pilot_cad_normalization_at_antibleed.py \
+            tests/test_pilot_atomic_budget_concurrency.py \
+            tests/test_pilot_paper_authorization.py \
+            tests/test_pilot_dual_control.py \
+            tests/test_pilot_authorization_ledger.py \
+            tests/test_governed_pilot_profile.py \
+            tests/test_antibleed_guard_integration.py \
+            tests/engine/test_risk_governor.py \
+            tests/test_trusted_paper_authority.py \
+            tests/test_pilot_coordination_ledger.py \
+            tests/test_trusted_governed_paper_route.py \
+            tests/test_css062_independent_review.py \
+            tests/test_governed_paper_route.py \
+            tests/test_pilot_exposure_reservation.py \
+            tests/engine/test_live_order_kill_switch.py \
+            -q --no-header -p no:cacheprovider -rxX
+        env:
+          PYTHONPATH: .

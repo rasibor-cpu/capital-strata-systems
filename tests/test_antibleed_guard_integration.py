@@ -66,6 +66,7 @@ def test_antibleed_guard_is_called_in_execution_gate_path() -> None:
             "fee_bps": 1.0,
             "spread_bps": 1.0,
             "slippage_bps": 1.0,
+            "pilot_min_size_exception": None,
         }
     ]
     assert result["debug"]["anti_bleed_guard"]["approved"] is True
