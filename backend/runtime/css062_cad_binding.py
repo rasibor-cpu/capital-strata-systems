@@ -6,7 +6,7 @@ The caller must separately establish provenance of broker, instrument, and FX da
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from decimal import Decimal, InvalidOperation, ROUND_UP
+from decimal import Decimal, DecimalException, InvalidOperation, Inexact, ROUND_UP, localcontext
 from collections.abc import Mapping
 
 
@@ -76,7 +76,17 @@ def normalize_approved_cad(
     age = clock - observed
     if age < timedelta(0) or age > timedelta(seconds=max_rate_age_seconds):
         raise CadBindingError("stale or future FX evidence")
-    expected = (notional * rate + fees).quantize(Decimal("0.01"), rounding=ROUND_UP)
+    try:
+        # Multiplication/addition must be exact before the intentional
+        # outward rounding to cents. The default Decimal context (28 digits)
+        # can otherwise discard a tiny positive exposure and under-reserve.
+        with localcontext() as exact_context:
+            exact_context.traps[Inexact] = True
+            exact_exposure = notional * rate + fees
+        expected = exact_exposure.quantize(Decimal("0.01"), rounding=ROUND_UP)
+    except (DecimalException, OverflowError, ValueError) as exc:
+        # Fail closed with a typed governance error, not an unhandled decimal trap.
+        raise CadBindingError("CAD exposure cannot be represented") from exc
     reserved = _decimal(signed_order.get("reserved_cad"), "reserved_cad")
     if reserved < expected:
         raise CadBindingError("under-reservation against approved notional")
