@@ -4,7 +4,9 @@
     python scripts/css_shadow_paper_runner.py run       --evidence-dir DIR --operator-id ID [--max-cycles N]
     python scripts/css_shadow_paper_runner.py verify    --evidence-dir DIR
 
-Real public BTC-USD / ETH-USD prices; simulated fills only; no broker connection.
+Real public prices (default: Coinbase BTC-USD/ETH-USD; --source binance: Binance Spot
+BTCUSDT/ETHUSDT from the public market-data host). Simulated fills only; no broker
+connection and no API credentials are used.
 Exit codes: 0 ok, 2 safety preflight/halt, 3 journal integrity failure, 5 feed not ready (preflight).
 """
 
@@ -42,6 +44,10 @@ def _parser() -> argparse.ArgumentParser:
         p.add_argument("--evidence-dir", required=True, type=Path)
         p.add_argument("--operator-id", required=True)
         p.add_argument("--starting-equity", type=float, default=1000.0)
+        p.add_argument(
+            "--source", choices=("coinbase", "binance"), default="coinbase",
+            help="public market-data source (no credentials): coinbase BTC-USD/ETH-USD or binance BTCUSDT/ETHUSDT",
+        )
         if name == "run":
             p.add_argument("--max-cycles", type=int, default=0, help="0 = run until Ctrl+C")
     v = sub.add_parser("verify")
@@ -62,8 +68,13 @@ def main(argv: list[str] | None = None) -> int:
         _print(summary)
         return 0 if summary.get("journal_integrity") == "PASS" else 3
 
+    ticker = None
+    if args.source == "binance":
+        from backend.shadow_paper.binance_market_data import BinancePublicTicker
+
+        ticker = BinancePublicTicker()
     runner = ShadowPaperRunner(
-        args.evidence_dir, operator_id=args.operator_id, starting_equity=args.starting_equity,
+        args.evidence_dir, operator_id=args.operator_id, starting_equity=args.starting_equity, ticker=ticker,
     )
     try:
         preflight = runner.start()

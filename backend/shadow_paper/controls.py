@@ -96,6 +96,7 @@ FORBIDDEN_MODULE_PREFIXES = (
     "backend.broker",
     "backend.app.brokers",
     "backend.execution",
+    "backend.binance_readonly",  # authenticated (read-only) Binance client; never in the paper runner
     "broker_oanda",
     "execution_router",
     "coinbase",

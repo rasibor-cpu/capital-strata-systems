@@ -100,7 +100,7 @@ class ShadowPaperRunner:
         *,
         operator_id: str,
         starting_equity: float = 1000.0,
-        instruments: tuple[str, ...] = SUPPORTED_INSTRUMENTS,
+        instruments: Optional[tuple[str, ...]] = None,
         ticker: Optional[CoinbasePublicTicker] = None,
         clock: Optional[Callable[[], datetime]] = None,
         commit_sha: Optional[str] = None,
@@ -110,7 +110,9 @@ class ShadowPaperRunner:
     ) -> None:
         if not str(operator_id or "").strip():
             raise ValueError("operator_id is required")
-        unsupported = [i for i in instruments if i not in SUPPORTED_INSTRUMENTS]
+        supported = tuple(getattr(ticker, "supported_instruments", SUPPORTED_INSTRUMENTS))
+        instruments = tuple(instruments) if instruments is not None else supported
+        unsupported = [i for i in instruments if i not in supported]
         if unsupported or not instruments:
             raise ValueError(f"unsupported instruments: {unsupported}")
         if not (math.isfinite(float(starting_equity)) and float(starting_equity) > 0):
@@ -202,6 +204,7 @@ class ShadowPaperRunner:
             "schema": SCHEMA_VERSION,
             "operator_id": self.operator_id,
             "instruments": list(self.instruments),
+            "market_data_source": str(getattr(self.ticker, "source_name", "UNKNOWN")),
             "asset_class": ASSET_CLASS,
             "starting_equity": self.starting_equity,
             "bar_interval_seconds": BAR_INTERVAL_SECONDS,
