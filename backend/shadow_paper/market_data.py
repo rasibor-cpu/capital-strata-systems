@@ -118,13 +118,15 @@ def validate_ticker(
     body: Any,
     received_at: datetime,
     fetch_latency_ms: float,
+    supported: tuple[str, ...] = SUPPORTED_INSTRUMENTS,
+    source: str = SOURCE_NAME,
 ) -> MarketQuote | QuoteRejection:
     received_iso = _iso(received_at)
 
     def reject(reason: str, detail: str = "") -> QuoteRejection:
-        return QuoteRejection(instrument, SOURCE_NAME, url, reason, detail[:200], received_iso)
+        return QuoteRejection(instrument, source, url, reason, detail[:200], received_iso)
 
-    if instrument not in SUPPORTED_INSTRUMENTS:
+    if instrument not in supported:
         return reject("UNSUPPORTED_INSTRUMENT", instrument)
     if http_status != 200:
         return reject("HTTP_STATUS", str(http_status))
@@ -168,7 +170,7 @@ def validate_ticker(
 
     return MarketQuote(
         instrument=instrument,
-        source=SOURCE_NAME,
+        source=source,
         url=url,
         price=price,
         bid=bid,
@@ -184,6 +186,9 @@ def validate_ticker(
 
 class CoinbasePublicTicker:
     """Fetch and validate one quote. Never raises; returns a rejection instead."""
+
+    source_name = SOURCE_NAME
+    supported_instruments = SUPPORTED_INSTRUMENTS
 
     def __init__(
         self,
