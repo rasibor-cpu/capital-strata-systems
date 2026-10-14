@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import backend.certification.ov002_endurance_monitor as ov002_monitor
+
 import json
 import os
 import sys
@@ -49,7 +51,7 @@ def _identity(pid: int, role: str, now: datetime) -> dict:
         role=role,
         attempt_id="",
         baseline_commit="",
-        repo_root="C:/rasib/source/capital-strata-systems",
+        repo_root=ov002_monitor.REPO_ROOT,
         require_live_fields=True,
     )
 
