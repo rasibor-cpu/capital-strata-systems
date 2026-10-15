@@ -1,0 +1,47 @@
+name: CSS-064 Linux Ledger Validation
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ledger-validation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout validation commit
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Validate authorization ledger and AntiBleed exception
+        env:
+          PYTHONPATH: .
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python -m pytest -q \
+            tests/test_pilot_authorization_ledger.py \
+            tests/test_antibleed_pilot_min_size_exception.py \
+            --tb=short \
+            2>&1 | tee css064-linux-ledger-results.log
+          exit ${PIPESTATUS[0]}
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: css064-linux-ledger-evidence
+          path: css064-linux-ledger-results.log
+          if-no-files-found: warn
