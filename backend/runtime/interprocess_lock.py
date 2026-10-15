@@ -19,6 +19,7 @@ closed). The lock file is never written to, truncated or deleted.
 from __future__ import annotations
 
 import errno
+import math
 import os
 import sys
 import time
@@ -72,11 +73,18 @@ def exclusive_file_lock(
     poll_seconds: float = DEFAULT_POLL_SECONDS,
 ) -> Iterator[None]:
     """Hold an exclusive cross-process lock on ``path`` for the duration of the block."""
-    if not timeout_seconds > 0 or not poll_seconds > 0:
-        raise ValueError("timeout_seconds and poll_seconds must be positive")
+    # Validate before opening the lockfile. NaN/Infinity could otherwise make a
+    # lock wait unbounded, while oversized integers can overflow float().
+    try:
+        timeout = float(timeout_seconds)
+        poll = float(poll_seconds)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError("timeout_seconds and poll_seconds must be finite positive numbers") from exc
+    if not (math.isfinite(timeout) and timeout > 0 and math.isfinite(poll) and poll > 0):
+        raise ValueError("timeout_seconds and poll_seconds must be finite positive numbers")
     fd = os.open(os.fspath(path), os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0), 0o600)
     try:
-        deadline = time.monotonic() + float(timeout_seconds)
+        deadline = time.monotonic() + timeout
         while True:
             try:
                 _try_lock(fd)
@@ -88,7 +96,7 @@ def exclusive_file_lock(
                     raise InterprocessLockTimeout(
                         f"could not lock {os.fspath(path)} within {timeout_seconds}s ({LOCK_BACKEND})"
                     ) from None
-                time.sleep(poll_seconds)
+                time.sleep(poll)
         try:
             yield
         finally:
