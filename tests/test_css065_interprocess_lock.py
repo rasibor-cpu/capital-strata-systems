@@ -69,7 +69,9 @@ def test_backend_matches_platform_and_never_requires_fcntl_on_windows():
 WINDOWS_SIMULATION = r"""
 import errno, json, os, sys, types
 import backend.runtime.governed_pilot_profile, backend.runtime.pilot_dual_control  # import real deps first
-calls, script = [], json.loads(sys.argv[2])
+# The retry script is passed as a file path: a long script on the command line
+# exceeds the Windows 32,767-character limit (WinError 206).
+calls, script = [], json.loads(open(sys.argv[2], encoding="utf-8").read())
 fake = types.ModuleType("msvcrt"); fake.LK_NBLCK, fake.LK_UNLCK = 2, 0
 def locking(fd, mode, nbytes):
     calls.append([mode, nbytes, os.lseek(fd, 0, os.SEEK_CUR)])
@@ -99,7 +101,9 @@ print(json.dumps({"backend": lock_mod.LOCK_BACKEND, "calls": calls, "outcome": o
 
 
 def _simulate_windows(tmp_path, script, timeout="5"):
-    proc = _child(WINDOWS_SIMULATION, str(tmp_path), json.dumps(script), timeout)
+    script_path = tmp_path.parent / f"{tmp_path.name}_sim_script.json"
+    script_path.write_text(json.dumps(script), encoding="utf-8")
+    proc = _child(WINDOWS_SIMULATION, str(tmp_path), str(script_path), timeout)
     out, err = proc.communicate(timeout=60)
     assert proc.returncode == 0, err
     return json.loads(out.strip().splitlines()[-1])
