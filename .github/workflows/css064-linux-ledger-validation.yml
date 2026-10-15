@@ -2,7 +2,9 @@ name: CSS-064 Linux Ledger Validation
 
 on:
   workflow_dispatch:
-
+  push:
+    branches:
+      - validation/css064-linux-ledger-20261014
 permissions:
   contents: read
 
