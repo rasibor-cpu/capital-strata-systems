@@ -138,3 +138,38 @@ def test_concurrent_processes_consume_once(tmp_path):
     results = sorted(proc.communicate(timeout=60)[0].strip() for proc in procs)
     assert results.count("ok") == 1 and results.count("replay") == 5
     PilotAuthorizationLedger(tmp_path).verify_chain()
+
+
+def test_concurrent_revoke_tolerates_append_in_progress(tmp_path):
+    """CSS-065: an append in progress must not be reported as journal corruption."""
+    import threading
+    from backend.runtime.pilot_authorization_ledger import _entry_hash
+
+    ledger = PilotAuthorizationLedger(tmp_path)
+    ledger.revoke("rev-001", revoked_by="ops", reason="test")
+    prev = ledger.verify_chain()[-1]["entry_hash"]
+    body = {"event": "REVOKED", "approval_id": "rev-002", "revoked_by": "ops",
+            "reason": "test", "at": "2026-10-15T00:00:00+00:00"}
+    line = json.dumps({**body, "prev_hash": prev, "entry_hash": _entry_hash(prev, body)}, sort_keys=True)
+    outcome = {}
+
+    def concurrent_revoke():
+        try:
+            outcome["hash"] = ledger.revoke("rev-003", revoked_by="ops", reason="concurrent")
+        except Exception as exc:  # pragma: no cover - asserted below
+            outcome["error"] = exc
+
+    with ledger._locked():  # another writer is mid-append: unterminated last line
+        with ledger.journal.open("a", encoding="utf-8", newline="\n") as handle:
+            handle.write(line[:25])
+            handle.flush()
+            thread = threading.Thread(target=concurrent_revoke)
+            thread.start()
+            thread.join(0.5)
+            assert "error" not in outcome, f"in-progress append reported as corruption: {outcome.get('error')}"
+            assert thread.is_alive(), "concurrent revoke should be waiting for the journal lock"
+            handle.write(line[25:] + "\n")
+            handle.flush()
+    thread.join(10)
+    assert "error" not in outcome, outcome.get("error")
+    assert [e["approval_id"] for e in ledger.verify_chain()] == ["rev-001", "rev-002", "rev-003"]

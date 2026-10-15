@@ -7,14 +7,16 @@ Replay/duplicate/restart resistance:
   consumed later;
 - a crash between claim and journal append leaves the approval burned (fail closed);
 - every event is appended to a SHA-256 hash-chained JSONL journal (fsync'd);
-  a broken chain, unreadable journal or claim without journal entry fails closed.
+  a broken chain, unreadable journal or claim without journal entry fails closed;
+- journal appends are serialized by a cross-platform interprocess lock
+  (fcntl on POSIX, msvcrt on Windows; CSS-065); a lock that cannot be acquired
+  within the timeout fails closed with PilotReplayError and appends nothing.
 
 The ledger is preflight infrastructure only. It is not wired to any broker
 submission path and does not alter execution_allowed / live_trading_blocked.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -24,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.runtime.interprocess_lock import InterprocessLockTimeout, exclusive_file_lock
 from backend.runtime.governed_pilot_profile import (
     GovernedPilotProfile,
     PilotConfigurationError,
@@ -55,6 +58,8 @@ def _entry_hash(prev_hash: str, body: dict[str, Any]) -> str:
 
 
 class PilotAuthorizationLedger:
+    lock_timeout_seconds: float = 30.0
+
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self.root = Path(root)
         self.claims = self.root / "claims"
@@ -64,12 +69,26 @@ class PilotAuthorizationLedger:
     # -- integrity -----------------------------------------------------
     def verify_chain(self) -> list[dict[str, Any]]:
         """Return journal entries; raise PilotReplayError if tampered or unreadable."""
+        return self._read_chain(allow_incomplete_tail=False)
+
+    def _read_chain(self, *, allow_incomplete_tail: bool) -> list[dict[str, Any]]:
+        """Verify the hash chain.
+
+        allow_incomplete_tail=True is for the unlocked pre-checks only: a final line
+        without its terminating newline may be an append in progress in another
+        process, so it is ignored there instead of being reported as corruption.
+        The authoritative read in _append (under the journal lock) is always strict,
+        so a torn line left by a crashed writer still fails closed.
+        """
         entries: list[dict[str, Any]] = []
         if not self.journal.exists():
             return entries
         prev = GENESIS_HASH
         try:
-            lines = self.journal.read_text(encoding="utf-8").splitlines()
+            text = self.journal.read_text(encoding="utf-8")
+            if allow_incomplete_tail and not text.endswith("\n"):
+                text = text[: text.rfind("\n") + 1]
+            lines = text.splitlines()
             for line in lines:
                 record = json.loads(line)
                 body = {k: v for k, v in record.items() if k not in {"prev_hash", "entry_hash"}}
@@ -85,20 +104,20 @@ class PilotAuthorizationLedger:
 
     @contextmanager
     def _locked(self):
-        with (self.root / "journal.lock").open("a") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
+        # Only lock acquisition can raise InterprocessLockTimeout; it fails closed.
+        try:
+            with exclusive_file_lock(self.root / "journal.lock", timeout_seconds=self.lock_timeout_seconds):
                 yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except InterprocessLockTimeout as exc:
+            raise PilotReplayError("ledger lock timeout; nothing was appended") from exc
 
     def _append(self, body: dict[str, Any]) -> str:
         with self._locked():
-            entries = self.verify_chain()
+            entries = self._read_chain(allow_incomplete_tail=False)
             prev = entries[-1]["entry_hash"] if entries else GENESIS_HASH
             entry_hash = _entry_hash(prev, body)
             line = json.dumps({**body, "prev_hash": prev, "entry_hash": entry_hash}, sort_keys=True)
-            with self.journal.open("a", encoding="utf-8") as handle:
+            with self.journal.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(line + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -120,7 +139,7 @@ class PilotAuthorizationLedger:
         return (self.claims / f"{approval_id}.claim").exists()
 
     def revoke(self, approval_id: str, *, revoked_by: str, reason: str) -> str:
-        self.verify_chain()
+        self._read_chain(allow_incomplete_tail=True)
         self._claim(approval_id, "REVOKED")
         return self._append({
             "event": "REVOKED", "approval_id": approval_id, "revoked_by": revoked_by,
@@ -150,7 +169,7 @@ class PilotAuthorizationLedger:
             raise PilotConfigurationError("approval bound to a different process session")
         if running_release_sha != profile.release_sha:
             raise PilotConfigurationError("approval bound to a different release")
-        self.verify_chain()  # refuse to consume against a tampered ledger
+        self._read_chain(allow_incomplete_tail=True)  # refuse to consume against a tampered ledger
         self._claim(profile.approval_id, "CONSUMED")
         body = {
             "event": "CONSUMED", "approval_id": profile.approval_id,
@@ -175,7 +194,7 @@ class PilotAuthorizationLedger:
         if type(receipt) is not PilotConsumptionReceipt:
             return False
         try:
-            entries = self.verify_chain()
+            entries = self._read_chain(allow_incomplete_tail=True)
         except PilotReplayError:
             return False
         for entry in entries:

@@ -46,8 +46,12 @@ from backend.validation.canonical_readiness import CanonicalReadinessFramework
 
 @pytest.fixture
 def temp_dir():
+    original_cwd = os.getcwd()
     with tempfile.TemporaryDirectory() as td:
-        yield td
+        try:
+            yield td
+        finally:
+            os.chdir(original_cwd)
 
 
 @pytest.fixture
