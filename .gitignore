@@ -64,6 +64,7 @@ backend/runtime/*
 !backend/runtime/live_micro_pilot_governor.py
 !backend/runtime/governed_pilot_profile.py
 !backend/runtime/pilot_authorization_ledger.py
+!backend/runtime/interprocess_lock.py
 !backend/runtime/pilot_min_size_exception.py
 !backend/runtime/pilot_dual_control.py
 !backend/runtime/safety_flag_observation.py

@@ -7,14 +7,16 @@ Replay/duplicate/restart resistance:
   consumed later;
 - a crash between claim and journal append leaves the approval burned (fail closed);
 - every event is appended to a SHA-256 hash-chained JSONL journal (fsync'd);
-  a broken chain, unreadable journal or claim without journal entry fails closed.
+  a broken chain, unreadable journal or claim without journal entry fails closed;
+- journal appends are serialized by a cross-platform interprocess lock
+  (fcntl on POSIX, msvcrt on Windows; CSS-065); a lock that cannot be acquired
+  within the timeout fails closed with PilotReplayError and appends nothing.
 
 The ledger is preflight infrastructure only. It is not wired to any broker
 submission path and does not alter execution_allowed / live_trading_blocked.
 """
 from __future__ import annotations
 
-import fcntl
 import hashlib
 import json
 import os
@@ -24,6 +26,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from backend.runtime.interprocess_lock import InterprocessLockTimeout, exclusive_file_lock
 from backend.runtime.governed_pilot_profile import (
     GovernedPilotProfile,
     PilotConfigurationError,
@@ -55,6 +58,8 @@ def _entry_hash(prev_hash: str, body: dict[str, Any]) -> str:
 
 
 class PilotAuthorizationLedger:
+    lock_timeout_seconds: float = 30.0
+
     def __init__(self, root: str | os.PathLike[str]) -> None:
         self.root = Path(root)
         self.claims = self.root / "claims"
@@ -85,12 +90,12 @@ class PilotAuthorizationLedger:
 
     @contextmanager
     def _locked(self):
-        with (self.root / "journal.lock").open("a") as lock:
-            fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-            try:
+        # Only lock acquisition can raise InterprocessLockTimeout; it fails closed.
+        try:
+            with exclusive_file_lock(self.root / "journal.lock", timeout_seconds=self.lock_timeout_seconds):
                 yield
-            finally:
-                fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
+        except InterprocessLockTimeout as exc:
+            raise PilotReplayError("ledger lock timeout; nothing was appended") from exc
 
     def _append(self, body: dict[str, Any]) -> str:
         with self._locked():
@@ -98,7 +103,7 @@ class PilotAuthorizationLedger:
             prev = entries[-1]["entry_hash"] if entries else GENESIS_HASH
             entry_hash = _entry_hash(prev, body)
             line = json.dumps({**body, "prev_hash": prev, "entry_hash": entry_hash}, sort_keys=True)
-            with self.journal.open("a", encoding="utf-8") as handle:
+            with self.journal.open("a", encoding="utf-8", newline="\n") as handle:
                 handle.write(line + "\n")
                 handle.flush()
                 os.fsync(handle.fileno())
