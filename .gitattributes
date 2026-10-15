@@ -1,0 +1,2 @@
+# Keep validation tooling byte-exact (SHA-256 is verified before use).
+*.ps1 -text
