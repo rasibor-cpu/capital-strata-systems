@@ -40,7 +40,7 @@ PROFILES: dict[Trader, StrategyProfile] = {
     Trader.CONSERVATIVE: StrategyProfile(Trader.CONSERVATIVE, "CSS-CONS-V1", ("equity", "etf"), "trend_confirmed", "trailing_defensive", timedelta(days=14)),
     Trader.BALANCED: StrategyProfile(Trader.BALANCED, "CSS-BAL-V1", ("equity", "etf", "fx"), "diversified_multisignal", "risk_reward", timedelta(days=7)),
     Trader.AGGRESSIVE: StrategyProfile(Trader.AGGRESSIVE, "CSS-AGG-V1", ("equity", "fx", "crypto"), "momentum_volatility", "volatility_trailing", timedelta(hours=24)),
-    Trader.ULTRA_AGGRESSIVE: StrategyProfile(Trader.ULTRA_AGGRESSIVE, "CSS-ULTRA-V1", ("equity", "fx", "crypto", "options"), "high_conviction_breakout", "hard_stop_and_time", timedelta(hours=8), True),
+    Trader.ULTRA_AGGRESSIVE: StrategyProfile(Trader.ULTRA_AGGRESSIVE, "CSS-ULTRA-V1", ("equity", "fx", "crypto", "options"), "high_conviction_breakout", "hard_stop_and_time", timedelta(hours=24), True),
 }
 
 
@@ -57,6 +57,8 @@ class CopyMandate:
     allowed_instruments: tuple[str, ...]
     mfa_verified: bool
     revoked: bool = False
+    session_id: str | None = None
+    authorized_session_id: str | None = None
 
     def permits_new_trade(self, now: datetime, *, instrument: str) -> bool:
         """Fail closed; this is a prerequisite, never a complete trade authorization."""
@@ -64,6 +66,8 @@ class CopyMandate:
         if profile is None or self.strategy_id != profile.strategy_id:
             return False
         if now.tzinfo is None or self.authorized_at.tzinfo is None or self.expires_at.tzinfo is None:
+            return False
+        if self.trader is Trader.ULTRA_AGGRESSIVE and (not self.session_id or self.session_id != self.authorized_session_id):
             return False
         if self.revoked or not self.mfa_verified or not self.customer_id or not self.brokerage_account_id:
             return False
