@@ -53,6 +53,9 @@ def normalize_approved_cad(
         raise CadBindingError("broker mismatch")
     if not isinstance(approved_currency, str) or not approved_currency.strip():
         raise CadBindingError("currency missing")
+    # Canonical ASCII currency codes prevent CAD parity bypass via aliases.
+    if not (approved_currency.isascii() and approved_currency.isalnum() and approved_currency.isupper()):
+        raise CadBindingError("noncanonical currency code")
     if signed_order.get("currency") != approved_currency:
         raise CadBindingError("approved currency mismatch")
     notional = _decimal(approved_notional, "approved_notional")
@@ -70,8 +73,11 @@ def normalize_approved_cad(
         raise CadBindingError("invalid FX timestamp") from exc
     if observed.tzinfo is None:
         raise CadBindingError("FX timestamp must be timezone-aware")
-    clock = now or datetime.now(timezone.utc)
-    if clock.tzinfo is None:
+    # Never replace an explicitly invalid clock with wall time.
+    if now is not None and not isinstance(now, datetime):
+        raise CadBindingError("invalid explicit clock")
+    clock = datetime.now(timezone.utc) if now is None else now
+    if clock.tzinfo is None or clock.utcoffset() is None:
         raise CadBindingError("clock must be timezone-aware")
     age = clock - observed
     if age < timedelta(0) or age > timedelta(seconds=max_rate_age_seconds):
