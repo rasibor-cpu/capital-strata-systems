@@ -195,3 +195,40 @@ def test_router_exit_cycle_posts_fees_once_and_never_blocks_exits(tmp_path, monk
                            signal_id=decisions[0].signal_id, notional=[d for d in decisions
                                                                          if d.follower_user_id == "auto-1"][0].notional,
                            pnl=by_user["auto-1"]["pnl"])["status"] == "DUPLICATE_IGNORED"
+
+
+def test_http_fee_statement_and_market_data_status_require_auth(tmp_path, monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+
+    from backend.trading_profiles.api import PREFIX, create_trading_profiles_router
+    from backend.trading_profiles.service import TradingProfileService
+
+    monkeypatch.setenv("APCA_API_SECRET_KEY", "SENTINEL-SECRET-XYZ")
+    root = tmp_path / "tp"
+    engine = CopyTradeEngine(root, key_provider=lambda: KEY)
+    fees = FeeLedger(root / "commercial", terms_resolver={"auto-1": profile()}.get)
+    router = TradingRouter(engine, book=PaperBook(root), role_resolver=ROLES.get,
+                           session_resolver=lambda u: (SESSION, time.time()), system_provider=lambda: system(),
+                           fee_ledger=fees)
+    close(fees, "p1", "100", user="auto-1")
+
+    def resolver(request):
+        uid = request.headers.get("x-test-user")
+        return {"user_id": uid, "session_id": SESSION, "role": ROLES.get(uid)} if uid else None
+
+    app = FastAPI()
+    app.include_router(create_trading_profiles_router(
+        user_resolver=resolver, service_factory=lambda: TradingProfileService(root, key_provider=lambda: KEY),
+        router_factory=lambda: router))
+    c = TestClient(app)
+    assert c.get(PREFIX + "/paper/fees").status_code == 401
+    assert c.get(PREFIX + "/market-data/status").status_code == 401
+    body = c.get(PREFIX + "/paper/fees", headers={"x-test-user": "auto-1"}).json()
+    assert body["statement"]["net_fees"] == "20.00" and body["money_moved"] is False
+    other = c.get(PREFIX + "/paper/fees", headers={"x-test-user": "auto-2"}).json()
+    assert other["statement"]["net_fees"] == "0" and other["statement"]["trades"] == 0  # no cross-user leakage
+    status = c.get(PREFIX + "/market-data/status", headers={"x-test-user": "auto-1"})
+    assert status.status_code == 200 and "SENTINEL-SECRET-XYZ" not in status.text
+    names = {p["provider"]: p["status"] for p in status.json()["providers"]}
+    assert names["blocked_options"] == "BLOCKED" and names["coinbase_exchange_public"] == "READY"
