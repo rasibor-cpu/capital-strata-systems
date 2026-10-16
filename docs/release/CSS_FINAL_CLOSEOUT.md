@@ -121,7 +121,7 @@ check annotations.
 
 | Run | Commit | Linux full | Windows full | Targeted + UX (Playwright) |
 |---|---|---|---|---|
-| 38882199876 | `M1` (market data) | success | success | success |
+| 38882199876 | `1d8096f` (M1) | success | success | success |
 | 38883133131 | `60616ae` | success | in progress at writing | success |
 | 38883160557 | `8a6296e` | in progress at writing | in progress at writing | **440 passed** |
 | local (Python 3.13) | `3c13abe` (merge only) | 4,521 passed, 1 failed*, 9 skipped | — | — |
