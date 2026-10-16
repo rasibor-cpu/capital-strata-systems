@@ -49,12 +49,12 @@ Mutation checks on the closeout controls: 16 of 16 caught.
 ## 3. Remaining blockers
 | # | Blocker | Type | Status / needed |
 |---|---|---|---|
-| B1 | Calibrated real-data CSS signal producer | engineering + owner | **Engineering landed** on `css-final-integration`: replay bar source, walk-forward calibration, enablement registry, paper runner via `CssEngineSignalBridge` (`docs/governance/CSS118_B1_CALIBRATED_SIGNAL_PRODUCER.md`). **Owner:** approve live/licensed market-data source and any operational calibration artifact before non-fixture paper shadow. |
+| B1 | Calibrated real-data CSS signal producer | engineering + owner | **Canonical producer: `backend/signals` (RC1, dual-control approval).** The #123 replay runner is confined to research books. Real-data calibration has now run on Coinbase public data (see `docs/release/CSS_FINAL_CLOSEOUT.md`); no artifact has passed the gates, so nothing is routable. |
 | B2 | AntiBleed minimum 50 vs CAD 20 pilot envelope | owner | **Engineering default Option A (reject).** CAD 50 binding. See `CSS118_EFFECTIVE_RISK_LIMITS.md`. Owner must record A/B/C if changing. |
 | B3 | Anchor key custody | owner | **Production design complete** (`CSS118_B3_LEDGER_ANCHOR_CUSTODY.md`). No production key enrolled; ledgers `UNANCHORED` until authorization. |
 | B4 | Real traders: registry empty | owner | Workflows complete (propose/dual-approve/suspend). Registry stays empty until vetted traders + two SUPER_USER approvers. |
 | B5 | Legacy random-candidate operator opens | engineering | **Resolved (retired):** `LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED = False`. Random candidates never become recommendations. |
-| B6 | Launcher paper routes write-only | engineering | **Resolved (connected):** `/mobile/trade/paper` and `/operator-trade/request` dual-write audit JSONL and call `submit_governed_launcher_paper_order` → `TradingRouter` (paper only). |
+| B6 | Launcher paper routes write-only | engineering | **Reconciled in final closeout:** both routes call `submit_governed_launcher_paper_order` → `TradingRouter`, but the #123 version fabricated inputs (quantity used as notional, 1% default stop, session id = user id with created = now). Those defaults are removed: the routes now refuse unless the caller supplies notional, stop and a real sign-on session, which these auth paths do not expose. The governed order path for users remains the mobile ticket `/trade`; request-log records stay labelled `REQUEST_LOG_ONLY_NOT_AN_ORDER`. |
 | B7 | Personality vs capital governors | owner | **Governors remain binding** (documented in `CSS118_EFFECTIVE_RISK_LIMITS.md`). |
 | B8 | Live trading / CAD 20 pilot / 72h endurance | owner | Not authorized; PRODUCTION_GO=NO. |
 | B8-W | Windows identity-probe timeout under CI load | engineering | **Hardened:** 45s timeout + one fail-closed retry in `default_identity_probe`; still returns `None` on failure (no invented identity). |
