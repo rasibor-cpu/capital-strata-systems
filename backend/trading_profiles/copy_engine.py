@@ -260,9 +260,11 @@ class CopyTradeEngine:
         system: SystemContext,
         *,
         now: datetime | None = None,
+        requested_notional: float | None = None,
     ) -> CopyDecision:
+        """`requested_notional` is a user's own size for a manual order: a hard cap, never enlarged."""
         now = now or _now()
-        decision = self._evaluate(signal, follower, system, now)
+        decision = self._evaluate(signal, follower, system, now, requested_notional=requested_notional)
         self._record(signal, decision, now)
         return decision
 
@@ -277,7 +279,8 @@ class CopyTradeEngine:
         self.ledger.append(record_type, {**asdict(decision), "at_utc": now.isoformat()})
 
     def _evaluate(self, signal: SourceSignal, follower: FollowerContext, system: SystemContext, now: datetime,
-                  approved_proposal: Mapping[str, Any] | None = None) -> CopyDecision:
+                  approved_proposal: Mapping[str, Any] | None = None,
+                  requested_notional: float | None = None) -> CopyDecision:
         state: dict[str, Any] = {"operating_mode": None, "personality": None, "mandate_id": None}
 
         def reject(stage: str, reason: str, **extra: Any) -> CopyDecision:
@@ -395,6 +398,11 @@ class CopyTradeEngine:
         if mandate is not None:
             mandate_exposure = sum(p.notional for p in open_positions if p.mandate_id == mandate.mandate_id)
             caps.append(mandate.max_allocation - mandate_exposure)
+        if requested_notional is not None:
+            if (isinstance(requested_notional, bool) or not isinstance(requested_notional, (int, float))
+                    or not math.isfinite(requested_notional) or requested_notional <= 0):
+                return reject("sizing", "requested_notional_invalid", stop_distance_pct=stop_pct)
+            caps.append(float(requested_notional))  # the user's size decision is never enlarged
         if approved_proposal is not None:
             # An approval never authorizes more than the size the user approved.
             caps.append(float(approved_proposal["notional"]))
