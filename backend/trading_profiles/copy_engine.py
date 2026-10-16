@@ -34,6 +34,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import math
 import secrets
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
@@ -236,6 +237,8 @@ class CopyTradeEngine:
         self.proposals_path = self.root / "assisted_proposals.json"
         self._integration_factory = integration_factory or self._default_integration
         self._quality = TradeQualityScoringEngine()
+        # Per-instrument volatility state shared across evaluations (ExecutionGate is per call).
+        self._vol_sizers: dict[str, Any] = {}
         self._caie = CAIEScoringEngine()
 
     @staticmethod
@@ -257,9 +260,11 @@ class CopyTradeEngine:
         system: SystemContext,
         *,
         now: datetime | None = None,
+        requested_notional: float | None = None,
     ) -> CopyDecision:
+        """`requested_notional` is a user's own size for a manual order: a hard cap, never enlarged."""
         now = now or _now()
-        decision = self._evaluate(signal, follower, system, now)
+        decision = self._evaluate(signal, follower, system, now, requested_notional=requested_notional)
         self._record(signal, decision, now)
         return decision
 
@@ -274,7 +279,8 @@ class CopyTradeEngine:
         self.ledger.append(record_type, {**asdict(decision), "at_utc": now.isoformat()})
 
     def _evaluate(self, signal: SourceSignal, follower: FollowerContext, system: SystemContext, now: datetime,
-                  approved_proposal: Mapping[str, Any] | None = None) -> CopyDecision:
+                  approved_proposal: Mapping[str, Any] | None = None,
+                  requested_notional: float | None = None) -> CopyDecision:
         state: dict[str, Any] = {"operating_mode": None, "personality": None, "mandate_id": None}
 
         def reject(stage: str, reason: str, **extra: Any) -> CopyDecision:
@@ -392,6 +398,11 @@ class CopyTradeEngine:
         if mandate is not None:
             mandate_exposure = sum(p.notional for p in open_positions if p.mandate_id == mandate.mandate_id)
             caps.append(mandate.max_allocation - mandate_exposure)
+        if requested_notional is not None:
+            if (isinstance(requested_notional, bool) or not isinstance(requested_notional, (int, float))
+                    or not math.isfinite(requested_notional) or requested_notional <= 0):
+                return reject("sizing", "requested_notional_invalid", stop_distance_pct=stop_pct)
+            caps.append(float(requested_notional))  # the user's size decision is never enlarged
         if approved_proposal is not None:
             # An approval never authorizes more than the size the user approved.
             caps.append(float(approved_proposal["notional"]))
@@ -467,7 +478,9 @@ class CopyTradeEngine:
         for p in open_positions:
             counts[p.asset_class.lower()] = counts.get(p.asset_class.lower(), 0) + 1
         simulated = mode is OperatingMode.SIMULATED_TRADING
-        integration = self._integration_factory(ExecutionGate(anti_bleed_guard=self._anti_bleed_for(follower.user_id)), simulated)
+        execution_gate = ExecutionGate(anti_bleed_guard=self._anti_bleed_for(follower.user_id))
+        execution_gate._vol_sizers = self._vol_sizers
+        integration = self._integration_factory(execution_gate, simulated)
         total_cost_bps = signal.fee_bps + signal.spread_bps + signal.slippage_bps
         try:
             result = integration.execute(
@@ -493,6 +506,7 @@ class CopyTradeEngine:
                     "margin_snapshot": SimpleNamespace(buying_power=follower.buying_power,
                                                        margin_state=state_margin, margin_ratio=0.0),
                     "broker_mode": "PAPER",
+                    "price": signal.reference_price,
                 },
                 mode="PAPER",
             )
@@ -513,10 +527,29 @@ class CopyTradeEngine:
         if not permissions.simulated_fills_only:  # pragma: no cover - invariant
             raise RuntimeError("only simulated fills are supported")
 
+        # 9b. ExecutionGate sizing (volatility, drawdown) may only REDUCE the order, never enlarge it,
+        # and a reduction must not take it below AntiBleed's minimum profitable size.
+        gate_sizing = getattr(result, "execution_gate_sizing", None) or {}
+        scaled = gate_sizing.get("scaled_notional")
+        requested_notional = notional
+        if isinstance(scaled, (int, float)) and not isinstance(scaled, bool):
+            if not math.isfinite(float(scaled)) or scaled <= 0:
+                return reject("execution_gate", "gate_scaled_size_invalid_or_zero", **sized, **q, caie_score=caie_score,
+                              r14f=r14f_info, gate_results=gate_results, pipeline_status=pipeline_status)
+            reduced = int(min(notional, float(scaled)) * 100) / 100.0
+            if reduced < notional:
+                minimum = execution_gate.anti_bleed_guard.minimum_profitable_trade_size
+                if reduced < minimum:
+                    return reject("execution_gate", "anti_bleed_min_size_after_gate_reduction",
+                                  notional=reduced, stop_distance_pct=stop_pct, **q, caie_score=caie_score,
+                                  r14f=r14f_info, gate_results=gate_results, pipeline_status=pipeline_status)
+                notional = reduced
+
         # 10. Deterministic simulated fill (adverse slippage, entry fee).
         direction = 1 if side == "BUY" else -1
         fill_price = signal.reference_price * (1 + direction * signal.slippage_bps / 10_000.0)
-        fill = {"price": round(fill_price, 8), "notional": notional,
+        fill = {"price": round(fill_price, 8), "notional": notional, "requested_notional": requested_notional,
+                "gate_sizing": dict(gate_sizing),
                 "fees": round(notional * signal.fee_bps / 10_000.0, 2), "source": "SIMULATED_PAPER_FILL",
                 "stop_price": round(fill_price * (1 - direction * stop_pct / 100.0), 8),
                 "take_profit_price": round(fill_price * (1 + direction * stop_pct / 100.0 * policy.take_profit_r_multiple), 8)}

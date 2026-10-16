@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.governance.css_unified_trade_gate import ENGINE_MODE_PROBABILITY_THRESHOLD
 from backend.runtime.environment_bootstrap import bootstrap_broker_environment
@@ -906,9 +906,47 @@ async def trade_ticket_submit(request: Request):
         return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status="error"), status_code=403)
 
     form = await _read_form(request)
-    result = execute_mobile_trade_ticket(session["user_ctx"], form)
+    result, http_status = _governed_mobile_ticket(request, session, form)
     status = "success" if result.get("ok") else "error"
-    return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status))
+    return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status), status_code=http_status)
+
+
+def _governed_mobile_ticket(request: Request, session: Dict[str, Any], form: Dict[str, str]) -> tuple[Dict[str, Any], int]:
+    """CSS-118: the mobile ticket is a manual paper order through the governed router.
+
+    The user decides symbol, side, size and stop; CSS supplies its own market assessment and
+    enforces consent, personality, capital governors, R14F/R7, ExecutionGate and AntiBleed.
+    Live-armed tickets are refused (live trading is not authorized); the legacy executor
+    `execute_mobile_trade_ticket` is no longer reachable from any route.
+    """
+    user_ctx = session["user_ctx"]
+    controls = load_mobile_controls()
+    mode = str(controls.get("mobile_trading_mode") or "MOBILE_READ_ONLY")
+    broker = str(form.get("broker") or "CSS_PAPER").strip().upper()
+    base = {"live_order_sent": False, "broker": broker, "mobile_trading_mode": mode}
+    if not _can_submit_trade(user_ctx):
+        result, code = {"ok": False, "status": "MOBILE_AUTHORITY_DENIED", **base}, 403
+    elif mode == "MOBILE_READ_ONLY":
+        result, code = {"ok": False, "status": "MOBILE_ORDERS_DISABLED", **base}, 403
+    elif broker != "CSS_PAPER":  # any broker ticket (live or practice) bypasses the governed paper path
+        result, code = {"ok": False, "status": "LIVE_TICKET_DISABLED_CSS118",
+                        "error": "Broker tickets are disabled: only governed CSS paper orders are available.", **base}, 403
+    else:
+        token = request.cookies.get(SESSION_COOKIE) or ""
+        order = {"symbol": form.get("symbol", ""), "asset_class": form.get("asset_class", ""),
+                 "side": form.get("side", ""), "notional": form.get("amount"),
+                 "stop_distance_pct": form.get("stop_distance_pct") or "1.0",
+                 "client_order_id": form.get("client_order_id", "")}
+        decision = _trading_router().submit_manual_order(
+            str(user_ctx.get("user_id")), (_session_hash(token), float(session.get("created") or 0.0)), order)
+        ok = decision.outcome in {"COPIED", "SIMULATED", "PROPOSED"}
+        result = {"ok": ok, "status": f"CSS_GOVERNED_{decision.outcome}", **base,
+                  "decision": {"outcome": decision.outcome, "stage": decision.stage, "reason": decision.reason,
+                               "notional": decision.notional, "proposal_id": decision.proposal_id,
+                               "pipeline_status": decision.pipeline_status}}
+        code = 200
+    _record_mobile_event({"event_type": "mobile_governed_ticket", "user_id": str(user_ctx.get("user_id")), **result})
+    return result, code
 
 
 @app.get("/users", response_class=HTMLResponse)
@@ -3522,6 +3560,11 @@ def _trade_status_headline(code: str) -> str:
         "OANDA_ORDER_FAILED": "OANDA order failed",
         "OANDA_NOT_CONFIGURED": "OANDA credentials not configured",
         "LIVE_BROKER_NOT_SUPPORTED": "Live broker not supported for this ticket",
+        "LIVE_TICKET_DISABLED_CSS118": "Broker tickets are disabled (paper only)",
+        "CSS_GOVERNED_PROPOSED": "Proposal created: approve it to open the paper position",
+        "CSS_GOVERNED_COPIED": "Paper order filled through CSS gates",
+        "CSS_GOVERNED_SIMULATED": "Simulated order filled",
+        "CSS_GOVERNED_REJECTED": "Order rejected by CSS safety gates",
     }
     return labels.get(code, code.replace("_", " ").title())
 
@@ -3563,7 +3606,7 @@ def _trade_ticket_page(
         trade_form_markup = f"""
           <section class="form-panel trade-form-panel" aria-label="Mobile trade ticket form">
             <h2>Submit Trade Ticket</h2>
-            <p class="muted">Tickets use the current mobile system mode. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
+            <p class="muted">Tickets are governed CSS paper orders: you choose the instrument, side, size and stop; CSS applies its market assessment and every safety limit. Broker (live) tickets are disabled.</p>
             <form method="post" action="/trade" autocomplete="off">
               <label for="mode_display">Mobile Mode</label>
               <input id="mode_display" value="{html.escape(system_mode.upper())}" disabled>
@@ -3593,8 +3636,11 @@ def _trade_ticket_page(
                 <option value="SELL">Sell</option>
               </select>
 
-              <label for="amount">USD Amount / Notional</label>
+              <label for="amount">Notional (account currency)</label>
               <input id="amount" name="amount" inputmode="decimal" value="{DEFAULT_ORDER_LIMIT_CONFIG.live_order_default_notional_usd}" required>
+
+              <label for="stop_distance_pct">Stop distance (%)</label>
+              <input id="stop_distance_pct" name="stop_distance_pct" inputmode="decimal" value="1.0">
 
               <label for="qty">Quantity / Units</label>
               <input id="qty" name="qty" inputmode="decimal" value="1">
@@ -4099,6 +4145,16 @@ def _build_mobile_ticket(
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Parse a whole number from a query/form value; anything else returns `default`."""
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(str(value).strip())
     except (TypeError, ValueError):
         return default
 

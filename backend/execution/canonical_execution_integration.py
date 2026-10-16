@@ -31,6 +31,13 @@ class CanonicalExecutionResult:
     execution_decision: dict[str, Any]
     execution_result: dict[str, Any]
     profit_protection_governance: dict[str, Any] | None = None
+    # ExecutionGate sizing outputs (volatility, drawdown). Advisory to callers that size
+    # their own orders; a caller may only use them to REDUCE size, never to enlarge it.
+    execution_gate_sizing: dict[str, Any] | None = None
+
+
+_GATE_SIZING_KEYS = ("vol_scaled_notional", "scaled_notional", "vol_size_status", "vol_mult",
+                     "vol_upsizing_suppressed")
 
 
 class CanonicalExecutionIntegration:
@@ -111,8 +118,12 @@ class CanonicalExecutionIntegration:
             )
         }
 
+        execution_gate_sizing: dict[str, Any] | None = None
         if trade_gate_decision.approved:
             engine_gate_decision = self.execution_gate.evaluate_trade(**dict(execution_context))
+            gate_debug = engine_gate_decision.get("debug") if isinstance(engine_gate_decision, Mapping) else None
+            if isinstance(gate_debug, Mapping):
+                execution_gate_sizing = {k: gate_debug[k] for k in _GATE_SIZING_KEYS if k in gate_debug}
             engine_gate_final = str((engine_gate_decision.get("decision") or {}).get("final") or "BLOCK").upper()
             if engine_gate_final not in {"ALLOW", "BLOCK"}:
                 engine_gate_final = "BLOCK"
@@ -176,6 +187,7 @@ class CanonicalExecutionIntegration:
             execution_decision=execution_decision.as_dict(),
             execution_result=execution_result,
             profit_protection_governance=profit_protection_governance,
+            execution_gate_sizing=execution_gate_sizing,
         )
 
     def _evaluate_profit_protection_governance(

@@ -24,6 +24,7 @@ role, or an unreadable safety-flag provider rejects the follower with a recorded
 """
 from __future__ import annotations
 
+import math
 import re
 import secrets
 from dataclasses import asdict, dataclass
@@ -47,6 +48,7 @@ from backend.trading_profiles.exits import CopiedPosition, evaluate_exit, realiz
 from backend.trading_profiles.limits import LimitsError, effective_policy
 from backend.trading_profiles.operating_modes import OperatingMode
 from backend.trading_profiles.risk_personalities import RiskPersonality, policy_for
+from backend.trading_profiles.market_assessment import MarketAssessmentStore
 from backend.trading_profiles.signal_feed import SignalFeed, SignalFeedError
 
 _CLIENT_ID = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
@@ -181,6 +183,8 @@ class TradingRouter:
         self.session_resolver = session_resolver
         self.system_provider = system_provider
         self.feed = feed or SignalFeed(engine.root, engine.trader_registry)
+        # CSS's own market view for manual orders, recorded from CSS engine signals (C3).
+        self.assessments = MarketAssessmentStore(engine.root)
         self.assessment_provider = assessment_provider
 
     # -- context (fail closed) ---------------------------------------------------
@@ -215,13 +219,13 @@ class TradingRouter:
         return decision
 
     def _decide(self, signal: SourceSignal, user_id: str, now: datetime, system: SystemContext | None,
-                *, session: tuple[str, float] | None = None) -> CopyDecision:
+                *, session: tuple[str, float] | None = None, requested_notional: float | None = None) -> CopyDecision:
         if system is None:
             return self._reject(signal, user_id, "safety_flags_unavailable", now)
         follower = self._follower(user_id, now, session=session)
         if isinstance(follower, str):
             return self._reject(signal, user_id, follower, now)
-        decision = self.engine.evaluate(signal, follower, system, now=now)
+        decision = self.engine.evaluate(signal, follower, system, now=now, requested_notional=requested_notional)
         self._book_fill(decision, signal, now)
         return decision
 
@@ -261,6 +265,7 @@ class TradingRouter:
         now = now or _now()
         if signal.trader_id != AUTONOMOUS_SOURCE_ID:
             return RouteResult(signal.signal_id, False, "not_a_css_engine_signal")
+        self.assessments.record(signal, now=now)
         system = self._system()
         modes = {OperatingMode.CSS_AUTONOMOUS_TRADING, OperatingMode.CSS_ASSISTED_TRADING, OperatingMode.SIMULATED_TRADING}
         decisions = tuple(self._decide(signal, uid, now, system) for uid, _ in self._users_in(modes))
@@ -284,7 +289,13 @@ class TradingRouter:
 
     def submit_manual_order(self, user_id: str, session: tuple[str, float], order: Mapping[str, Any], *,
                             now: datetime | None = None) -> CopyDecision:
-        """The user's own paper order. The gates still need CSS's market assessment; none -> rejected."""
+        """The user's own paper order: the user decides instrument, side, size and stop.
+
+        CSS supplies only its fresh market assessment for that instrument and side (price,
+        probability, expected move, costs) and enforces every platform limit; the user's size is
+        a cap that CSS may reduce but never enlarge. No fresh assessment -> rejected. In
+        CSS-Assisted mode the order becomes a proposal the user must confirm individually.
+        """
         now = now or _now()
         symbol = str(order.get("symbol") or "").strip()[:32]
         asset = str(order.get("asset_class") or "").strip().upper()
@@ -293,26 +304,37 @@ class TradingRouter:
         signal_id = "man-" + (client_id if _CLIENT_ID.match(client_id) else secrets.token_hex(8))
         base = dict(signal_id=signal_id, trader_id=MANUAL_ORDER_PREFIX + user_id, symbol=symbol or "?",
                     asset_class=asset or "?", side=side or "?")
+
+        def stub_reject(reason: str) -> CopyDecision:
+            stub = SourceSignal(**base, reference_price=1.0, probability=0.0, signal_score=0.0, confidence=0.0,
+                                expected_move_bps=0.0, fee_bps=0.0, spread_bps=0.0, slippage_bps=0.0,
+                                stop_distance_pct=1.0, risk_reward=0.0)
+            return self._reject(stub, user_id, reason, now)
+
         try:
-            assessment = self.assessment_provider(symbol, asset, side) if self.assessment_provider else None
-        except Exception:
-            assessment = None
-        try:
-            price = float(order["reference_price"])
+            requested = float(order["notional"])
             stop = float(order["stop_distance_pct"])
         except (KeyError, TypeError, ValueError):
-            price = stop = 0.0
+            return stub_reject("manual_order_requires_notional_and_stop")
+        if not (math.isfinite(requested) and requested > 0 and math.isfinite(stop) and stop > 0):
+            return stub_reject("manual_order_requires_notional_and_stop")
+        try:
+            if self.assessment_provider is not None:
+                assessment = self.assessment_provider(symbol, asset, side)
+            else:
+                assessment = self.assessments.get(symbol, asset, side, now=now)
+        except Exception:
+            assessment = None
         if not assessment:
-            stub = SourceSignal(**base, reference_price=price or 1.0, probability=0.0, signal_score=0.0, confidence=0.0,
-                                expected_move_bps=0.0, fee_bps=0.0, spread_bps=0.0, slippage_bps=0.0,
-                                stop_distance_pct=stop or 1.0, risk_reward=0.0)
-            return self._reject(stub, user_id, "manual_order_requires_css_market_assessment", now)
-        allowed = {"probability", "signal_score", "confidence", "expected_move_bps", "fee_bps", "spread_bps",
-                   "slippage_bps", "risk_reward", "market_regime", "strategy_score", "replay_confidence",
+            return stub_reject("manual_order_requires_css_market_assessment")
+        allowed = {"reference_price", "probability", "signal_score", "confidence", "expected_move_bps", "fee_bps",
+                   "spread_bps", "slippage_bps", "risk_reward", "market_regime", "strategy_score", "replay_confidence",
                    "liquidity_score", "regime_alignment", "risk_score", "volatility_state", "regime_persistence"}
-        signal = SourceSignal(**base, reference_price=price, stop_distance_pct=stop,
-                              **{k: v for k, v in assessment.items() if k in allowed})
-        return self._decide(signal, user_id, now, self._system(), session=session)
+        try:
+            signal = SourceSignal(**base, stop_distance_pct=stop, **{k: v for k, v in assessment.items() if k in allowed})
+        except TypeError:
+            return stub_reject("manual_order_requires_css_market_assessment")
+        return self._decide(signal, user_id, now, self._system(), session=session, requested_notional=requested)
 
     # -- protective exits (never gated by consent, mandate or pause) ----------------------
     def run_exit_cycle(self, marks: Mapping[str, float], *, now: datetime | None = None,

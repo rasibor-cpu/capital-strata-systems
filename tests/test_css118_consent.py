@@ -32,10 +32,9 @@ from backend.trading_profiles.preferences import LEGACY_SCHEMA_V1, PreferencesEr
 from backend.trading_profiles.risk_personalities import RiskPersonality, policy_for
 from backend.trading_profiles.service import TradingProfileService
 
-OWNER_ACK = ("I confirm that I have read and understood the CSS User Operating Manual, Trading Assumptions and Risk "
-             "Disclosure Agreement. I understand that trading involves the risk of losing some or all of my invested "
-             "capital, that profits are not guaranteed, and that I bear the investment risks associated with my trading "
-             "decisions and authorized CSS trading activities.")
+OWNER_ACK = ("I understand that trading involves substantial risk, including the possible loss of my invested "
+             "capital. I accept responsibility for the trading decisions and authorizations I make, subject to "
+             "applicable law.")
 
 
 @pytest.fixture(autouse=True)
@@ -93,8 +92,8 @@ def _reissue(manual_path: Path, manifest_path: Path, *, version: str, material: 
 def test_manual_is_controlled_complete_and_uses_owner_acknowledgement():
     manual = load_manual()
     assert ACKNOWLEDGEMENT_TEXT == OWNER_ACK
-    assert manual.version == "1.1.0" and manual.history[-1]["material"] is True
-    assert [h["version"] for h in manual.history] == ["1.0.0", "1.1.0"]
+    assert manual.version == "1.2.0" and manual.history[-1]["material"] is True
+    assert [h["version"] for h in manual.history] == ["1.0.0", "1.1.0", "1.2.0"]
     assert len(manual.pages) == 12
     text = manual.text
     for required in ("Simulated Trading", "CSS-Assisted Trading", "Copy a CSS Trader", "CSS Autonomous Trading",
@@ -237,7 +236,7 @@ def test_restart_persistence_receipts_and_history(tmp_path):
     assert restarted.consent.verify_active("u1") == (True, "consent_valid")
     receipts = restarted.consent.receipts("u1")
     assert [r["receipt_id"] for r in receipts] == [receipt["receipt_id"]]
-    assert receipts[0]["document"]["version"] == "1.1.0" and receipts[0]["pages_reviewed"] == 12
+    assert receipts[0]["document"]["version"] == "1.2.0" and receipts[0]["pages_reviewed"] == 12
     assert restarted.consent.receipts("someone-else") == []
 
 
@@ -306,7 +305,7 @@ def test_review_restarts_if_manual_changes_mid_review(tmp_path):
     review_all_pages(engine.consent, "u1", review)
     _reissue(manual_path, manifest_path, version="9.0.0", material=True, append="Changed.")
     with pytest.raises(ConsentError, match="manual_version_mismatch|manual_changed_restart_review"):
-        _accept(engine, change, review, manual_version="1.1.0")
+        _accept(engine, change, review, manual_version="1.2.0")
     manual = engine.consent.manual_provider()
     with pytest.raises(ConsentError, match="manual_changed_restart_review"):
         _accept(engine, change, review, manual_version=manual.version, manual_sha256=manual.sha256)

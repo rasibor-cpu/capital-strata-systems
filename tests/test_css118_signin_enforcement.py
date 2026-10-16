@@ -112,12 +112,24 @@ def test_trade_ticket_blocked_without_acceptance(env):
     assert env["tickets"] == []  # never reached the ticket executor
 
 
-def test_trade_ticket_reaches_executor_only_with_acceptance(env):
+def test_trade_ticket_with_acceptance_goes_to_the_governed_router_not_the_legacy_executor(env, monkeypatch):
+    calls = []
+
+    class _Router:
+        def submit_manual_order(self, user_id, session, order, now=None):
+            calls.append((user_id, order))
+            from types import SimpleNamespace
+            return SimpleNamespace(outcome="SIMULATED", stage="filled", reason="all_gates_passed", notional=300.0,
+                                   proposal_id=None, pipeline_status="simulated_not_routed")
+    monkeypatch.setattr(mobile_app, "_trading_router", lambda: _Router())
+    env["controls"].write_text(json.dumps({"mobile_trading_mode": "MOBILE_PAPER_TRADING", "engine_mode": "SAFE"}))
     client = env["client"]
     _accept(env["service"], "accepted-user")
     _login(client, "accepted-user")
-    client.post("/trade", data={"symbol": "EUR/USD", "side": "BUY", "quantity": "1"})
-    assert len(env["tickets"]) == 1  # the existing ticket gates then decide (stubbed here)
+    r = client.post("/trade", data={"symbol": "EUR/USD", "asset_class": "FX", "side": "BUY", "amount": "300",
+                                    "broker": "CSS_PAPER"})
+    assert r.status_code == 200 and env["tickets"] == []  # legacy executor never reached
+    assert calls and calls[0][0] == "accepted-user" and calls[0][1]["notional"] == "300"
 
 
 # ------------------------------------------------------------------ /controls
