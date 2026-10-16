@@ -12,6 +12,7 @@ on:
       - claude/css118-trading-profiles
       - claude/css118-closeout
       - grok/css-129-h2-questrade-refresh-hardening
+      - claude/css-h2-lowfindings-followup
 
 permissions:
   contents: read
