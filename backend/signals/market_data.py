@@ -588,6 +588,8 @@ def provider_matrix(env: Mapping[str, str] | None = None) -> list[dict[str, Any]
     ok_binance, why_binance = binance_eligibility(env.get("CSS_OPERATING_COUNTRY", ""))
     has_alpaca = bool(env.get("APCA_API_KEY_ID") and env.get("APCA_API_SECRET_KEY"))
     has_oanda = bool(env.get("OANDA_PRACTICE_TOKEN"))
+    # Questrade: presence of an operator-authorized OAuth refresh-token reference only (never the value).
+    has_questrade = bool(env.get("QUESTRADE_REFRESH_TOKEN") or env.get("QUESTRADE_SECRET_STORE_PROVIDER"))
     return [
         {"provider": "coinbase_exchange_public", "asset_class": "CRYPTO", "classification": LIVE,
          "credentials": "none", "status": "READY", "reason": "public endpoint"},
@@ -601,6 +603,10 @@ def provider_matrix(env: Mapping[str, str] | None = None) -> list[dict[str, Any]
         {"provider": "oanda_practice", "asset_class": "FX", "classification": LIVE,
          "credentials": "OANDA_PRACTICE_TOKEN",
          "status": "READY" if has_oanda else "BLOCKED", "reason": "token present" if has_oanda else "oanda_practice_token_missing"},
+        {"provider": "questrade_api", "asset_class": "EQUITY", "classification": "LIVE_IF_ENTITLED_ELSE_DELAYED",
+         "credentials": "Questrade OAuth (operator-authorized refresh token)",
+         "status": "READY" if has_questrade else "BLOCKED",
+         "reason": "token reference present" if has_questrade else "questrade_oauth_authorization_required"},
         {"provider": OPTIONS_FEED.source, "asset_class": "OPTIONS", "classification": "BLOCKED", "credentials": "n/a",
          "status": "BLOCKED", "reason": OPTIONS_FEED.reason},
         {"provider": FUTURES_FEED.source, "asset_class": "FUTURES", "classification": "BLOCKED", "credentials": "n/a",
