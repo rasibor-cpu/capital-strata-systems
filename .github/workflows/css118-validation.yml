@@ -11,6 +11,7 @@ on:
     branches:
       - claude/css118-trading-profiles
       - claude/css118-closeout
+      - claude/css-rc1-signal-pipeline
 
 permissions:
   contents: read
@@ -98,7 +99,7 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD > evidence/head_sha.txt
           python -m pytest -q -p no:cacheprovider -rfEs --junitxml=evidence/junit-css118.xml \
-            tests/test_css118_*.py tests/test_r14f_gate_parity.py \
+            tests/test_css118_*.py tests/test_css_rc1_*.py tests/test_r14f_gate_parity.py \
             tests/engine/test_execution_gate_volatility_sizing.py tests/test_mobile_audit_replay_limit.py 2>&1 | tee evidence/pytest-css118.log
       - name: SHA-256 manifest
         if: always()
