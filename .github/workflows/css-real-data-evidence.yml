@@ -72,6 +72,15 @@ jobs:
             python tools/css_real_data_evidence.py --artifacts evidence/calibration --instrument $inst --source coinbase \
               --out evidence/producer_cycle_$inst.json 2>&1 | tee -a evidence/producer.log
           done
+      - name: "Summary annotations: providers"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence matrix
+      - name: "Summary annotations: calibration"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence calibration
+      - name: "Summary annotations: producer"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence producer
       - name: SHA-256 manifest
         if: always()
         run: cd evidence && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt; tail -n 40 SHA256SUMS.txt
