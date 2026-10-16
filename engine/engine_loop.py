@@ -522,6 +522,23 @@ class EngineLoop:
             self.prev_price_by_instrument[instrument] = float(price)
             return
 
+        # 4b) Optional CSS-118 bridge: publish the engine's view to the governed paper router.
+        # Default None (no behaviour change). The sink can never affect this loop's own trading.
+        sink = getattr(self, "css_signal_sink", None)
+        if sink is not None:
+            try:
+                sink({
+                    "instrument": instrument, "price": float(price), "step": self.current_step,
+                    "direction": str(signal.direction).upper(), "strength": signal_strength,
+                    "stop_distance_fraction": float(DEFAULT_STOP_DISTANCE_PCT),
+                    "fee_bps": float(ANTI_BLEED_FEE_BPS), "spread_bps": float(ANTI_BLEED_SPREAD_BPS),
+                    "slippage_bps": float(ANTI_BLEED_SLIPPAGE_BPS),
+                    "regime_persistence": float(DEFAULT_REGIME_PERSISTENCE),
+                    "regime_decision": dict(regime_decision),
+                })
+            except Exception:  # pragma: no cover - defensive
+                LOGGER.exception("css_signal_sink failed; engine loop continues unaffected")
+
         # 5) ExecutionGate (instrument-level governance + sizing)
         margin_snapshot = self.margin_engine.calculate(
             required_margin=0.0,
