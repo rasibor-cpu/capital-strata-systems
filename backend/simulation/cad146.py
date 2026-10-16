@@ -182,8 +182,11 @@ def build_track(name: str, root: Path, *, approvals: Any, operator: str, now: da
         # R7 requires a sign-on within SESSION_TIMEOUT_SECONDS (1 h). The simulation honours it: the
         # session is the operator's last explicit attestation (Cad146Simulation.attest_operator).
         session_resolver=lambda u: (SIM_SESSION, created()) if u == SIM_USER else None,
-        system_provider=lambda: SystemContext(engine_mode="SAFE", safety_flags=dict(SAFE_FLAGS),
-                                              mobile_controls={}, env={}),
+        # Same kill-switch inputs as the canonical router (dashboard.mobile.mobile_app): an engaged
+        # kill switch halts simulated entries too.
+        system_provider=lambda: SystemContext(engine_mode="SAFE", safety_flags=dict(SAFE_FLAGS), mobile_controls={},
+                                              env={k: v for k, v in os.environ.items()
+                                                   if k in {"CSS_LIVE_ORDER_KILL_SWITCH", "REA_KILL_SWITCH"}}),
     )
     if engine.preferences.get(SIM_USER).active is None:
         _activate(engine, operator=operator, now=now, presenter=presenter)
@@ -286,8 +289,13 @@ class Cad146Simulation:
                 track.processed.add(obs_key)
                 track.save()
         for track in (self.track_a, self.track_b):
+            symbols = {p.position_id: p.symbol for p in track.router.book.positions(SIM_USER)}
             for closed in track.router.run_exit_cycle(marks, now=now):
-                self._write({"type": "EXIT", "track": track.name, **closed, "at_utc": now.isoformat()})
+                self._write({"type": "EXIT", "track": track.name, "symbol": symbols.get(closed["position_id"]),
+                             **closed, "at_utc": now.isoformat()})
+            acct = track.router.book.account(SIM_USER, now)
+            self._write({"type": "EQUITY", "track": track.name, "equity_cad": acct["equity"],
+                         "open_positions": len(track.router.book.positions(SIM_USER)), "at_utc": now.isoformat()})
         self._write({"type": "HEARTBEAT", **summary})
         return summary
 
@@ -333,6 +341,10 @@ class Cad146Simulation:
                "outage_count": sum(1 for e in events if e["type"] == "OUTAGE"),
                "cycles": sum(1 for e in events if e["type"] == "HEARTBEAT"),
                "baseline_no_trade_equity_cad": meta["starting_equity_cad"], "tracks": {}}
+        last_close = {}
+        for e in events:
+            if e["type"] == "OBSERVATION":
+                last_close[e["instrument"]] = e["last_close"]
         for track in (self.track_a, self.track_b):
             acct = track.router.book.account(SIM_USER, now)
             positions = track.router.book.positions(SIM_USER)
@@ -356,7 +368,11 @@ class Cad146Simulation:
                 "return_pct": round((equity / meta["starting_equity_cad"] - 1) * 100, 4),
                 "realized_pnl_cad": acct["realized_pnl"], "fees_cad": acct.get("fees", 0.0),
                 "equity_peak_cad": acct["equity_peak"],
-                "max_drawdown_cad": round(float(acct["equity_peak"]) - min(equity, float(acct["equity_peak"])), 2),
+                "max_drawdown_cad": _max_drawdown([meta["starting_equity_cad"]] + [
+                    e["equity_cad"] for e in events if e["type"] == "EQUITY" and e["track"] == track.name] + [equity]),
+                "unrealized_pnl_cad": round(sum(_unrealized(p, last_close.get(p.symbol)) for p in positions), 2),
+                "capital_utilization_pct": round(sum(p.notional for p in positions) / equity * 100, 4) if equity else None,
+                "by_instrument": _by_instrument(exits),
                 "cash_cad": round(equity - sum(p.notional for p in positions), 2),
                 "open_positions": [{"symbol": p.symbol, "side": p.side, "notional_cad": p.notional,
                                     "entry_price": p.entry_price} for p in positions],
@@ -367,3 +383,28 @@ class Cad146Simulation:
                 "reasons": dict(sorted(reasons.items(), key=lambda kv: -kv[1])),
             }
         return out
+
+
+def _max_drawdown(path: Sequence[float]) -> float:
+    peak, worst = float("-inf"), 0.0
+    for x in path:
+        peak = max(peak, float(x))
+        worst = max(worst, peak - float(x))
+    return round(worst, 2)
+
+
+def _unrealized(position: Any, mark: float | None) -> float:
+    if mark is None or not position.entry_price:
+        return 0.0
+    direction = 1 if position.side == "BUY" else -1
+    return direction * (mark - position.entry_price) / position.entry_price * position.notional
+
+
+def _by_instrument(exits: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, Any]]:
+    out: dict[str, dict[str, Any]] = {}
+    for e in exits:
+        row = out.setdefault(str(e.get("symbol")), {"closed": 0, "wins": 0, "pnl_cad": 0.0})
+        row["closed"] += 1
+        row["wins"] += int((e.get("pnl") or 0) > 0)
+        row["pnl_cad"] = round(row["pnl_cad"] + float(e.get("pnl") or 0), 2)
+    return out

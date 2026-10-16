@@ -56,7 +56,8 @@ def test_user_size_is_reduced_by_platform_limits_but_never_enlarged(w):
     _assess(router)  # before activation, so sim-1 does not also take the CSS signal itself
     activate(engine.consent, "sim-1", "Simulated Trading", None)
     big = router.submit_manual_order("sim-1", sess, _order(notional=50_000.0, client_order_id="c2"), now=NOW)
-    assert big.notional == 500.0  # capital governor 5% of 10,000
+    from backend.trading_profiles.router import DEFAULT_PAPER_EQUITY_CAD
+    assert big.notional == 0.05 * DEFAULT_PAPER_EQUITY_CAD < 50_000.0  # capital governor: 5% of default equity
     activate(engine.consent, "sim-2", "Simulated Trading", None)  # separate account: AntiBleed cooldown is per follower
     small = router.submit_manual_order("sim-2", sess, _order(notional=120.0, client_order_id="c3"), now=NOW)
     assert small.notional == 120.0

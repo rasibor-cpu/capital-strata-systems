@@ -28,6 +28,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from backend.signals.market_data import CoinbaseQuotes, build_provider, resilient_http  # noqa: E402
 from backend.signals.research import DEFAULT_COSTS  # noqa: E402
 from backend.simulation.cad146 import Cad146Simulation  # noqa: E402
+from backend.simulation.capital_profiles import starting_capital, reference_comparison  # noqa: E402
 
 DEFAULT_APPROVALS_ROOT = Path("artifacts") / "trading_profiles"  # operational ledger, read-only use
 
@@ -46,12 +47,18 @@ def _sim(args, presenter=None) -> Cad146Simulation:
     return Cad146Simulation(args.root, artifacts=_load_artifacts(args.artifacts) if getattr(args, "artifacts", None) else [],
                             costs=DEFAULT_COSTS, operational_approvals_root=args.approvals_root,
                             operator=args.operator, presenter=presenter,
-                            quote_provider=CoinbaseQuotes(resilient_http()))
+                            quote_provider=CoinbaseQuotes(resilient_http()),
+                            starting_equity=starting_capital(profile=args.capital_profile,
+                                custom_cad=args.custom_capital_cad))
 
 
 def cmd_run(args) -> int:
     sim = _sim(args, presenter=_terminal_presenter)
     meta = json.loads(sim.meta_path.read_text(encoding="utf-8"))
+    requested = starting_capital(profile=args.capital_profile, custom_cad=args.custom_capital_cad)
+    if float(meta["starting_equity_cad"]) != requested:
+        raise SystemExit(f"refused: {args.root} was initialised with CAD {meta['starting_equity_cad']:.2f}; "
+                         f"requested CAD {requested:.2f}. Use a new --root for a new scenario (no silent reset).")
     end = datetime.fromisoformat(meta["started_utc"]) + timedelta(hours=args.hours)
     provider = build_provider(args.source)
     instruments = sorted({(a["instrument"], int(a["granularity_s"])) for a in sim.artifacts}) or \
@@ -74,6 +81,14 @@ def cmd_attest(args) -> int:
 
 def cmd_report(args) -> int:
     rep = _sim(args).report()
+    initial = rep["run"]["starting_equity_cad"]
+    try:
+        rep["reference_comparison"] = {
+            name: reference_comparison(track["net_pnl_cad"], simulation_capital_cad=initial)
+            for name, track in rep["tracks"].items()
+        }
+    except ValueError as exc:  # e.g. a legacy CAD 146 run: nothing to normalise
+        rep["reference_comparison"] = {"unavailable": str(exc)}
     text = json.dumps(rep, indent=2, sort_keys=True, default=str)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
@@ -90,6 +105,8 @@ def main(argv=None) -> int:
         p.add_argument("--operator", required=True if name != "report" else False, default="report-reader")
         p.add_argument("--approvals-root", default=str(DEFAULT_APPROVALS_ROOT))
         p.add_argument("--artifacts", default="artifacts/calibration")
+        p.add_argument("--capital-profile", choices=("engineering", "standard", "small", "intermediate", "advanced", "custom"), default="engineering")
+        p.add_argument("--custom-capital-cad", default=None)
         if name == "run":
             p.add_argument("--hours", type=float, default=48.0)
             p.add_argument("--poll-seconds", type=float, default=300.0)
