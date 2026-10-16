@@ -108,6 +108,12 @@ class InterProcessFileLock:
         if fd is None:
             return
         try:
+            try:
+                # Clear the owner metadata while still holding the lock, so that a non-empty lock
+                # file at the next acquire really means "previous holder died holding it".
+                os.ftruncate(fd, 0)
+            except OSError:
+                pass  # metadata is informational only
             _unlock(fd)
         finally:
             os.close(fd)

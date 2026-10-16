@@ -106,7 +106,10 @@ class QuestradeBoundedOAuthRefresh:
         except Exception:
             observed = None
         thread_lock = thread_lock_for(self._key)
-        if not thread_lock.acquire(timeout=self._lock_timeout if self._lock_timeout > 0 else -1):
+        # 0 means "do not wait" for both locks (the file lock already fails at once with 0).
+        acquired = (thread_lock.acquire(timeout=self._lock_timeout) if self._lock_timeout > 0
+                    else thread_lock.acquire(blocking=False))
+        if not acquired:
             return _failure("QUESTRADE_REFRESH_LOCK_TIMEOUT", attempted=False)
         try:
             try:

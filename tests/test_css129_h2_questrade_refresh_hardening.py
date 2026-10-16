@@ -344,6 +344,42 @@ def test_stale_lock_file_left_by_dead_owner_is_reclaimed(env):
     assert _ref(_store(token_path), server).refresh()["success"]
 
 
+def test_clean_release_is_not_reported_as_stale_reclaim(env):
+    lock_path = _store(env[0]).lock_path()
+    first = InterProcessFileLock(lock_path, timeout_seconds=1)
+    with first:
+        pass
+    second = InterProcessFileLock(lock_path, timeout_seconds=1)
+    with second:
+        assert second.reclaimed_stale is False  # previous holder released cleanly
+    assert lock_path.stat().st_size == 0
+
+
+def test_lock_from_crashed_holder_is_reported_as_stale_reclaim(env):
+    lock_path = _store(env[0]).lock_path()
+    p = mp.get_context("spawn").Process(target=_die_holding_lock, args=(str(lock_path),))
+    p.start()
+    p.join(60)
+    assert p.exitcode == 17
+    lock = InterProcessFileLock(lock_path, timeout_seconds=5)
+    with lock:
+        assert lock.reclaimed_stale is True
+
+
+def test_zero_lock_timeout_never_waits_on_either_lock(env):
+    token_path, server = env
+    store = _store(token_path)
+    lock = thread_lock_for(coordination_key(store))
+    lock.acquire()
+    started = time.monotonic()
+    try:
+        out = _ref(store, server, lock_timeout_seconds=0).refresh()
+    finally:
+        lock.release()
+    assert time.monotonic() - started < 1.0  # previously blocked forever on the thread lock
+    assert out["reason"] == "QUESTRADE_REFRESH_LOCK_TIMEOUT" and server.state()["posts"] == 0
+
+
 def _die_holding_lock(lock_path: str) -> None:
     InterProcessFileLock(Path(lock_path), timeout_seconds=5).acquire()
     os._exit(17)  # crash without releasing
