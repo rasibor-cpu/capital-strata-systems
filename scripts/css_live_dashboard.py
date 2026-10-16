@@ -4622,18 +4622,15 @@ def active_execution_scope_label() -> str:
 
 
 def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
-    candidates = [
-        ("CRYPTO", random.choice(SYMBOLS), 12.0, 0.68),
-        ("CRYPTO", random.choice(SYMBOLS), 12.2, 0.69),
-        ("FX", random.choice(FX_SYMBOLS), 11.5, 0.66),
-        ("FX", random.choice(FX_SYMBOLS), 11.7, 0.67),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.0, 0.71),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.2, 0.72),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.0, 0.69),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.2, 0.70),
-    ]
-    random.shuffle(candidates)
-    return candidates
+    """RETIRED (RC1 R3): returns no candidates.
+
+    This loop used to open paper positions from random.choice() symbols with hard-coded
+    scores and probabilities, outside the governed router (consent, personality, capital
+    governors, ExecutionGate/AntiBleed). New entries now come only from approved, calibrated
+    signals via backend.signals.producer -> CssEngineSignalBridge.publish_real_data ->
+    TradingRouter. Existing legacy positions are still managed (exits) by this loop.
+    """
+    return []
 
 
 def pnl_divergence_warning(
