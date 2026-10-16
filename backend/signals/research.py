@@ -32,6 +32,9 @@ class CostModel:
 DEFAULT_COSTS: Mapping[str, CostModel] = {
     "CRYPTO": CostModel(fee_bps=60.0, spread_bps=5.0, slippage_bps=5.0),   # retail taker tier
     "FX": CostModel(fee_bps=0.0, spread_bps=1.5, slippage_bps=1.0),        # spread-only pricing
+    # US equities on a commission-free broker still pay regulatory fees, spread and impact;
+    # conservative for liquid ETFs on IEX-only data. Owner must confirm before any live use.
+    "EQUITY": CostModel(fee_bps=0.5, spread_bps=3.0, slippage_bps=3.0),
 }
 
 

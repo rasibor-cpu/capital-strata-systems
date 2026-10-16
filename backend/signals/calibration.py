@@ -154,10 +154,18 @@ def evaluate_gates(r: OOSResult, g: GateThresholds) -> dict[str, Any]:
     return {"passed": all(checks.values()), "checks": checks}
 
 
+def _round_trip(costs: Mapping[str, Any]) -> float | None:
+    try:
+        return round(2 * float(costs["fee_bps"]) + float(costs["spread_bps"]) + 2 * float(costs["slippage_bps"]), 3)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 def build_artifact(*, strategy: str, instrument: str, asset_class: str, granularity_s: int,
                    events: Sequence[Event], oos: OOSResult, gates: GateThresholds, data_digests: Sequence[str],
                    barrier: Mapping[str, Any], costs: Mapping[str, Any], code_revision: str,
-                   score_map: Mapping[str, float] | None = None, n_bins: int = 3) -> dict[str, Any]:
+                   score_map: Mapping[str, float] | None = None, n_bins: int = 3,
+                   data_source: str | None = None) -> dict[str, Any]:
     final = fit_bins(events, n_bins)
     body = {
         "schema": SCHEMA, "strategy": strategy, "instrument": instrument, "asset_class": asset_class,
@@ -170,6 +178,18 @@ def build_artifact(*, strategy: str, instrument: str, asset_class: str, granular
         "quality_inputs": {"strategy_score": round(oos.positive_fold_fraction, 4),
                            "replay_confidence": round(1 - oos.p_value_one_sided, 4)},
     }
+    if events:
+        # Why a strategy fails is as important as whether: gross edge vs. cost drag on ALL labelled
+        # events (in-sample, unfiltered). Reporting only; gates use the OOS result above.
+        gross = [float(e.extra.get("gross_bps", e.net_bps)) for e in events]
+        body["diagnostics"] = {"labelled_events": len(events),
+                               "mean_gross_bps": round(sum(gross) / len(gross), 3),
+                               "mean_net_bps": round(sum(e.net_bps for e in events) / len(events), 3),
+                               "win_rate": round(sum(1 for e in events if e.win) / len(events), 4),
+                               "round_trip_cost_bps": _round_trip(costs)}
+    if data_source:
+        # Pins the venue the model was fitted on; the producer refuses bars from any other source.
+        body["data_source"] = data_source
     body["artifact_sha256"] = hashlib.sha256(json.dumps(body, sort_keys=True, default=str).encode()).hexdigest()
     return body
 

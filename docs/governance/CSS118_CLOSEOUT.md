@@ -47,16 +47,17 @@ Unchanged and still binding (direction 1):
 Mutation checks on the closeout controls: 16 of 16 caught.
 
 ## 3. Remaining blockers
-| # | Blocker | Type | Needed |
+| # | Blocker | Type | Status / needed |
 |---|---|---|---|
-| B1 | **No calibrated real-data CSS signal producer.** The legacy loop's candidates are random. `EngineLoop` has real direction and edge but no probability or R14F-scale score, and runs only in replay. Until a calibration is approved, Autonomous and Assisted users get no engine signals, and manual orders have no fresh assessment (rejected). | engineering + owner | Approve a calibration and a live data source (e.g. scanner candles → `IntelligenceOrchestrator`), then wire `EngineLoop.css_signal_sink` in a governed runner. |
-| B2 | AntiBleed minimum 50 vs CAD 20 pilot envelope: every pilot order is rejected. | owner | Choose option A, B or C in the exception design. |
-| B3 | Anchor key custody: no production anchor key enrolled; ledgers report `UNANCHORED`. | owner | Choose the key holder and storage (HSM or offline signer), the publication channel for statements, and the checkpoint cadence. |
-| B4 | Real traders: the registry is empty. | owner | Independent vetting, approval of signing-key custody, two SUPER_USER approvers. |
-| B5 | Legacy dashboard loop still opens **operator paper simulations** from random candidates. These are not user accounts and have no broker path. | owner | Retire the loop, or replace its candidate source with the bridge (B1). |
-| B6 | The launcher's `POST /mobile/trade/paper` and `/operator-trade/request` append to a request file that nothing consumes (no execution). | engineering, low | Remove the routes, or route them through the router. |
-| B7 | Personality values above the capital governors (6/8/10%, 30/40%) are capped at 5% / 25%. | owner | Keep the governors binding (current state), or lower the personality values. |
-| B8 | Live trading, the CAD 20 pilot and the 72-hour endurance run. | owner | Not authorized; PRODUCTION_GO=NO. |
+| B1 | Calibrated real-data CSS signal producer | engineering + owner | **Canonical producer: `backend/signals` (RC1, dual-control approval).** The #123 replay runner is confined to research books. Real-data calibration has now run on Coinbase public data (see `docs/release/CSS_FINAL_CLOSEOUT.md`); no artifact has passed the gates, so nothing is routable. |
+| B2 | AntiBleed minimum 50 vs CAD 20 pilot envelope | owner | **Engineering default Option A (reject).** CAD 50 binding. See `CSS118_EFFECTIVE_RISK_LIMITS.md`. Owner must record A/B/C if changing. |
+| B3 | Anchor key custody | owner | **Production design complete** (`CSS118_B3_LEDGER_ANCHOR_CUSTODY.md`). No production key enrolled; ledgers `UNANCHORED` until authorization. |
+| B4 | Real traders: registry empty | owner | Workflows complete (propose/dual-approve/suspend). Registry stays empty until vetted traders + two SUPER_USER approvers. |
+| B5 | Legacy random-candidate operator opens | engineering | **Resolved (retired):** `LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED = False`. Random candidates never become recommendations. |
+| B6 | Launcher paper routes write-only | engineering | **Reconciled in final closeout:** both routes call `submit_governed_launcher_paper_order` → `TradingRouter`, but the #123 version fabricated inputs (quantity used as notional, 1% default stop, session id = user id with created = now). Those defaults are removed: the routes now refuse unless the caller supplies notional, stop and a real sign-on session, which these auth paths do not expose. The governed order path for users remains the mobile ticket `/trade`; request-log records stay labelled `REQUEST_LOG_ONLY_NOT_AN_ORDER`. |
+| B7 | Personality vs capital governors | owner | **Governors remain binding** (documented in `CSS118_EFFECTIVE_RISK_LIMITS.md`). |
+| B8 | Live trading / CAD 20 pilot / 72h endurance | owner | Not authorized; PRODUCTION_GO=NO. |
+| B8-W | Windows identity-probe timeout under CI load | engineering | **Hardened:** 45s timeout + one fail-closed retry in `default_identity_probe`; still returns `None` on failure (no invented identity). |
 
 ## 4. Rollback
 Every change is additive or fail-closed, so rollback is safe at any point. From least to most:

@@ -258,6 +258,29 @@ def _add_routing_endpoints(router: APIRouter, user_resolver: UserResolver, route
                     "live_trading": False}
         return _run(request, action)
 
+    @router.get(PREFIX + "/paper/fees")
+    def paper_fees(request: Request) -> Any:
+        """The caller's own commercial accrual statement (accounting only; no money moves)."""
+        def action(r, ctx):
+            ledger = getattr(r, "fee_ledger", None)
+            if ledger is None:
+                return {"statement": None, "reason": "fee_ledger_not_configured", "money_moved": False}
+            from backend.commercial.fee_ledger import FeeLedgerError
+            try:
+                return {"statement": ledger.statement(ctx["user_id"]), "money_moved": False}
+            except FeeLedgerError as exc:
+                return {"statement": None, "reason": str(exc), "money_moved": False}
+        return _run(request, action)
+
+    @router.get(PREFIX + "/market-data/status")
+    def market_data_status(request: Request) -> Any:
+        """Static market-data readiness (credentials / jurisdiction / blocked feeds). No network, no secrets."""
+        def action(_r, _ctx):
+            from backend.signals.market_data import provider_matrix
+            return {"providers": provider_matrix(), "live_probe": "tools/css_market_data_matrix.py --probe",
+                    "live_trading": False}
+        return _run(request, action)
+
     @router.get(PREFIX + "/proposals")
     def proposals(request: Request) -> Any:
         return _run(request, lambda r, ctx: {"proposals": r.engine.pending_proposals(ctx["user_id"])})

@@ -10,6 +10,13 @@ Providers
   OandaPracticeCandles    api-fxpractice.oanda.com only (practice token; FX). The live
                           trading host is refused.
   CsvCandleStore          local cache/replay so validation is reproducible offline.
+
+More providers (Alpaca crypto/IEX, Binance public spot, failover, cross-provider checks,
+quotes/depth, clock skew, blocked options/futures feeds) live in backend.signals.market_data.
+
+Data classification (closeout): every series carries one of LIVE, DELAYED, INDICATIVE, REPLAY
+or SYNTHETIC. The producer routes LIVE only by default; REPLAY/SYNTHETIC can never reach a
+live-signal decision (backend.signals.producer).
 """
 from __future__ import annotations
 
@@ -27,6 +34,14 @@ COINBASE_CANDLES_URL = "https://api.exchange.coinbase.com/products/{product_id}/
 OANDA_PRACTICE_BASE = "https://api-fxpractice.oanda.com/v3"
 OANDA_GRANULARITY = {60: "M1", 300: "M5", 900: "M15", 3600: "H1", 14400: "H4", 86400: "D"}
 COINBASE_GRANULARITIES = {60, 300, 900, 3600, 21600, 86400}
+
+
+LIVE = "LIVE"                # venue's own real-time data (venue-specific, not consolidated)
+DELAYED = "DELAYED"          # real data published with a delay
+INDICATIVE = "INDICATIVE"    # real but partial/non-executable reference (e.g. IEX-only equities)
+REPLAY = "REPLAY"            # cached historical bars replayed deterministically
+SYNTHETIC = "SYNTHETIC"      # generated; tests and simulations only
+CLASSIFICATIONS = frozenset({LIVE, DELAYED, INDICATIVE, REPLAY, SYNTHETIC})
 
 
 class CandleError(ValueError):
@@ -50,6 +65,8 @@ class CandleSeries:
     granularity_s: int
     source: str
     candles: tuple[Candle, ...]
+    # Not part of the digest: the same bars keep the same digest whether live or replayed.
+    classification: str = "UNCLASSIFIED"
 
     @property
     def digest(self) -> str:
@@ -90,6 +107,17 @@ def validate(series: CandleSeries, *, allow_gaps: int = 0) -> CandleSeries:
     return series
 
 
+def drop_incomplete(series: CandleSeries, *, now: datetime) -> CandleSeries:
+    """Remove bars that have not closed yet. Exchanges (e.g. Coinbase) return the forming bar;
+    using it would compute features on a bar whose close is not final."""
+    cutoff = now.timestamp()
+    kept = tuple(c for c in series.candles if c.ts + series.granularity_s <= cutoff)
+    if len(kept) == len(series.candles):
+        return series
+    return CandleSeries(series.instrument, series.asset_class, series.granularity_s, series.source, kept,
+                        series.classification)
+
+
 def check_fresh(series: CandleSeries, *, now: datetime, max_bars_stale: int = 2) -> None:
     """The newest complete bar must be recent: stale data never produces a live signal."""
     if not series.candles:
@@ -112,18 +140,42 @@ class _Http(Protocol):
     def get(self, url: str, params: dict | None = None, headers: dict | None = None, timeout: float = 10.0): ...
 
 
+def check_http(resp) -> None:
+    """Map HTTP failures to stable reason codes. 451 (restricted location) is authoritative and is
+    never retried or routed around; 401/403 mean credentials or entitlement are missing."""
+    if not hasattr(resp, "status_code"):  # minimal response objects (tests): defer to them
+        resp.raise_for_status()
+        return
+    status = int(resp.status_code or 0)
+    if 200 <= status < 300:
+        return
+    if status == 451:
+        raise CandleError("restricted_location")
+    if status in (401, 403):
+        raise CandleError(f"credentials_rejected:{status}")
+    if status == 429:
+        raise CandleError("rate_limited")
+    raise CandleError(f"http_status:{status}")
+
+
 def _requests_session() -> _Http:
     import requests
 
     return requests.Session()
 
 
+def _now_utc() -> datetime:
+    return datetime.now(timezone.utc)
+
+
 class CoinbasePublicCandles:
     source = "coinbase_exchange_public"
+    classification = LIVE
 
-    def __init__(self, http: _Http | None = None, *, asset_class: str = "CRYPTO") -> None:
+    def __init__(self, http: _Http | None = None, *, asset_class: str = "CRYPTO", clock=None) -> None:
         self.http = http or _requests_session()
         self.asset_class = asset_class
+        self.clock = clock or _now_utc
 
     def fetch(self, instrument: str, *, granularity_s: int, end: datetime | None = None) -> CandleSeries:
         if granularity_s not in COINBASE_GRANULARITIES:
@@ -133,7 +185,7 @@ class CoinbasePublicCandles:
             start = datetime.fromtimestamp(end.timestamp() - 300 * granularity_s, tz=timezone.utc)
             params.update(start=start.isoformat(), end=end.isoformat())
         resp = self.http.get(COINBASE_CANDLES_URL.format(product_id=instrument), params=params, timeout=10.0)
-        resp.raise_for_status()
+        check_http(resp)
         rows = resp.json()
         if not isinstance(rows, list):
             raise CandleError("response_invalid")
@@ -144,14 +196,17 @@ class CoinbasePublicCandles:
             ts, low, high, open_, close, vol = row[:6]
             candles.append(Candle(int(ts), float(open_), float(high), float(low), float(close), float(vol)))
         candles.sort(key=lambda c: c.ts)
-        return validate(CandleSeries(instrument, self.asset_class, granularity_s, self.source, tuple(candles)),
-                        allow_gaps=10)
+        series = CandleSeries(instrument, self.asset_class, granularity_s, self.source, tuple(candles), self.classification)
+        return validate(drop_incomplete(series, now=self.clock()), allow_gaps=10)
 
 
 class OandaPracticeCandles:
     """FX candles from the OANDA PRACTICE host only (read-only). Token from OANDA_PRACTICE_TOKEN."""
 
     source = "oanda_practice"
+    # OANDA's own dealer prices (practice environment): real-time but broker-specific, and
+    # FX has no consolidated tape. LIVE here means "real-time from this venue", nothing more.
+    classification = LIVE
 
     def __init__(self, http: _Http | None = None, *, token: str | None = None, base_url: str = OANDA_PRACTICE_BASE) -> None:
         if base_url.rstrip("/") != OANDA_PRACTICE_BASE:
@@ -171,7 +226,7 @@ class OandaPracticeCandles:
             params = {"granularity": gran, "price": "M", "to": end.isoformat(), "count": 500}
         resp = self.http.get(f"{self.base_url}/instruments/{instrument}/candles", params=params,
                              headers={"Authorization": f"Bearer {self.token}"}, timeout=10.0)
-        resp.raise_for_status()
+        check_http(resp)
         candles = []
         for row in resp.json().get("candles", []):
             if not row.get("complete", False):
@@ -181,8 +236,8 @@ class OandaPracticeCandles:
             candles.append(Candle(ts, float(mid["o"]), float(mid["h"]), float(mid["l"]), float(mid["c"]),
                                   float(row.get("volume", 0))))
         candles.sort(key=lambda c: c.ts)
-        return validate(CandleSeries(instrument.replace("_", "/"), "FX", granularity_s, self.source, tuple(candles)),
-                        allow_gaps=200)  # FX weekends
+        return validate(CandleSeries(instrument.replace("_", "/"), "FX", granularity_s, self.source, tuple(candles),
+                                     self.classification), allow_gaps=200)  # FX weekends
 
 
 def _oanda_ts(raw: str) -> int:
@@ -229,7 +284,7 @@ class CsvCandleStore:
             rows = list(csv.DictReader(fh))
         candles = tuple(Candle(int(r["ts"]), float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]),
                                float(r["volume"])) for r in rows)
-        return CandleSeries(instrument, asset_class, granularity_s, source, candles)
+        return CandleSeries(instrument, asset_class, granularity_s, source, candles, REPLAY)
 
 
 def merge(parts: Iterable[CandleSeries]) -> CandleSeries:
@@ -239,7 +294,7 @@ def merge(parts: Iterable[CandleSeries]) -> CandleSeries:
     first = parts[0]
     by_ts = {c.ts: c for p in parts for c in p.candles}
     return CandleSeries(first.instrument, first.asset_class, first.granularity_s, first.source,
-                        tuple(by_ts[t] for t in sorted(by_ts)))
+                        tuple(by_ts[t] for t in sorted(by_ts)), first.classification)
 
 
 def closes_sequence(series: CandleSeries) -> Sequence[float]:

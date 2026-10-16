@@ -274,13 +274,16 @@ def test_approved_artifact_becomes_unroutable_if_edited(tmp_path):
 
 
 class _Provider:
+    """Stub of a LIVE feed for mechanics tests. The bars are synthetic; the explicit LIVE label is
+    what a real provider would attach. Unlabelled synthetic bars are refused (test below)."""
     source = "synthetic"
 
-    def __init__(self, series):
+    def __init__(self, series, classification="LIVE"):
         self.series = series
+        self.classification = classification
 
     def fetch(self, instrument, *, granularity_s, end=None):
-        return self.series
+        return replace(self.series, classification=self.classification)
 
 
 def _now_for(series):
@@ -375,3 +378,93 @@ def test_shadow_runner_journals_heartbeats_and_decisions(world, tmp_path):
     lines = [json.loads(x) for x in (tmp_path / "j.jsonl").read_text().splitlines()]
     assert [r["type"] for r in lines].count("HEARTBEAT") == 3 and lines[-1]["type"] == "SUMMARY"
     assert summary["signals"] == 3 and summary["routed"] == 3
+
+
+def test_producer_never_acts_on_synthetic_or_replay_data(world):
+    router, approvals = world
+    art = _artifact()
+    approvals.approve(art, actor_ctx=ADMIN_A)
+    approvals.approve(art, actor_ctx=ADMIN_B)
+    s = synthetic()
+    for label in ("SYNTHETIC", "REPLAY", "UNCLASSIFIED", "DELAYED", "INDICATIVE"):
+        (p,) = SignalProducer(_Provider(s, label), approvals, [art], DEFAULT_COSTS).produce(
+            "BTC-USD", granularity_s=H, now=_now_for(s))
+        assert p.signal is None and p.reason == f"data_classification_not_permitted:{label}"
+    with pytest.raises(ValueError, match="never_permitted"):
+        SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS, allowed_classifications=frozenset({"REPLAY"}))
+
+
+# ------------------------------------------------------------------ closeout: market quality and provenance
+class _Quotes:
+    def __init__(self, bid, ask, depth=1e6, error=None):
+        self.bid, self.ask, self.depth, self.error = bid, ask, depth, error
+
+    def quote(self, instrument):
+        from backend.signals.market_data import QuoteSnapshot
+        if self.error:
+            raise CandleError(self.error)
+        return QuoteSnapshot(instrument, "stub", self.bid, self.ask, datetime.now(timezone.utc), self.depth, self.depth)
+
+
+def _approved(approvals, **kw):
+    art = _artifact()
+    if kw:
+        body = {k: v for k, v in {**art, **kw}.items() if k != "artifact_sha256"}
+        from backend.signals.calibration import artifact_digest
+        art = {**body, "artifact_sha256": artifact_digest(body)}
+    approvals.approve(art, actor_ctx=ADMIN_A)
+    approvals.approve(art, actor_ctx=ADMIN_B)
+    return art
+
+
+def test_producer_records_data_provenance_on_every_decision(world):
+    router, approvals = world
+    art = _approved(approvals)
+    s = synthetic()
+    (p,) = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS).produce("BTC-USD", granularity_s=H, now=_now_for(s))
+    assert p.reason == "ok" and p.data_source == "synthetic" and p.data_classification == "LIVE"
+    assert p.data_digest == s.digest and p.last_bar_ts == s.candles[-1].ts
+
+
+def test_producer_refuses_wide_spread_thin_book_or_missing_quote(world):
+    router, approvals = world
+    art = _approved(approvals)
+    s = synthetic()
+    now = _now_for(s)
+    px = s.candles[-1].close
+    wide = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS, quote_provider=_Quotes(px, px * 1.002))
+    (p,) = wide.produce("BTC-USD", granularity_s=H, now=now)  # 20 bps > 2 x 5 bps model
+    assert p.signal is None and p.reason.startswith("market_quality:spread_exceeds_cost_model:")
+    thin = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS, quote_provider=_Quotes(px, px * 1.0001, depth=50),
+                          min_depth_notional=10_000)
+    (p,) = thin.produce("BTC-USD", granularity_s=H, now=now)
+    assert p.signal is None and p.reason.startswith("market_quality:depth_insufficient")
+    dead = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS, quote_provider=_Quotes(0, 0, error="quote_stale"))
+    (p,) = dead.produce("BTC-USD", granularity_s=H, now=now)
+    assert p.signal is None and p.reason == "market_quality:quote_unavailable:quote_stale"
+    tight = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS, quote_provider=_Quotes(px, px * 1.0004))
+    (p,) = tight.produce("BTC-USD", granularity_s=H, now=now)
+    assert p.reason == "ok" and p.observed_spread_bps == pytest.approx(4.0, rel=1e-2)
+
+
+def test_producer_refuses_bars_from_a_venue_other_than_the_calibrated_one(world):
+    router, approvals = world
+    art = _approved(approvals, data_source="coinbase_exchange_public")
+    s = synthetic()
+    (p,) = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS).produce("BTC-USD", granularity_s=H, now=_now_for(s))
+    assert p.signal is None and p.reason == "data_source_mismatch:synthetic!=coinbase_exchange_public"
+
+
+def test_producer_refuses_zero_volume_and_forming_bar(world):
+    router, approvals = world
+    art = _approved(approvals)
+    s = synthetic()
+    dead = replace(s, candles=s.candles[:-1] + (replace(s.candles[-1], volume=0.0),))
+    (p,) = SignalProducer(_Provider(dead), approvals, [art], DEFAULT_COSTS).produce("BTC-USD", granularity_s=H,
+                                                                                    now=_now_for(s))
+    assert p.reason == "market_quality:last_bar_no_volume"
+    # A provider that leaks the forming bar: the producer drops it and decides on the last closed bar.
+    forming_now = datetime.fromtimestamp(s.candles[-1].ts + 600, tz=timezone.utc)
+    (p,) = SignalProducer(_Provider(s), approvals, [art], DEFAULT_COSTS).produce("BTC-USD", granularity_s=H,
+                                                                                 now=forming_now)
+    assert p.last_bar_ts in (None, s.candles[-2].ts)

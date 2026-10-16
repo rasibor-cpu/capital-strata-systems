@@ -1,0 +1,107 @@
+name: CSS real-data evidence (read-only market data, paper only)
+
+# Contacts ONLY public / practice read-only market-data endpoints. No broker, no orders, no
+# account access, no deployment. Approvals are never created: every calibration artifact stays
+# unroutable until two distinct SUPER_USERs approve it on the operator host.
+#
+# Jurisdiction: CSS operates from Canada (CSS_OPERATING_COUNTRY=CA). Binance.com does not serve
+# Canada, so the Binance provider is refused before any request. The runner's own location is
+# never used to work around a restriction.
+#
+# Optional repository secrets (absent -> that provider is reported BLOCKED, never faked):
+#   OANDA_PRACTICE_TOKEN, APCA_API_KEY_ID, APCA_API_SECRET_KEY
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/css-final-closeout
+
+permissions:
+  contents: read
+
+jobs:
+  real-data:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      PYTHONPATH: .
+      PYTHONIOENCODING: utf-8
+      CSS_OPERATING_COUNTRY: CA
+      OANDA_PRACTICE_TOKEN: ${{ secrets.OANDA_PRACTICE_TOKEN }}
+      APCA_API_KEY_ID: ${{ secrets.APCA_API_KEY_ID }}
+      APCA_API_SECRET_KEY: ${{ secrets.APCA_API_SECRET_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Record environment
+        run: |
+          mkdir -p evidence
+          { echo "head_sha=$(git rev-parse HEAD)"; echo "utc=$(date -u +%FT%TZ)"; python --version; } > evidence/environment.txt
+      - name: Provider matrix (live read-only probe)
+        run: python tools/css_market_data_matrix.py --probe --out evidence/market_data_matrix.json 2>&1 | tee evidence/matrix.log
+      - name: Fetch real history (Coinbase BTC-USD, ETH-USD; Alpaca crypto BTC-USD)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          for inst in BTC-USD ETH-USD; do
+            for g in 3600 21600 86400; do
+              python tools/css_fetch_candles.py --source coinbase --instrument $inst --granularity $g --bars 8000 --cache evidence/market_cache 2>&1 | tee -a evidence/fetch.log
+            done
+          done
+          python tools/css_fetch_candles.py --source alpaca_crypto --instrument BTC-USD --granularity 3600 --bars 8000 --cache evidence/market_cache 2>&1 | tee -a evidence/fetch.log
+      - name: Walk-forward calibration on real bars (gates reported as measured; no tuning)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          # Same strategies, same gates, three horizons. All results are reported; with 12 artifacts a
+          # single PASS can be a false discovery, so any PASS still needs owner review + dual approval.
+          for inst in BTC-USD ETH-USD; do
+            for g in 3600 21600 86400; do
+              python tools/css_calibrate.py --cache evidence/market_cache --source coinbase_exchange_public --instrument $inst \
+                --asset-class CRYPTO --granularity $g --out evidence/calibration 2>&1 | tee -a evidence/calibration.log
+            done
+          done
+          python tools/css_calibrate.py --cache evidence/market_cache --source alpaca_crypto_public --instrument BTC-USD \
+            --asset-class CRYPTO --granularity 3600 --out evidence/calibration_alpaca 2>&1 | tee -a evidence/calibration.log
+      - name: One live producer cycle per instrument (empty approvals ledger)
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          for inst in BTC-USD ETH-USD; do
+            python tools/css_real_data_evidence.py --artifacts evidence/calibration --instrument $inst --source coinbase \
+              --out evidence/producer_cycle_$inst.json 2>&1 | tee -a evidence/producer.log
+          done
+      - name: "Summary annotations: providers"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence matrix
+      - name: "Summary annotations: fetch"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence fetch
+      - name: "Summary annotations: calibration 1h"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence cal3600
+      - name: "Summary annotations: calibration 6h"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence cal21600
+      - name: "Summary annotations: calibration 1d"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence cal86400
+      - name: "Summary annotations: producer"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence producer
+      - name: SHA-256 manifest
+        if: always()
+        run: cd evidence && find . -type f ! -name SHA256SUMS.txt -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS.txt; tail -n 40 SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: css-real-data-evidence
+          path: evidence/
+          if-no-files-found: error
