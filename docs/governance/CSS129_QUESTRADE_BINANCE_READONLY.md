@@ -29,7 +29,7 @@
 - **`provider_matrix`:** a `questrade_api` row, `BLOCKED` until a refresh-token reference exists.
 
 **Binance (public hosts only, no key) — `backend/signals/binance_market_data.py`**
-- **`exchange_filters`:** tick size, step size, minimum quantity and minimum notional, and status, from `exchangeInfo`.
+- **`exchange_filters`:** tick size, step size, minimum quantity and minimum notional, and status, from `exchangeInfo`. A missing or out-of-range filter is refused, never treated as NaN or zero.
 - **`WeightGuard`:**
   - enforces an 80% budget of the 1-minute request weight (`X-MBX-USED-WEIGHT-1M`), resetting once 60 s have passed since the server last reported usage;
   - one guard is shared per process by default, so the budget and any back-off carry across calls (Binance meters per IP);
@@ -46,7 +46,7 @@
 - **Eligibility first:** every entry point applies `binance_eligibility` before any connection is attempted. That means an unattested country or a restricted jurisdiction (**CA**, US, NL, ...) is refused.
 
 ## Tests
-`tests/test_css129_questrade_binance_readonly.py` (26 tests) are contract tests with fakes; no network is used.
+`tests/test_css129_questrade_binance_readonly.py` (29 tests) are contract tests with fakes; no network is used.
 
 **Questrade**
 - candles, provenance and entitlement;

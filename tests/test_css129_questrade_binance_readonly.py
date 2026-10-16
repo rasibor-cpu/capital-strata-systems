@@ -223,6 +223,19 @@ def test_binance_exchange_filters_from_public_host():
     assert http.calls[0][0] == "https://data-api.binance.vision/api/v3/exchangeInfo"
 
 
+@pytest.mark.parametrize("drop,patch", [("NOTIONAL", None), (None, ("PRICE_FILTER", "tickSize", "0")),
+                                        (None, ("LOT_SIZE", "stepSize", "nan"))])
+def test_binance_missing_or_invalid_filters_fail_closed(drop, patch):
+    info = json.loads(json.dumps(EXCHANGE_INFO))
+    filters = info["symbols"][0]["filters"]
+    if drop:
+        info["symbols"][0]["filters"] = [f for f in filters if f["filterType"] != drop]
+    if patch:
+        next(f for f in filters if f["filterType"] == patch[0])[patch[1]] = patch[2]
+    with pytest.raises(CandleError, match="binance_exchange_info_invalid"):
+        exchange_filters("BTC-USDT", operating_country="GB", http=FakeHttp(Resp(info)), guard=WeightGuard())
+
+
 def test_binance_weight_budget_and_ban_backoff():
     t = {"now": 0.0}
     guard = WeightGuard(clock=lambda: t["now"])

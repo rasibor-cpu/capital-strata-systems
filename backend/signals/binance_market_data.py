@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -112,10 +113,14 @@ def exchange_filters(instrument: str, *, operating_country: str | None, http: An
     try:
         (info,) = [s for s in resp.json()["symbols"] if s.get("symbol") == symbol]
         filters = {f["filterType"]: f for f in info.get("filters", [])}
-        notional = filters.get("NOTIONAL") or filters.get("MIN_NOTIONAL") or {}
-        return SymbolFilters(symbol, str(info["status"]), str(info["baseAsset"]), str(info["quoteAsset"]),
-                             float(filters["PRICE_FILTER"]["tickSize"]), float(filters["LOT_SIZE"]["stepSize"]),
-                             float(filters["LOT_SIZE"]["minQty"]), float(notional.get("minNotional", "nan")))
+        # A missing notional filter is an error, never NaN: every comparison with NaN is false, so a
+        # "below minimum notional" check would silently pass.
+        notional = filters.get("NOTIONAL") or filters["MIN_NOTIONAL"]
+        values = (float(filters["PRICE_FILTER"]["tickSize"]), float(filters["LOT_SIZE"]["stepSize"]),
+                  float(filters["LOT_SIZE"]["minQty"]), float(notional["minNotional"]))
+        if not all(math.isfinite(v) and v >= 0 for v in values) or values[0] <= 0 or values[1] <= 0:
+            raise ValueError("filter_out_of_range")
+        return SymbolFilters(symbol, str(info["status"]), str(info["baseAsset"]), str(info["quoteAsset"]), *values)
     except (KeyError, TypeError, ValueError) as exc:
         raise CandleError("binance_exchange_info_invalid") from exc
 
