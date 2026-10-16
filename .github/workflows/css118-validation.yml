@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - claude/css129-questrade-binance-readonly  # first: avoids a merge conflict with #130's entry
       - claude/css118-trading-profiles
       - claude/css118-closeout
       - claude/css-rc1-signal-pipeline
@@ -111,7 +112,7 @@ jobs:
           mkdir -p evidence
           git rev-parse HEAD > evidence/head_sha.txt
           python -m pytest -q -p no:cacheprovider -rfEs --junitxml=evidence/junit-css118.xml \
-            tests/test_css118_*.py tests/test_css_rc1_*.py tests/test_css_closeout_*.py tests/test_css_cad146_*.py tests/test_css_sim_*.py tests/test_css_simulation_*.py tests/test_r14f_gate_parity.py \
+            tests/test_css118_*.py tests/test_css_rc1_*.py tests/test_css129_*.py tests/test_css_closeout_*.py tests/test_css_cad146_*.py tests/test_css_sim_*.py tests/test_css_simulation_*.py tests/test_r14f_gate_parity.py \
             tests/engine/test_execution_gate_volatility_sizing.py tests/test_mobile_audit_replay_limit.py 2>&1 | tee evidence/pytest-css118.log
       - name: Summary annotation (counts readable via the checks API)
         if: always()

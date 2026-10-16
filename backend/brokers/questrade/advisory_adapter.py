@@ -124,6 +124,7 @@ class QuestradeAdvisoryAdapter:
     def _blocked(self, contract: str) -> dict[str, Any]:
         capability = {
             "account_data": BrokerCapability.ACCOUNT,
+            "orders": BrokerCapability.ACCOUNT,
             "holdings": BrokerCapability.HOLDINGS,
             "quote": BrokerCapability.MARKET_DATA,
             "option_chain": BrokerCapability.OPTION_CHAIN,
@@ -257,6 +258,52 @@ class QuestradeAdvisoryAdapter:
                     "provenance": "QUESTRADE_ACTIVITIES",
                 }
                 for row in activities
+                if isinstance(row, Mapping)
+            ],
+            "execution_allowed": False,
+        }
+
+    def get_order_history(self, *, start_time: str | None = None, end_time: str | None = None,
+                          state_filter: str = "All") -> dict[str, Any]:
+        """Read-only order HISTORY (GET /accounts/{id}/orders). Nothing here can create, change or
+        cancel an order: the client and transport are GET-only and execution stays blocked."""
+        if state_filter not in {"All", "Open", "Closed"}:
+            raise ValueError("state_filter must be All, Open or Closed")
+        prerequisite = self._prerequisite_failure("orders")
+        if prerequisite:
+            return prerequisite
+        number = self._selected_account_number()
+        if not number:
+            return self._account_selection_required("orders")
+        result = self.client.request(
+            f"/accounts/{number}/orders",
+            params={"startTime": start_time, "endTime": end_time, "stateFilter": state_filter},
+            success_state=BrokerOperationalState.ACCOUNT_READY,
+        )
+        if not result.success:
+            return self._http_failure("orders", result.diagnostics("orders"))
+        orders = result.payload.get("orders") if isinstance(result.payload.get("orders"), list) else []
+        return {
+            **result.diagnostics("orders"),
+            "status": "ACCOUNT_READY",
+            "order_count": len(orders),
+            "orders": [
+                {
+                    "order_id": row.get("id"),
+                    "symbol": normalize_equity_symbol(str(row.get("symbol") or "")).get("canonical"),
+                    "symbol_id": row.get("symbolId"),
+                    "side": row.get("side"),
+                    "order_type": row.get("orderType"),
+                    "state": row.get("state"),
+                    "total_quantity": row.get("totalQuantity"),
+                    "filled_quantity": row.get("filledQuantity"),
+                    "avg_exec_price": row.get("avgExecPrice"),
+                    "limit_price": row.get("limitPrice"),
+                    "creation_time": row.get("creationTime"),
+                    "update_time": row.get("updateTime"),
+                    "provenance": "QUESTRADE_ORDER_HISTORY",
+                }
+                for row in orders
                 if isinstance(row, Mapping)
             ],
             "execution_allowed": False,

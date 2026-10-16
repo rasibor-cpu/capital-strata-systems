@@ -20,6 +20,13 @@ _ALLOWED_PATHS = (
     re.compile(r"^/markets/quotes$"),
     re.compile(r"^/symbols$"),
     re.compile(r"^/symbols/[0-9]+/options$"),
+    # Issue #129 (read-only): symbol discovery, historical candles and order HISTORY. These are
+    # GET-only like everything here; order placement would need a write method, which both this
+    # client and QuestradeGetOnlyHttpTransport refuse before dispatch.
+    re.compile(r"^/symbols/search$"),
+    re.compile(r"^/symbols/[0-9]+$"),
+    re.compile(r"^/markets/candles/[0-9]+$"),
+    re.compile(r"^/accounts/[^/]+/orders$"),
 )
 
 
