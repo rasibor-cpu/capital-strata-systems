@@ -18,6 +18,8 @@ on:
       - claude/css-sim-validation-20261016
       - claude/css-sim-operational-readiness-20261016
       - claude/css-agreement-single-acceptance
+      - grok/css-129-h2-questrade-refresh-hardening
+      - claude/css-integration-proposal-128-132
 
 permissions:
   contents: read

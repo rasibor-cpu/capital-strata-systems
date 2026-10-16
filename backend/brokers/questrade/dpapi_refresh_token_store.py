@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import subprocess
+import tempfile
 import sys
 from typing import Any, Protocol
 
@@ -123,23 +124,39 @@ class WindowsDpapiRefreshTokenStore:
             "token_values_returned": False,
         }
 
+    def coordination_key(self) -> str:
+        return f"file:{os.path.normcase(str(self._path))}"
+
+    def lock_path(self) -> Path:
+        return self._path.with_name(self._path.name + ".lock")
+
     def _atomic_replace(self, ciphertext: bytes) -> None:
-        tmp = self._path.with_name(self._path.name + ".tmp")
+        """Durable atomic replace (H2): unique temp in the same directory, 0600, flush+fsync,
+        os.replace, then fsync the directory on POSIX. The previous file is untouched until
+        os.replace succeeds; any failure removes the temp file and raises."""
+        directory = self._path.parent
+        tmp: str | None = None
         try:
-            fd = os.open(str(tmp), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            fd, tmp = tempfile.mkstemp(prefix="." + self._path.name + ".", suffix=".tmp", dir=str(directory))
+            if os.name != "nt":
+                os.fchmod(fd, 0o600)
             with os.fdopen(fd, "wb") as handle:
                 handle.write(ciphertext)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.replace(tmp, self._path)
+            tmp = None
+            _fsync_directory(directory)
         except TokenStoreError:
             raise
-        except Exception as exc:
-            try:
-                tmp.unlink(missing_ok=True)
-            except OSError:
-                pass
-            raise TokenStoreError("QUESTRADE_TOKEN_REPLACE_FAILED", code="QUESTRADE_TOKEN_REPLACE_FAILED") from exc
+        except Exception:
+            raise TokenStoreError("QUESTRADE_TOKEN_REPLACE_FAILED", code="QUESTRADE_TOKEN_REPLACE_FAILED") from None
+        finally:
+            if tmp is not None:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
 
     def __repr__(self) -> str:
         return (
@@ -162,6 +179,16 @@ class WindowsPowerShellDpapiBackend:
         if sys.platform != "win32":
             raise TokenStoreError("WINDOWS_DPAPI_REQUIRED", code="WINDOWS_DPAPI_REQUIRED")
         return _powershell_unprotect(ciphertext)
+
+
+def _fsync_directory(directory: Path) -> None:
+    if os.name == "nt":
+        return  # NTFS directory entries cannot be fsynced via os.open; os.replace is MoveFileEx
+    fd = os.open(str(directory), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def _require_external_absolute_path(path: str | Path) -> Path:
