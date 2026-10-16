@@ -18,12 +18,21 @@ Entry points
                                proposal the user must then confirm
   run_exit_cycle(marks)        protective exits for open paper positions. Exempt from
                                consent and mandate state (risk-reducing).
+  reconcile_orders()           (with an OMS) resolve orders from the venue's records and book
+                               any fills not yet booked
+
+Execution (optional, R2): with `oms` set, a COPIED decision is not filled at the model price.
+It becomes one immediate-or-cancel order in the paper OMS and only the venue's reported fill
+(quantity, price incl. slippage) is booked; rejected orders book nothing, partial fills book the
+filled part, a dropped connection books nothing until reconciliation. An OMS emergency halt
+rejects every new decision before evaluation. Without `oms` behaviour is unchanged.
 
 Context is resolved server-side and fails closed: no current sign-on session, unknown
 role, or an unreadable safety-flag provider rejects the follower with a recorded reason.
 """
 from __future__ import annotations
 
+import hashlib
 import math
 import re
 import secrets
@@ -34,6 +43,7 @@ from typing import Any, Callable, Mapping
 
 from backend.certification.ov002_persistence import PersistenceError, atomic_write_json, read_json_object
 from backend.runtime.interprocess_lock import exclusive_file_lock
+from backend.oms.paper_oms import OMSError, Order, OrderIntent, PaperOMS
 from backend.trading_profiles.copy_engine import (
     AUTONOMOUS_SOURCE_ID,
     MANUAL_ORDER_PREFIX,
@@ -176,6 +186,7 @@ class TradingRouter:
         system_provider: Callable[[], SystemContext],
         feed: SignalFeed | None = None,
         assessment_provider: ASSESSMENT_PROVIDER | None = None,
+        oms: PaperOMS | None = None,
     ) -> None:
         self.engine = engine
         self.book = book
@@ -186,6 +197,7 @@ class TradingRouter:
         # CSS's own market view for manual orders, recorded from CSS engine signals (C3).
         self.assessments = MarketAssessmentStore(engine.root)
         self.assessment_provider = assessment_provider
+        self.oms = oms
 
     # -- context (fail closed) ---------------------------------------------------
     def _system(self) -> SystemContext | None:
@@ -222,6 +234,13 @@ class TradingRouter:
                 *, session: tuple[str, float] | None = None, requested_notional: float | None = None) -> CopyDecision:
         if system is None:
             return self._reject(signal, user_id, "safety_flags_unavailable", now)
+        if self.oms is not None:
+            try:
+                halted = self.oms.halted
+            except OMSError:
+                return self._reject(signal, user_id, "oms_state_unavailable", now)
+            if halted:
+                return self._reject(signal, user_id, "oms_emergency_halt", now)
         follower = self._follower(user_id, now, session=session)
         if isinstance(follower, str):
             return self._reject(signal, user_id, follower, now)
@@ -230,10 +249,66 @@ class TradingRouter:
         return decision
 
     def _book_fill(self, decision: CopyDecision, signal: SourceSignal, now: datetime) -> None:
-        if decision.copied:
-            position = self.engine.position_from_decision(decision, signal, opened_at=now)
+        if not decision.copied:
+            return
+        position = self.engine.position_from_decision(decision, signal, opened_at=now)
+        if self.oms is None:
             self.book.open(position, personality=str(decision.personality), entry_fee=float(decision.fill["fees"]),
                            fee_bps=signal.fee_bps)
+            return
+        # deterministic id: a retried decision can never produce a second order
+        coid = "css-" + hashlib.sha256(position.position_id.encode()).hexdigest()[:32]
+        intent = OrderIntent(coid, position.follower_user_id, position.symbol, position.side,
+                             position.notional / position.entry_price, position.entry_price)
+        rec = asdict(position)
+        rec["opened_at"] = _iso(position.opened_at)
+        try:
+            order = self.oms.submit(intent, context={"position": rec, "personality": str(decision.personality),
+                                                     "fee_bps": signal.fee_bps})
+        except OMSError as exc:
+            self.engine.ledger.append("ORDER_EXECUTION", {"position_id": position.position_id,
+                                                          "follower_user_id": position.follower_user_id,
+                                                          "outcome": "NOT_SUBMITTED", "reason": str(exc),
+                                                          "at_utc": now.isoformat()})
+            return
+        self._book_order(order, now)
+
+    def _book_order(self, order: Order, now: datetime) -> bool:
+        """Book exactly what the venue filled, once. Returns True when a position was opened."""
+        ctx = order.context
+        if order.booked or not order.terminal or not ctx.get("position"):
+            return False
+        pos = dict(ctx["position"])
+        filled = order.filled_qty > 0 and order.avg_price
+        self.engine.ledger.append("ORDER_EXECUTION", {
+            "position_id": pos["position_id"], "follower_user_id": pos["follower_user_id"],
+            "client_order_id": order.intent.client_order_id, "venue_order_id": order.venue_order_id,
+            "state": order.state.value, "reason": order.reason, "requested_qty": order.intent.quantity,
+            "filled_qty": order.filled_qty, "avg_price": order.avg_price,
+            "reference_price": order.intent.reference_price, "at_utc": now.isoformat()})
+        if filled:
+            notional = round(order.filled_qty * float(order.avg_price), 2)
+            pos.update(notional=notional, entry_price=float(order.avg_price), best_price=float(order.avg_price),
+                       opened_at=datetime.fromisoformat(pos["opened_at"]))
+            try:
+                self.book.open(CopiedPosition(**pos), personality=ctx["personality"],
+                               entry_fee=round(notional * float(ctx["fee_bps"]) / 10_000.0, 2),
+                               fee_bps=float(ctx["fee_bps"]))
+            except PaperBookError as exc:
+                if str(exc) != "position_exists":
+                    raise
+        self.oms.mark_booked(order.intent.client_order_id)
+        return bool(filled)
+
+    def reconcile_orders(self, *, now: datetime | None = None) -> dict[str, Any]:
+        """Resolve orders against the venue, then book every terminal fill not yet booked."""
+        if self.oms is None:
+            raise OMSError("no_oms_configured")
+        now = now or _now()
+        report = self.oms.reconcile()
+        report["booked"] = [o.intent.client_order_id for o in self.oms.orders() if self._book_order(o, now)]
+        report.pop("resolved_orders", None)
+        return report
 
     def _users_in(self, modes: set[OperatingMode]) -> list[tuple[str, Any]]:
         out = []
