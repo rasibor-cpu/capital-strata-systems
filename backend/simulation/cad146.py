@@ -55,6 +55,21 @@ TRACK_A, TRACK_B = "A_STRICT_GOVERNED", "B_RESEARCH_SHADOW"
 LIVE_ARM_ENVS = ("REA_LIVE_ARM", "REA_CONFIRM_LIVE", "CSS_ENABLE_LIVE_TRADING", "ENABLE_LIVE_TRADING",
                  "ALLOW_LIVE_TRADING")
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+SIM_ENTRY_HALT_ENV = "CSS_SIM_ENTRY_HALT"
+LIVE_KILL_SWITCH_ENV = "CSS_LIVE_ORDER_KILL_SWITCH"
+_TRUTHY = {"1", "true", "yes", "y", "on"}
+
+
+def sim_entry_halted(env: Mapping[str, str] | None = None) -> bool:
+    env = os.environ if env is None else env
+    return str(env.get(SIM_ENTRY_HALT_ENV, "")).strip().lower() in _TRUTHY
+
+
+def live_kill_switch_engaged(env: Mapping[str, str] | None = None) -> bool:
+    env = os.environ if env is None else env
+    return str(env.get(LIVE_KILL_SWITCH_ENV, "")).strip().lower() in _TRUTHY
+
+
 SAFE_FLAGS = {"verdict": "SAFE", "fail_closed": False, "execution_allowed": False, "live_trading_blocked": True,
               "advisory_only": True}
 
@@ -182,11 +197,14 @@ def build_track(name: str, root: Path, *, approvals: Any, operator: str, now: da
         # R7 requires a sign-on within SESSION_TIMEOUT_SECONDS (1 h). The simulation honours it: the
         # session is the operator's last explicit attestation (Cad146Simulation.attest_operator).
         session_resolver=lambda u: (SIM_SESSION, created()) if u == SIM_USER else None,
-        # Same kill-switch inputs as the canonical router (dashboard.mobile.mobile_app): an engaged
-        # kill switch halts simulated entries too.
+        # Simulation entries are controlled by SIM_ENTRY_HALT_ENV (enforced in Cad146Simulation.cycle),
+        # not by the LIVE brokerage kill switch: that switch governs real broker orders, which this
+        # module cannot place, and must stay engaged during the trial (preflight requires it). The
+        # env passed here is deliberately non-empty so evaluate_live_order_kill_switch does not fall
+        # back to os.environ. The global emergency stop (REA_KILL_SWITCH / runtime/kill.switch) is
+        # still checked by the engine via check_kill_switch and halts simulated entries too.
         system_provider=lambda: SystemContext(engine_mode="SAFE", safety_flags=dict(SAFE_FLAGS), mobile_controls={},
-                                              env={k: v for k, v in os.environ.items()
-                                                   if k in {"CSS_LIVE_ORDER_KILL_SWITCH", "REA_KILL_SWITCH"}}),
+                                              env={"CSS_EXECUTION_CONTEXT": "SIMULATION_NO_BROKER"}),
     )
     if engine.preferences.get(SIM_USER).active is None:
         _activate(engine, operator=operator, now=now, presenter=presenter)
@@ -259,7 +277,8 @@ class Cad146Simulation:
               now: datetime | None = None) -> dict[str, Any]:
         now = _utc(now)
         refuse_if_live_armed()
-        summary = {"at_utc": now.isoformat(), "observations": 0, "outages": 0, "decisions": {TRACK_A: 0, TRACK_B: 0}}
+        summary = {"at_utc": now.isoformat(), "observations": 0, "outages": 0, "decisions": {TRACK_A: 0, TRACK_B: 0},
+                   "operator_session_age_s": round(now.timestamp() - self._session_created(), 1)}
         marks: dict[str, float] = {}
         for instrument, gran in instruments:
             try:
@@ -282,9 +301,16 @@ class Cad146Simulation:
                          "last_close": last.close, "data_sha256": series.digest, "at_utc": now.isoformat()})
             summary["observations"] += 1
             marks[instrument] = last.close
+            halted = sim_entry_halted()
             for track in (self.track_a, self.track_b):
                 if obs_key in track.processed:
                     continue  # replay / restart: this bar was already decided for this track
+                if halted:
+                    # Entries halted by the simulation control: the bar is NOT marked processed, so
+                    # it is decided normally if the halt is lifted while the bar is still current.
+                    self._write({"type": "SIM_ENTRY_HALTED", "track": track.name, "key": obs_key,
+                                 "at_utc": now.isoformat()})
+                    continue
                 summary["decisions"][track.name] += self._decide(track, series, now)
                 track.processed.add(obs_key)
                 track.save()
@@ -296,6 +322,8 @@ class Cad146Simulation:
             acct = track.router.book.account(SIM_USER, now)
             self._write({"type": "EQUITY", "track": track.name, "equity_cad": acct["equity"],
                          "open_positions": len(track.router.book.positions(SIM_USER)), "at_utc": now.isoformat()})
+        summary["sim_entry_halted"] = sim_entry_halted()
+        summary["live_kill_switch_engaged"] = live_kill_switch_engaged()
         self._write({"type": "HEARTBEAT", **summary})
         return summary
 
@@ -340,7 +368,16 @@ class Cad146Simulation:
                "outages": [e for e in events if e["type"] == "OUTAGE"][-20:],
                "outage_count": sum(1 for e in events if e["type"] == "OUTAGE"),
                "cycles": sum(1 for e in events if e["type"] == "HEARTBEAT"),
-               "baseline_no_trade_equity_cad": meta["starting_equity_cad"], "tracks": {}}
+               "baseline_no_trade_equity_cad": meta["starting_equity_cad"], "tracks": {},
+               "operator_sign_ons": [e["at_utc"] for e in events if e["type"] == "OPERATOR_SIGN_ON"],
+               # R7 refuses new entries when the operator's sign-on is older than 1 h; these cycles
+               # are reported so a gap in attendance is visible rather than mistaken for "no signals".
+               "cycles_with_expired_sign_on": sum(1 for e in events if e["type"] == "HEARTBEAT"
+                                                  and (e.get("operator_session_age_s") or 0) > 3600),
+               "sim_entry_halted_cycles": sum(1 for e in events if e["type"] == "HEARTBEAT"
+                                              and e.get("sim_entry_halted")),
+               "live_kill_switch_engaged_all_cycles": all(e.get("live_kill_switch_engaged", False) for e in events
+                                                          if e["type"] == "HEARTBEAT")}
         last_close = {}
         for e in events:
             if e["type"] == "OBSERVATION":

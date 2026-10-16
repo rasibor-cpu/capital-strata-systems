@@ -15,6 +15,7 @@ on:
       - claude/css-final-closeout
       - claude/css-cad146-simulation
       - claude/css-sim-validation-20261016
+      - claude/css-sim-operational-readiness-20261016
 
 permissions:
   contents: read
