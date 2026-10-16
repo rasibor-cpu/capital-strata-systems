@@ -89,8 +89,11 @@ jobs:
             python tools/css_sim_cad146.py preflight --root evidence/sim_preflight_root --artifacts evidence/calibration \
               --capital-profile engineering --out evidence/sim_preflight.json 2>&1 | tee evidence/sim_preflight.log || true
             grep -E "^(PASS|FAIL|WARN) |PREFLIGHT" evidence/sim_preflight.log | head -n 10 | while read -r l; do echo "::notice title=sim preflight::$l"; done
-            grep -E "^(PASS|FAIL|WARN) |PREFLIGHT" evidence/sim_preflight.log | tail -n +11 | head -n 10 | while read -r l; do echo "::notice title=sim preflight (cont)::$l"; done
           fi
+      - name: "Summary annotations: preflight (continued)"
+        if: always()
+        run: |
+          [ -f evidence/sim_preflight.log ] && grep -E "^(PASS|FAIL|WARN) |PREFLIGHT" evidence/sim_preflight.log | tail -n +11 | head -n 10 | while read -r l; do echo "::notice title=sim preflight (cont)::$l"; done || true
       - name: "Summary annotations: providers"
         if: always()
         run: python tools/css_evidence_notices.py evidence matrix
