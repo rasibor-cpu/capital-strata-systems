@@ -1142,6 +1142,11 @@ def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, An
         "status": "REQUESTED",
         "execution_allowed": False,
         "live_trading_blocked": True,
+        # RC1 R3: a request-log entry is not an order. Nothing executes it; governed paper
+        # orders are placed only through the mobile ticket (TradingRouter.submit_manual_order).
+        "record_kind": "REQUEST_LOG_ONLY_NOT_AN_ORDER",
+        "order_submitted": False,
+        "governed_order_path": "/trade",
     }
 
 
