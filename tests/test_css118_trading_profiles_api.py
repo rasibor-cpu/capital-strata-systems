@@ -1,20 +1,20 @@
-"""HTTP API for trading profiles: authentication, own-account only, no trading capability."""
+"""HTTP API: authentication, session isolation, direct-API bypass attempts, downloads, emergency actions."""
 from __future__ import annotations
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from backend.trading_profiles.api import PREFIX, create_trading_profiles_router
-from backend.trading_profiles.disclosures import DISCLOSURE_VERSION
+from css118_support import KEY, mandate_request
+from backend.trading_profiles.api import ONBOARDING_PATH, PREFIX, create_trading_profiles_router
+from backend.trading_profiles.manual import ACKNOWLEDGEMENT_SHA256, ACKNOWLEDGEMENT_TEXT, current_manual
 from backend.trading_profiles.service import TradingProfileService
-
-KEY = b"synthetic-test-mandate-key-0123456789abcdef"
 
 
 def _client(tmp_path, key=KEY) -> TestClient:
     def resolver(request):
         user = request.headers.get("x-test-user")
-        return {"user_id": user, "session_id": "sess-" + user} if user else None
+        session = request.headers.get("x-test-session") or ("sess-" + str(user))
+        return {"user_id": user, "session_id": session} if user else None
 
     app = FastAPI()
     app.include_router(create_trading_profiles_router(
@@ -24,65 +24,154 @@ def _client(tmp_path, key=KEY) -> TestClient:
     return TestClient(app)
 
 
-def test_requires_authentication(tmp_path):
+def _h(user="u1", session=None):
+    headers = {"x-test-user": user}
+    if session:
+        headers["x-test-session"] = session
+    return headers
+
+
+def _review_all(client, review, headers):
+    for page in review["pages"]:
+        body = client.get(f"{PREFIX}/consent/reviews/{review['review_id']}/pages/{page['page_id']}", headers=headers).json()
+        assert body["ok"] and "<script" not in body["html"]
+        r = client.post(f"{PREFIX}/consent/reviews/{review['review_id']}/pages/{page['page_id']}/reviewed",
+                        headers=headers, json={"method": "scroll_bottom", "page_sha256": body["sha256"]})
+        assert r.json()["ok"], r.json()
+
+
+def _accept_payload(change, review, **overrides):
+    payload = {"acknowledgement_checked": True, "acknowledgement_sha256": ACKNOWLEDGEMENT_SHA256,
+               "manual_version": review["manual_version"], "manual_sha256": review["manual_sha256"],
+               "policy_hash": change["policy_hash"]}
+    payload.update(overrides)
+    return payload
+
+
+def _start(client, headers, payload):
+    change = client.post(PREFIX + "/changes", headers=headers, json=payload).json()["change"]
+    review = client.post(PREFIX + "/consent/reviews", headers=headers, json={"change_id": change["change_id"]}).json()
+    return change, review
+
+
+def test_every_endpoint_requires_authentication(tmp_path):
     client = _client(tmp_path)
-    for path in ("/catalog", "/me", "/statement"):
-        assert client.get(PREFIX + path).status_code == 401
-    assert client.post(PREFIX + "/mode", json={"mode": "Simulated Trading"}).status_code == 401
+    for path in ("/catalog", "/me", "/manual", "/manual/download", "/manual/pages/about", "/consent/receipts", "/statement"):
+        assert client.get(PREFIX + path).status_code == 401, path
+    for path in ("/changes", "/consent/reviews", "/consent/reviews/x/accept", "/emergency/pause", "/resume"):
+        assert client.post(PREFIX + path, json={}).status_code == 401, path
+    assert client.get(ONBOARDING_PATH).status_code == 401
 
 
-def test_catalog_lists_exact_choices_and_no_live_permission(tmp_path):
-    body = _client(tmp_path).get(PREFIX + "/catalog", headers={"x-test-user": "u1"}).json()
-    assert [m["mode"] for m in body["operating_modes"]] == ["Simulated Trading", "Copy a CSS Trader", "CSS Autonomous Trading"]
+def test_catalog_lists_four_modes_five_personalities_manual_and_precedence(tmp_path):
+    body = _client(tmp_path).get(PREFIX + "/catalog", headers=_h()).json()
+    assert [m["mode"] for m in body["operating_modes"]] == [
+        "Simulated Trading", "CSS-Assisted Trading", "Copy a CSS Trader", "CSS Autonomous Trading"]
     assert all(m["live_broker_orders_permitted"] is False for m in body["operating_modes"])
     assert [p["personality"] for p in body["risk_personalities"]] == [
         "Safe", "Conservative", "Balanced", "Aggressive", "Ultra Aggressive"]
-    assert all(p["overrides_safety_gates"] is False and p["live_trading_permission"] is False for p in body["risk_personalities"])
-    assert body["disclosure"]["version"] == DISCLOSURE_VERSION
+    assert body["manual"]["acknowledgement_text"] == ACKNOWLEDGEMENT_TEXT
+    assert body["precedence"][-2] == "user-configured limits (tighten only)"
 
 
-def test_full_copy_setup_flow_and_startup_state(tmp_path):
+def test_full_onboarding_flow_receipt_and_history(tmp_path):
     client = _client(tmp_path)
-    h = {"x-test-user": "u1"}
-    assert client.get(PREFIX + "/me", headers=h).json()["needs_selection"] == ["operating_mode"]
-    assert client.post(PREFIX + "/mode", json={"mode": "Copy a CSS Trader"}, headers=h).json()["ok"]
-    assert client.post(PREFIX + "/personality", json={"personality": "Aggressive"}, headers=h).json()["ok"]
-    assert client.post(PREFIX + "/disclosure/acknowledge", json={"version": DISCLOSURE_VERSION}, headers=h).json()["ok"]
+    h = _h()
     me = client.get(PREFIX + "/me", headers=h).json()
-    assert me["needs_selection"] == ["trader_mandate"] and me["can_open_new_trades"] is False
-    created = client.post(PREFIX + "/mandates", headers=h, json={
-        "trader_id": "trader-alpha", "asset_classes": ["FX", "CRYPTO"], "max_allocation": 2000, "currency": "CAD",
-        "valid_days": 30, "reauthorization_policy": "INTERVAL", "reauthorization_interval_hours": 24}).json()
-    assert created["ok"] and created["mandate_id"].startswith("mdt-")
+    assert me["needs"] == ["onboarding_acceptance"] and me["can_open_new_trades"] is False
+    change, review = _start(client, h, {"operating_mode": "Copy a CSS Trader", "risk_personality": "Aggressive",
+                                        "limits": {"max_position_pct_of_equity": 5}, "mandate": mandate_request()})
+    assert change["kind"] == "INITIAL_ACTIVATION" and change["implications"]
+    assert client.get(PREFIX + "/me", headers=h).json()["active"] is None  # proposing is not activating
+    _review_all(client, review, h)
+    receipt = client.post(f"{PREFIX}/consent/reviews/{review['review_id']}/accept", headers=h,
+                          json=_accept_payload(change, review)).json()["receipt"]
+    assert receipt["document"]["version"] == current_manual().version and receipt["live_trading_authorized"] is False
     me = client.get(PREFIX + "/me", headers=h).json()
-    assert me["can_open_new_trades"] is True and me["live_trading_permitted"] is False
-    assert me["mandate"]["personality"] == "Aggressive" and me["mandate"]["status"] == "mandate_valid"
-    # Another user cannot revoke u1's mandate: identity comes from the session only.
-    other = client.post(PREFIX + f"/mandates/{created['mandate_id']}/revoke", headers={"x-test-user": "u2"}, json={})
-    assert other.status_code == 400 and other.json()["reason"] == "mandate_not_found"
-    assert client.post(PREFIX + f"/mandates/{created['mandate_id']}/revoke", headers=h, json={}).json()["ok"]
-    assert "trader_mandate" in client.get(PREFIX + "/me", headers=h).json()["needs_selection"]
+    assert me["can_open_new_trades"] is True and me["consent"]["valid"] is True and me["live_trading_permitted"] is False
+    history = client.get(PREFIX + "/consent/receipts", headers=h).json()
+    assert [r["receipt_id"] for r in history["receipts"]] == [receipt["receipt_id"]] and history["document_history"]
+    download = client.get(f"{PREFIX}/consent/receipts/{receipt['receipt_id']}/download", headers=h)
+    assert download.status_code == 200 and "attachment" in download.headers["content-disposition"]
+    assert client.get(f"{PREFIX}/consent/receipts/{receipt['receipt_id']}/download", headers=_h("u2")).status_code == 404
 
 
-def test_invalid_choices_and_missing_signing_key(tmp_path):
+def test_direct_api_bypass_attempts_are_rejected(tmp_path):
+    client = _client(tmp_path)
+    h = _h()
+    change, review = _start(client, h, {"operating_mode": "CSS Autonomous Trading", "risk_personality": "Balanced"})
+    accept = f"{PREFIX}/consent/reviews/{review['review_id']}/accept"
+    r = client.post(accept, headers=h, json=_accept_payload(change, review))
+    assert r.status_code == 400 and r.json()["reason"].startswith("pages_not_reviewed")
+    # Marking a page reviewed without the server having presented it.
+    r = client.post(f"{PREFIX}/consent/reviews/{review['review_id']}/pages/about/reviewed", headers=h,
+                    json={"method": "scroll_bottom", "page_sha256": "0" * 64})
+    assert r.json()["reason"] == "page_not_presented"
+    _review_all(client, review, h)
+    for bad in ({"acknowledgement_checked": False}, {"acknowledgement_checked": "true"}, {"acknowledgement_sha256": "x"},
+                {"manual_version": "0.0.1"}, {"policy_hash": "0" * 64}):
+        r = client.post(accept, headers=h, json=_accept_payload(change, review, **bad))
+        assert r.status_code == 400, bad
+    assert client.get(PREFIX + "/me", headers=h).json()["active"] is None
+    assert client.post(accept, headers=h, json=_accept_payload(change, review)).json()["ok"]
+    assert client.post(accept, headers=h, json=_accept_payload(change, review)).json()["reason"] == "review_closed"
+
+
+def test_session_and_user_isolation_including_deep_links(tmp_path):
+    client = _client(tmp_path)
+    change, review = _start(client, _h(), {"operating_mode": "Simulated Trading"})
+    page = f"{PREFIX}/consent/reviews/{review['review_id']}/pages/about"
+    assert client.get(page, headers=_h("u2")).status_code == 404
+    assert client.get(page, headers=_h("u1", session="stolen-elsewhere")).status_code == 404
+    assert client.get(f"{PREFIX}/changes/{change['change_id']}", headers=_h("u2")).status_code == 404
+    assert client.post(PREFIX + "/consent/reviews", headers=_h("u2"), json={"change_id": change["change_id"]}).status_code == 404
+
+
+def test_emergency_actions_need_no_consent_but_resume_does(tmp_path):
+    client = _client(tmp_path)
+    assert client.post(PREFIX + "/emergency/pause", headers=_h()).json()["paused"] is True
+    r = client.post(PREFIX + "/resume", headers=_h())
+    assert r.status_code == 400 and r.json()["reason"] == "consent_missing"
+    assert client.post(PREFIX + "/mandates/mdt-unknown/revoke", headers=_h(), json={}).status_code == 404
+
+
+def test_manual_reference_and_downloads(tmp_path):
+    client = _client(tmp_path)
+    manual = client.get(PREFIX + "/manual", headers=_h()).json()
+    assert manual["version"] == current_manual().version and len(manual["pages"]) == 12
+    md = client.get(PREFIX + "/manual/download?format=md", headers=_h())
+    txt = client.get(PREFIX + "/manual/download?format=txt", headers=_h())
+    assert md.headers["x-css-document-sha256"] == current_manual().sha256
+    assert txt.headers["content-type"].startswith("text/plain") and "attachment" in txt.headers["content-disposition"]
+    assert client.get(PREFIX + "/manual/pages/gates", headers=_h()).json()["title"].startswith("4.")
+    assert client.get(PREFIX + "/manual/pages/nope", headers=_h()).status_code == 404
+
+
+def test_copy_activation_without_signing_key_fails_closed(tmp_path):
     client = _client(tmp_path, key=None)
-    h = {"x-test-user": "u1"}
-    assert client.post(PREFIX + "/mode", json={"mode": "Live Trading"}, headers=h).status_code == 400
-    assert client.post(PREFIX + "/personality", json={"personality": "EXPANSION"}, headers=h).status_code == 400
-    client.post(PREFIX + "/mode", json={"mode": "Copy a CSS Trader"}, headers=h)
-    client.post(PREFIX + "/personality", json={"personality": "Safe"}, headers=h)
-    client.post(PREFIX + "/disclosure/acknowledge", json={"version": DISCLOSURE_VERSION}, headers=h)
-    response = client.post(PREFIX + "/mandates", headers=h, json={
-        "trader_id": "t", "asset_classes": ["FX"], "max_allocation": 100, "valid_days": 1,
-        "reauthorization_policy": "EACH_SIGN_ON"})
-    assert response.status_code == 503 and response.json()["reason"] == "mandate_signing_key_unavailable"
+    h = _h()
+    change, review = _start(client, h, {"operating_mode": "Copy a CSS Trader", "risk_personality": "Balanced",
+                                        "mandate": mandate_request(asset_classes=["FX"])})
+    _review_all(client, review, h)
+    r = client.post(f"{PREFIX}/consent/reviews/{review['review_id']}/accept", headers=h, json=_accept_payload(change, review))
+    assert r.status_code == 503 and "signing_key_unavailable" in r.json()["reason"]
+    assert client.get(PREFIX + "/me", headers=h).json()["active"] is None
+
+
+def test_onboarding_page_is_served_with_unchecked_acknowledgement(tmp_path):
+    page = _client(tmp_path).get(ONBOARDING_PATH, headers=_h())
+    assert page.status_code == 200
+    html = page.text
+    assert 'id="ack-checkbox" disabled' in html and "checked" not in html.split('id="ack-checkbox"')[1].split(">")[0]
+    assert 'id="accept-btn" disabled' in html
+    assert "Pause new trading now" in html
 
 
 def test_router_is_mounted_on_mobile_app_and_requires_session():
     from dashboard.mobile import mobile_app
 
     client = TestClient(mobile_app.app)
-    # 401 (not 404) proves the route is mounted and guarded by the mobile session.
     assert client.get(PREFIX + "/me").status_code == 401
-    assert client.post(PREFIX + "/mandates", json={}).status_code == 401
+    assert client.post(PREFIX + "/changes", json={}).status_code == 401
+    assert client.get(ONBOARDING_PATH).status_code == 401
     assert client.get(PREFIX + "/does-not-exist").status_code == 404

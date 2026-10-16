@@ -2,9 +2,11 @@
 
 For one source signal and one follower, the engine applies:
   1. safety:       observed safety-flag verdict SAFE; live-order and global kill switches
-  2. profile:      persisted operating mode, risk personality, current disclosure
-  3. authority:    copy mode needs a valid signed mandate for this trader;
-                   autonomous mode only takes CSS engine signals
+  2. consent:      active settings accepted under the current agreement (revalidated now),
+                   not paused; personality tightened by the user's own limits
+  3. authority:    copy mode needs the consented, valid signed mandate for this trader;
+                   autonomous mode only takes CSS engine signals; assisted mode takes CSS
+                   proposals or the user's own manual orders and stops for approval
   4. personality:  asset class, probability, drawdown and daily-loss halts, margin state
   5. sizing:       risk budget / stop, capped by position, symbol, total exposure and
                    mandate allocation. Never scaled UP to satisfy any gate minimum.
@@ -23,10 +25,12 @@ simulated mode replaces even the validation pipeline with a no-route stub.
 """
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 import secrets
-from dataclasses import asdict, dataclass, field
-from datetime import datetime, timezone
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping
@@ -38,6 +42,7 @@ from backend.analytics.trade_quality_scoring_engine import (
     TradeQualityScoringEngineError,
 )
 from backend.app.observability.kill_switch import check_kill_switch
+from backend.certification.ov002_persistence import PersistenceError, atomic_write_json, read_json_object
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
 from backend.execution.canonical_execution_integration import (
     CanonicalExecutionIntegration,
@@ -50,7 +55,11 @@ from backend.trading_profiles.attribution import AttributionLedger
 from backend.trading_profiles.exits import CopiedPosition
 from backend.trading_profiles.mandates import KeyProvider, MandateRegistry, evaluate_mandate
 from backend.trading_profiles.operating_modes import OperatingMode, permissions_for
+from backend.trading_profiles.consent import ConsentService
+from backend.trading_profiles.limits import LimitsError, effective_policy
+from backend.trading_profiles.manual import ControlledManual, current_manual
 from backend.trading_profiles.preferences import PreferencesError, PreferencesStore
+from backend.runtime.interprocess_lock import exclusive_file_lock
 from backend.trading_profiles.risk_personalities import RiskPersonality, policy_for
 from engine.execution.execution_gate import ExecutionGate
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
@@ -61,6 +70,13 @@ HARD_TOTAL_OPEN_POSITION_CAP = 10
 LEGACY_ENGINE_MODES = frozenset({"SAFE", "CONSERVATIVE", "BALANCED", "AGGRESSIVE", "EXPANSION"})
 SIMULATED_DEFAULT_PERSONALITY = RiskPersonality.BALANCED
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.-]{1,64}$")
+MANUAL_ORDER_PREFIX = "USER_MANUAL:"
+PROPOSAL_TTL = timedelta(minutes=5)
+PROPOSALS_SCHEMA = "css.trading_profiles.assisted_proposals.v1"
+
+
+class ProposalError(RuntimeError):
+    """Fail-closed CSS-Assisted proposal error."""
 
 
 @dataclass(frozen=True)
@@ -132,6 +148,7 @@ class CopyDecision:
     gate_results: dict | None = None
     pipeline_status: str | None = None
     fill: dict | None = None
+    proposal_id: str | None = None
 
     @property
     def copied(self) -> bool:
@@ -165,12 +182,16 @@ class CopyTradeEngine:
         mandates: MandateRegistry | None = None,
         ledger: AttributionLedger | None = None,
         integration_factory: Callable[[ExecutionGate, bool], CanonicalExecutionIntegration] | None = None,
+        manual_provider: Callable[[], ControlledManual] = current_manual,
     ) -> None:
         self.root = Path(root)
         self.key_provider = key_provider
         self.preferences = preferences or PreferencesStore(self.root)
         self.mandates = mandates or MandateRegistry(self.root, key_provider=key_provider)
         self.ledger = ledger or AttributionLedger(self.root)
+        self.consent = ConsentService(self.root, preferences=self.preferences, mandates=self.mandates,
+                                      manual_provider=manual_provider)
+        self.proposals_path = self.root / "assisted_proposals.json"
         self._integration_factory = integration_factory or self._default_integration
         self._quality = TradeQualityScoringEngine()
         self._caie = CAIEScoringEngine()
@@ -197,16 +218,21 @@ class CopyTradeEngine:
     ) -> CopyDecision:
         now = now or _now()
         decision = self._evaluate(signal, follower, system, now)
+        self._record(signal, decision, now)
+        return decision
+
+    def _record(self, signal: SourceSignal, decision: CopyDecision, now: datetime) -> None:
         self.ledger.record_source_signal({
             "signal_id": signal.signal_id, "trader_id": signal.trader_id, "symbol": signal.symbol,
             "asset_class": signal.asset_class.upper(), "side": signal.side.upper(),
             "reference_price": signal.reference_price, "probability": signal.probability,
             "signal_score": signal.signal_score,
         })
-        self.ledger.append("FOLLOWER_DECISION", {**asdict(decision), "at_utc": now.isoformat()})
-        return decision
+        record_type = "FOLLOWER_PROPOSAL" if decision.outcome == "PROPOSED" else "FOLLOWER_DECISION"
+        self.ledger.append(record_type, {**asdict(decision), "at_utc": now.isoformat()})
 
-    def _evaluate(self, signal: SourceSignal, follower: FollowerContext, system: SystemContext, now: datetime) -> CopyDecision:
+    def _evaluate(self, signal: SourceSignal, follower: FollowerContext, system: SystemContext, now: datetime,
+                  approved_proposal: Mapping[str, Any] | None = None) -> CopyDecision:
         state: dict[str, Any] = {"operating_mode": None, "personality": None, "mandate_id": None}
 
         def reject(stage: str, reason: str, **extra: Any) -> CopyDecision:
@@ -240,28 +266,35 @@ class CopyTradeEngine:
         if engine_mode not in LEGACY_ENGINE_MODES:
             return reject("safety", "engine_mode_unknown")
 
-        # 2. Persisted profile.
+        # 2. Accepted settings: consent is revalidated server-side at every decision.
         try:
-            prefs = self.preferences.get(follower.user_id)
+            user_state = self.preferences.get(follower.user_id)
         except PreferencesError:
             return reject("profile", "preferences_unreadable")
-        missing = prefs.missing_requirements()
-        if missing:
-            return reject("profile", "profile_incomplete:" + ",".join(missing))
-        mode = prefs.operating_mode
-        assert mode is not None
+        active = user_state.active
+        if active is None:
+            return reject("consent", "consent_missing")
+        mode = active.operating_mode
         permissions = permissions_for(mode)
         state["operating_mode"] = mode.value
-        personality = prefs.risk_personality or SIMULATED_DEFAULT_PERSONALITY
+        personality = active.risk_personality or SIMULATED_DEFAULT_PERSONALITY
         state["personality"] = personality.value
-        policy = policy_for(personality)
+        if user_state.paused:
+            return reject("profile", "trading_paused_by_user")
+        consent_ok, consent_reason = self.consent.verify_active(follower.user_id, user_state)
+        if not consent_ok:
+            return reject("consent", consent_reason)
+        try:
+            policy = effective_policy(policy_for(personality), active.limits)
+        except LimitsError:
+            return reject("consent", "active_limits_invalid")
 
         # 3. Authority for the signal source.
         mandate = None
         if mode is OperatingMode.COPY_CSS_TRADER:
-            if signal.trader_id == AUTONOMOUS_SOURCE_ID:
+            if signal.trader_id == AUTONOMOUS_SOURCE_ID or signal.trader_id.startswith(MANUAL_ORDER_PREFIX):
                 return reject("authority", "copy_mode_requires_trader_signal")
-            mandate = self.mandates.active_for(follower.user_id, now)
+            mandate = self.mandates.get(active.mandate_id) if active.mandate_id else None
             md = evaluate_mandate(mandate, key_provider=self.key_provider, follower_user_id=follower.user_id,
                                   trader_id=signal.trader_id, personality=personality, asset_class=asset,
                                   session_id=follower.session_id, now=now)
@@ -271,6 +304,9 @@ class CopyTradeEngine:
         elif mode is OperatingMode.CSS_AUTONOMOUS_TRADING:
             if signal.trader_id != AUTONOMOUS_SOURCE_ID:
                 return reject("authority", "autonomous_mode_accepts_css_engine_signals_only")
+        elif mode is OperatingMode.CSS_ASSISTED_TRADING:
+            if signal.trader_id not in {AUTONOMOUS_SOURCE_ID, MANUAL_ORDER_PREFIX + follower.user_id}:
+                return reject("authority", "assisted_mode_accepts_css_proposals_or_own_manual_orders")
 
         # 4. Personality eligibility and portfolio-risk halts.
         if asset not in policy.allowed_asset_classes:
@@ -302,6 +338,9 @@ class CopyTradeEngine:
         if mandate is not None:
             mandate_exposure = sum(p.notional for p in open_positions if p.mandate_id == mandate.mandate_id)
             caps.append(mandate.max_allocation - mandate_exposure)
+        if approved_proposal is not None:
+            # An approval never authorizes more than the size the user approved.
+            caps.append(float(approved_proposal["notional"]))
         notional = int(min(caps) * 100) / 100.0
         if notional <= 0:
             return reject("sizing", "exposure_limit_reached", stop_distance_pct=stop_pct)
@@ -349,6 +388,11 @@ class CopyTradeEngine:
         r14f_info = {"allowed": r14f.allowed, "composite": round(r14f.composite, 4), "threshold": round(r14f.threshold, 4)}
         if not r14f.allowed:
             return reject("r14f", "r14f_profitability_below_threshold", **sized, **q, caie_score=caie_score, r14f=r14f_info)
+
+        # 8b. CSS-Assisted: stop here and ask the user. The full canonical chain runs only on approval.
+        if permissions.requires_per_order_approval and approved_proposal is None:
+            return self._create_proposal(signal, follower, now, mode=mode.value, personality=personality.value,
+                                         sized=sized, quality=q, caie_score=caie_score, r14f=r14f_info)
 
         # 9. Canonical paper chain: R7 -> ExecutionGate (AntiBleed, margin, risk) -> validation pipeline.
         counts = {k: 0 for k in MAX_POSITIONS_BY_ASSET}
@@ -415,6 +459,85 @@ class CopyTradeEngine:
             quality_recommendation=q["quality_recommendation"], caie_score=caie_score, r14f=r14f_info,
             gate_results=gate_results, pipeline_status=pipeline_status, fill=fill,
         )
+
+    # ------------------------------------------------------------------ CSS-Assisted proposals
+    def _read_proposals(self) -> dict[str, Any]:
+        if not self.proposals_path.exists():
+            return {}
+        try:
+            document = read_json_object(self.proposals_path)
+        except PersistenceError as exc:
+            raise ProposalError(f"proposals_unreadable:{exc}") from exc
+        if document.get("schema") != PROPOSALS_SCHEMA or not isinstance(document.get("proposals"), dict):
+            raise ProposalError("proposals_schema_mismatch")
+        return document["proposals"]
+
+    def _write_proposals(self, proposals: dict[str, Any]) -> None:
+        atomic_write_json(self.proposals_path, {"schema": PROPOSALS_SCHEMA, "proposals": proposals}, expected_root=self.root)
+
+    @staticmethod
+    def _proposal_hash(proposal: Mapping[str, Any]) -> str:
+        body = {k: proposal[k] for k in ("proposal_id", "user_id", "session_id", "signal", "notional",
+                                         "stop_distance_pct", "created_at_utc", "expires_at_utc")}
+        return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+
+    def _create_proposal(self, signal: SourceSignal, follower: FollowerContext, now: datetime, *, mode: str,
+                         personality: str, sized: dict, quality: dict, caie_score: float, r14f: dict) -> CopyDecision:
+        proposal = {
+            "proposal_id": "prp-" + secrets.token_hex(10), "user_id": follower.user_id,
+            "session_id": follower.session_id, "signal": asdict(signal), "notional": sized["notional"],
+            "stop_distance_pct": sized["stop_distance_pct"], "created_at_utc": now.isoformat(),
+            "expires_at_utc": (now + PROPOSAL_TTL).isoformat(), "status": "PENDING_USER_APPROVAL",
+        }
+        proposal["proposal_hash"] = self._proposal_hash(proposal)
+        self.root.mkdir(parents=True, exist_ok=True)
+        with exclusive_file_lock(self.root / "assisted_proposals.lock", timeout_seconds=10.0):
+            proposals = self._read_proposals()
+            proposals[proposal["proposal_id"]] = proposal
+            self._write_proposals(proposals)
+        return CopyDecision(
+            follower.user_id, signal.signal_id, "PROPOSED", "awaiting_user_approval",
+            "css_assisted_requires_user_approval", mode, personality, None, notional=sized["notional"],
+            stop_distance_pct=sized["stop_distance_pct"], quality_score=quality["quality_score"],
+            quality_recommendation=quality["quality_recommendation"], caie_score=caie_score, r14f=r14f,
+            proposal_id=proposal["proposal_id"],
+        )
+
+    def decide_proposal(self, proposal_id: str, follower: FollowerContext, system: SystemContext, *,
+                        approve: bool, now: datetime | None = None) -> CopyDecision:
+        """The user's individual decision on one proposal. Approval re-runs every gate now."""
+        now = now or _now()
+        self.root.mkdir(parents=True, exist_ok=True)
+        with exclusive_file_lock(self.root / "assisted_proposals.lock", timeout_seconds=10.0):
+            proposals = self._read_proposals()
+            proposal = proposals.get(proposal_id)
+            if proposal is None or proposal["user_id"] != follower.user_id or proposal["session_id"] != follower.session_id:
+                raise ProposalError("proposal_not_found")
+            if proposal.get("proposal_hash") != self._proposal_hash(proposal):
+                raise ProposalError("proposal_tampered")
+            if proposal["status"] != "PENDING_USER_APPROVAL":
+                raise ProposalError(f"proposal_already_decided:{proposal['status']}")  # replay protection
+            if now >= datetime.fromisoformat(proposal["expires_at_utc"]):
+                proposal["status"] = "EXPIRED"
+                self._write_proposals(proposals)
+                raise ProposalError("proposal_expired")
+            proposal["status"] = "DECIDING"
+            self._write_proposals(proposals)
+        signal = SourceSignal(**proposal["signal"])
+        if approve:
+            decision = self._evaluate(signal, follower, system, now, approved_proposal=proposal)
+        else:
+            decision = CopyDecision(follower.user_id, signal.signal_id, "REJECTED", "user_decision",
+                                    "rejected_by_user", None, None, None, proposal_id=proposal_id)
+        decision = replace(decision, proposal_id=proposal_id)
+        with exclusive_file_lock(self.root / "assisted_proposals.lock", timeout_seconds=10.0):
+            proposals = self._read_proposals()
+            proposals[proposal_id]["status"] = (
+                "APPROVED_EXECUTED" if decision.copied else ("REJECTED_BY_USER" if not approve else "APPROVED_BLOCKED"))
+            proposals[proposal_id]["decided_at_utc"] = now.isoformat()
+            self._write_proposals(proposals)
+        self._record(signal, decision, now)
+        return decision
 
     # ------------------------------------------------------------------
     def position_from_decision(self, decision: CopyDecision, signal: SourceSignal, *, opened_at: datetime) -> CopiedPosition:

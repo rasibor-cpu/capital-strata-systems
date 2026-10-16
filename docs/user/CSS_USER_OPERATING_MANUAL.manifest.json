@@ -1,0 +1,78 @@
+{
+  "document_id": "CSS-UOM",
+  "version": "1.0.0",
+  "effective_date": "2026-10-16",
+  "sha256": "5f64a2e10c7641182e783a7fcb4891fe3e508c7fb6a5c27aecb1cd9a6ceb3374",
+  "acknowledgement_sha256": "0d333aeb3db21e725706d53dca3a47fe0575f2a0219616b6233fc79be91d975c",
+  "pages": [
+    {
+      "page_id": "about",
+      "title": "1. About this agreement and who it is for",
+      "sha256": "2f651f146a71507f3ae5d480bd58ab4f57feb9979de0c65910ffd148fb085165"
+    },
+    {
+      "page_id": "modes",
+      "title": "2. The four trading modes and who decides",
+      "sha256": "3cbbe8fe70d6730dc371bc34711683d5d137628a6e050abb68eaceebf5f5a800"
+    },
+    {
+      "page_id": "personalities",
+      "title": "3. Risk personalities and your own limits",
+      "sha256": "20a4ae56123fc3833fc67302daaf6d6f5b20d92423a4c00b26eef1005bb01db7"
+    },
+    {
+      "page_id": "gates",
+      "title": "4. Safety gates and trading assumptions",
+      "sha256": "784d9e8824741e944b9906ab4b4967613380349a1e1d7e7e32681e117ceb9d9e"
+    },
+    {
+      "page_id": "instruments",
+      "title": "5. Instrument, cost, margin and exit risks",
+      "sha256": "959f812c5f8b62fa5d03cd5824f258e69d0270363b9850a77760ba3ca2b7cc0b"
+    },
+    {
+      "page_id": "signals",
+      "title": "6. Signals, models, copy-trading and autonomy",
+      "sha256": "5309ebb570ccd3f9c8621e03fa53f6b6e943f7fcc790124b48d4184ea1d2b124"
+    },
+    {
+      "page_id": "operations",
+      "title": "7. Operating procedures, outages and security",
+      "sha256": "374fd8295426bc47c27277baeab7c53c918e371f83ff9fd5902259ad52741c11"
+    },
+    {
+      "page_id": "emergency",
+      "title": "8. Pausing, kill switch and incidents",
+      "sha256": "de5a435d35729ef84c7737f618f938e76f28de2cf63bc0afb105665524c80634"
+    },
+    {
+      "page_id": "legal",
+      "title": "9. Tax, regulatory and jurisdictional matters",
+      "sha256": "42f3c41f989682f3a24c5e25fdd5333eb29e53e25ee80fc0ff47c2f1eba3796d"
+    },
+    {
+      "page_id": "scenarios",
+      "title": "10. Example scenarios",
+      "sha256": "5c36046b7bf19c020edc16efd41f87e923c83d16d0e97bc56a657ecb93d9d78c"
+    },
+    {
+      "page_id": "glossary",
+      "title": "11. Glossary",
+      "sha256": "23b91e0760cec3ea152cda64f2a4ab4a6f53e60f0a0460de7a840db3a25471cd"
+    },
+    {
+      "page_id": "support",
+      "title": "12. Support, escalation and acknowledgement",
+      "sha256": "ac2bce3b8a67cb1254bc73dfd3054dbae04297b399936b218794e0495fed2a91"
+    }
+  ],
+  "history": [
+    {
+      "version": "1.0.0",
+      "effective_date": "2026-10-16",
+      "sha256": "5f64a2e10c7641182e783a7fcb4891fe3e508c7fb6a5c27aecb1cd9a6ceb3374",
+      "summary": "Initial issue: four modes, five personalities, configurable limits, assumptions, risks, procedures",
+      "material": true
+    }
+  ]
+}
