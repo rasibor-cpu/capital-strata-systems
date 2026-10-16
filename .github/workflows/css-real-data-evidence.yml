@@ -51,16 +51,22 @@ jobs:
         run: |
           set -o pipefail
           for inst in BTC-USD ETH-USD; do
-            python tools/css_fetch_candles.py --source coinbase --instrument $inst --granularity 3600 --bars 8000 --cache evidence/market_cache 2>&1 | tee -a evidence/fetch.log
+            for g in 3600 21600 86400; do
+              python tools/css_fetch_candles.py --source coinbase --instrument $inst --granularity $g --bars 8000 --cache evidence/market_cache 2>&1 | tee -a evidence/fetch.log
+            done
           done
           python tools/css_fetch_candles.py --source alpaca_crypto --instrument BTC-USD --granularity 3600 --bars 8000 --cache evidence/market_cache 2>&1 | tee -a evidence/fetch.log
       - name: Walk-forward calibration on real bars (gates reported as measured; no tuning)
         continue-on-error: true
         run: |
           set -o pipefail
+          # Same strategies, same gates, three horizons. All results are reported; with 12 artifacts a
+          # single PASS can be a false discovery, so any PASS still needs owner review + dual approval.
           for inst in BTC-USD ETH-USD; do
-            python tools/css_calibrate.py --cache evidence/market_cache --source coinbase_exchange_public --instrument $inst \
-              --asset-class CRYPTO --granularity 3600 --out evidence/calibration 2>&1 | tee -a evidence/calibration.log
+            for g in 3600 21600 86400; do
+              python tools/css_calibrate.py --cache evidence/market_cache --source coinbase_exchange_public --instrument $inst \
+                --asset-class CRYPTO --granularity $g --out evidence/calibration 2>&1 | tee -a evidence/calibration.log
+            done
           done
           python tools/css_calibrate.py --cache evidence/market_cache --source alpaca_crypto_public --instrument BTC-USD \
             --asset-class CRYPTO --granularity 3600 --out evidence/calibration_alpaca 2>&1 | tee -a evidence/calibration.log
@@ -75,9 +81,18 @@ jobs:
       - name: "Summary annotations: providers"
         if: always()
         run: python tools/css_evidence_notices.py evidence matrix
-      - name: "Summary annotations: calibration"
+      - name: "Summary annotations: fetch"
         if: always()
-        run: python tools/css_evidence_notices.py evidence calibration
+        run: python tools/css_evidence_notices.py evidence fetch
+      - name: "Summary annotations: calibration 1h"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence cal3600
+      - name: "Summary annotations: calibration 6h"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence cal21600
+      - name: "Summary annotations: calibration 1d"
+        if: always()
+        run: python tools/css_evidence_notices.py evidence cal86400
       - name: "Summary annotations: producer"
         if: always()
         run: python tools/css_evidence_notices.py evidence producer

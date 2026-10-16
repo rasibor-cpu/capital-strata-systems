@@ -35,22 +35,29 @@ def matrix(ev: Path) -> None:
                                       "operating_country": doc.get("operating_country")})
 
 
-def calibration(ev: Path) -> None:
-    for line in (ev / "fetch.log").read_text(encoding="utf-8").splitlines() if (ev / "fetch.log").exists() else []:
-        if "sha256=" in line or "Error" in line:
+def fetch(ev: Path) -> None:
+    log = ev / "fetch.log"
+    for line in log.read_text(encoding="utf-8").splitlines() if log.exists() else []:
+        if "sha256=" in line or line.startswith("backend.signals.candles.CandleError"):
             notice("fetch", {"line": line.strip()[:400]})
+
+
+def calibration(ev: Path, granularity: int | None = None) -> None:
     for folder in ("calibration", "calibration_alpaca"):
         for p in sorted((ev / folder).glob("*.json")) if (ev / folder).exists() else []:
             a = json.loads(p.read_text(encoding="utf-8"))
+            if granularity is not None and a.get("granularity_s") != granularity:
+                continue
             o = a.get("oos") or {}
-            notice(f"{folder} {a.get('instrument')} {a.get('strategy')}", {
+            notice(f"{folder} {a.get('instrument')} {a.get('granularity_s')}s {a.get('strategy')}", {
                 "gates_passed": (a.get("gates") or {}).get("passed"), "failed_checks": [
                     k for k, v in ((a.get("gates") or {}).get("checks") or {}).items() if not v],
                 "oos_trades": o.get("trades"), "mean_net_bps": o.get("mean_net_bps"),
                 "lb95_net_bps": o.get("lower_bound_net_bps"), "brier": o.get("brier"),
                 "base_rate_brier": o.get("base_rate_brier"), "pos_folds": o.get("positive_fold_fraction"),
                 "max_dd_bps": o.get("max_drawdown_bps"), "folds": o.get("folds"),
-                "data_source": a.get("data_source"), "artifact_sha256": (a.get("artifact_sha256") or "")[:16]})
+                "diagnostics": a.get("diagnostics"), "data_source": a.get("data_source"),
+                "artifact_sha256": (a.get("artifact_sha256") or "")[:16]})
 
 
 def producer(ev: Path) -> None:
@@ -64,4 +71,7 @@ def producer(ev: Path) -> None:
 
 if __name__ == "__main__":
     evidence, section = Path(sys.argv[1]), sys.argv[2]
-    {"matrix": matrix, "calibration": calibration, "producer": producer}[section](evidence)
+    if section.startswith("cal"):
+        calibration(evidence, int(section[3:]) if section[3:] else None)
+    else:
+        {"matrix": matrix, "fetch": fetch, "producer": producer}[section](evidence)

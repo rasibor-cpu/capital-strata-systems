@@ -194,7 +194,9 @@ class AlpacaCryptoPublicCandles:
             raise CandleError("granularity_unsupported")
         symbol = normalize_symbol("alpaca_crypto", instrument)
         end_dt = end or self.clock()
-        params = {"symbols": symbol, "timeframe": tf, "limit": 1000, "sort": "asc",
+        # Newest first: with ascending order a page that hits the limit (or a page-size cap) ends
+        # in the past, and the "latest" bar was weeks old (seen on the real endpoint, run 38882824767).
+        params = {"symbols": symbol, "timeframe": tf, "limit": 1000, "sort": "desc",
                   "start": _rfc3339(end_dt.timestamp() - 1000 * granularity_s), "end": _rfc3339(end_dt.timestamp())}
         resp = self.http.get(f"{ALPACA_DATA_BASE}/v1beta3/crypto/us/bars", params=params, timeout=10.0)
         check_http(resp)
@@ -240,7 +242,7 @@ class AlpacaStockCandles:
             raise CandleError("alpaca_credentials_missing")
         symbol = normalize_symbol("alpaca_stock", instrument)
         end_dt = end or self.clock()
-        params = {"timeframe": tf, "feed": "iex", "limit": 1000, "adjustment": "raw", "sort": "asc",
+        params = {"timeframe": tf, "feed": "iex", "limit": 1000, "adjustment": "raw", "sort": "desc",
                   "start": _rfc3339(end_dt.timestamp() - 1000 * granularity_s * 3), "end": _rfc3339(end_dt.timestamp())}
         resp = self.http.get(f"{ALPACA_DATA_BASE}/v2/stocks/{symbol}/bars", params=params, timeout=10.0,
                              headers={"APCA-API-KEY-ID": self.key_id, "APCA-API-SECRET-KEY": self.secret})
