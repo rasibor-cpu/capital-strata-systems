@@ -1,0 +1,4 @@
+# CSS-118: the controlled user manual and its manifest are integrity-hashed byte for byte.
+# Never convert line endings on checkout (Windows core.autocrlf would break the SHA-256).
+docs/user/CSS_USER_OPERATING_MANUAL.md -text
+docs/user/CSS_USER_OPERATING_MANUAL.manifest.json -text

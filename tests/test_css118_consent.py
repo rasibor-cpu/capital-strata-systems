@@ -104,6 +104,14 @@ def test_manual_is_controlled_complete_and_uses_owner_acknowledgement():
         assert required.lower() in text.lower(), required
 
 
+def test_manual_bytes_are_pinned_against_line_ending_conversion():
+    """The manual is hashed byte for byte; a CRLF checkout (Windows autocrlf) must not alter it."""
+    attrs = (MANUAL_PATH.parents[2] / ".gitattributes").read_text(encoding="utf-8")
+    for path in (MANUAL_PATH, MANIFEST_PATH):
+        assert b"\r" not in path.read_bytes()
+        assert f"{path.relative_to(MANUAL_PATH.parents[2]).as_posix()} -text" in attrs
+
+
 def test_manual_tampering_fails_closed(tmp_path):
     manual_path, manifest_path = _copy_manual(tmp_path)
     assert load_manual(manual_path, manifest_path).sha256 == current_manual().sha256

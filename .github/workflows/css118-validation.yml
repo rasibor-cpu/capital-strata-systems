@@ -58,7 +58,7 @@ jobs:
       - name: Full pytest suite
         run: |
           set -o pipefail
-          python -m pytest -q -p no:cacheprovider -rs --junitxml=evidence/junit-full.xml \
+          python -m pytest -q -p no:cacheprovider -rfEs --junitxml=evidence/junit-full.xml \
             2>&1 | tee evidence/pytest-full.log
 
       - name: SHA-256 manifest
@@ -96,7 +96,7 @@ jobs:
           set -o pipefail
           mkdir -p evidence
           git rev-parse HEAD > evidence/head_sha.txt
-          python -m pytest -q -p no:cacheprovider -rs --junitxml=evidence/junit-css118.xml \
+          python -m pytest -q -p no:cacheprovider -rfEs --junitxml=evidence/junit-css118.xml \
             tests/test_css118_*.py tests/test_r14f_gate_parity.py 2>&1 | tee evidence/pytest-css118.log
       - name: SHA-256 manifest
         if: always()
