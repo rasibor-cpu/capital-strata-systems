@@ -17,13 +17,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.signals.candles import (  # noqa: E402
-    CoinbasePublicCandles,
-    CsvCandleStore,
-    OandaPracticeCandles,
-    merge,
-    validate,
-)
+from backend.signals.candles import CsvCandleStore, merge, validate  # noqa: E402
+from backend.signals.market_data import build_provider  # noqa: E402
 
 
 def fetch_history(provider, instrument: str, granularity_s: int, bars: int, *, sleep_s: float = 0.35):
@@ -41,19 +36,19 @@ def fetch_history(provider, instrument: str, granularity_s: int, bars: int, *, s
         time.sleep(sleep_s)
     series = merge(parts)
     series = type(series)(series.instrument, series.asset_class, series.granularity_s, series.source,
-                          series.candles[-bars:])
+                          series.candles[-bars:], series.classification)
     return validate(series, allow_gaps=10_000)
 
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--source", choices=["coinbase", "oanda"], required=True)
+    ap.add_argument("--source", choices=["coinbase", "alpaca_crypto", "binance", "alpaca_stock", "oanda"], required=True)
     ap.add_argument("--instrument", required=True)
     ap.add_argument("--granularity", type=int, default=3600)
     ap.add_argument("--bars", type=int, default=8000)
     ap.add_argument("--cache", default="data/market_cache")
     args = ap.parse_args(argv)
-    provider = CoinbasePublicCandles() if args.source == "coinbase" else OandaPracticeCandles()
+    provider = build_provider(args.source)  # read-only; rate-limited with bounded retries
     series = fetch_history(provider, args.instrument, args.granularity, args.bars)
     path = CsvCandleStore(args.cache).save(series)
     print(f"{series.instrument} {series.source} bars={len(series.candles)} sha256={series.digest} -> {path}")

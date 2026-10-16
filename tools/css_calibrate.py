@@ -32,7 +32,8 @@ def code_revision() -> str:
 
 
 def calibrate(series, *, asset_class: str, train_frac: float = 0.4, folds: int = 6,
-              gates: GateThresholds = GateThresholds(), barrier: BarrierParams = BarrierParams()) -> list[dict]:
+              gates: GateThresholds = GateThresholds(), barrier: BarrierParams = BarrierParams(),
+              data_source: str | None = None) -> list[dict]:
     costs = DEFAULT_COSTS[asset_class]
     events = label_events(series.candles, barrier, costs)
     n = len(series.candles)
@@ -45,7 +46,7 @@ def calibrate(series, *, asset_class: str, train_frac: float = 0.4, folds: int =
         out.append(build_artifact(strategy=strategy, instrument=series.instrument, asset_class=asset_class,
                                   granularity_s=series.granularity_s, events=evs, oos=oos, gates=gates,
                                   data_digests=[series.digest], barrier=asdict(barrier), costs=asdict(costs),
-                                  code_revision=code_revision()))
+                                  code_revision=code_revision(), data_source=data_source or series.source))
     return out
 
 

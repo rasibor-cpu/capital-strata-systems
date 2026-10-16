@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from backend.signals.calibration import BinModel, artifact_digest
-from backend.signals.candles import CandleError, CandleProvider, CandleSeries, check_fresh
+from backend.signals.candles import LIVE, CandleError, CandleProvider, CandleSeries, check_fresh, drop_incomplete
 from backend.signals.research import CostModel, candidates_at, compute_features
 from backend.trading_profiles.copy_engine import AUTONOMOUS_SOURCE_ID, SourceSignal
 from backend.trading_profiles.hash_chain import HashChainLog
@@ -81,6 +81,17 @@ class ProducedSignal:
     signal: SourceSignal | None
     reason: str
     artifact_sha256: str | None = None
+    # Provenance of the market observation the decision was computed on (closeout).
+    data_source: str | None = None
+    data_classification: str | None = None
+    data_digest: str | None = None
+    last_bar_ts: int | None = None
+    observed_spread_bps: float | None = None
+
+
+# Classifications a live producer may act on. REPLAY and SYNTHETIC are never permitted here:
+# replay belongs to research tools with a research router, synthetic to tests.
+NEVER_LIVE = frozenset({"REPLAY", "SYNTHETIC", "UNCLASSIFIED", "BLOCKED"})
 
 
 def _bins(model: Mapping[str, Any]) -> BinModel:
@@ -90,11 +101,20 @@ def _bins(model: Mapping[str, Any]) -> BinModel:
 
 class SignalProducer:
     def __init__(self, provider: CandleProvider, approvals: CalibrationApprovals, artifacts: list[Mapping[str, Any]],
-                 costs: Mapping[str, CostModel]) -> None:
+                 costs: Mapping[str, CostModel], *, allowed_classifications: frozenset[str] = frozenset({LIVE}),
+                 quote_provider: Any = None, max_spread_multiple: float = 2.0,
+                 min_depth_notional: float = 0.0) -> None:
+        bad = set(allowed_classifications) & NEVER_LIVE
+        if bad:
+            raise ValueError(f"classification_never_permitted_for_live_signals:{sorted(bad)}")
         self.provider = provider
         self.approvals = approvals
         self.artifacts = list(artifacts)
         self.costs = dict(costs)
+        self.allowed_classifications = frozenset(allowed_classifications)
+        self.quote_provider = quote_provider
+        self.max_spread_multiple = float(max_spread_multiple)
+        self.min_depth_notional = float(min_depth_notional)
 
     def produce(self, instrument: str, *, granularity_s: int, now: datetime) -> list[ProducedSignal]:
         relevant = [a for a in self.artifacts if a.get("instrument") == instrument
@@ -103,16 +123,52 @@ class SignalProducer:
             return [ProducedSignal(None, "no_calibration_for_instrument")]
         try:
             series = self.provider.fetch(instrument, granularity_s=granularity_s)
+            series = drop_incomplete(series, now=now)  # defence in depth: never act on a forming bar
             check_fresh(series, now=now)
         except (CandleError, OSError, ValueError) as exc:
             return [ProducedSignal(None, f"market_data_unavailable:{exc}")]
-        return [self._from_series(series, a, now) for a in relevant]
+        if series.classification not in self.allowed_classifications:
+            return [ProducedSignal(None, f"data_classification_not_permitted:{series.classification}",
+                                   data_source=series.source, data_classification=series.classification)]
+        if series.candles[-1].volume <= 0:
+            return [ProducedSignal(None, "market_quality:last_bar_no_volume", data_source=series.source,
+                                   data_classification=series.classification)]
+        spread_bps: float | None = None
+        if self.quote_provider is not None:
+            try:
+                quote = self.quote_provider.quote(instrument)
+            except (CandleError, OSError, ValueError) as exc:
+                return [ProducedSignal(None, f"market_quality:quote_unavailable:{exc}", data_source=series.source,
+                                       data_classification=series.classification)]
+            spread_bps = quote.spread_bps
+            cost = self.costs.get(series.asset_class)
+            if cost is not None and spread_bps > cost.spread_bps * self.max_spread_multiple:
+                return [ProducedSignal(None, f"market_quality:spread_exceeds_cost_model:{spread_bps:.1f}bps",
+                                       data_source=series.source, data_classification=series.classification,
+                                       observed_spread_bps=spread_bps)]
+            depth = min(quote.bid_depth_notional or 0.0, quote.ask_depth_notional or 0.0)
+            if self.min_depth_notional > 0 and depth < self.min_depth_notional:
+                return [ProducedSignal(None, f"market_quality:depth_insufficient:{depth:.0f}",
+                                       data_source=series.source, data_classification=series.classification,
+                                       observed_spread_bps=spread_bps)]
+        out = []
+        for a in relevant:
+            p = self._from_series(series, a, now)
+            out.append(ProducedSignal(p.signal, p.reason, p.artifact_sha256, series.source, series.classification,
+                                      series.digest, series.candles[-1].ts, spread_bps))
+        return out
 
     def _from_series(self, series: CandleSeries, artifact: Mapping[str, Any], now: datetime) -> ProducedSignal:
         sha = artifact.get("artifact_sha256")
         ok, why = self.approvals.status(artifact)
         if not ok:
             return ProducedSignal(None, f"calibration_not_routable:{why}", sha)
+        calibrated_source = artifact.get("data_source")
+        if calibrated_source and calibrated_source != series.source:
+            # A model fitted on one venue's bars is not applied to another venue's bars.
+            return ProducedSignal(None, f"data_source_mismatch:{series.source}!={calibrated_source}", sha)
+        if series.asset_class not in self.costs:
+            return ProducedSignal(None, f"no_cost_model:{series.asset_class}", sha)
         feats = compute_features(series.candles)
         last = feats[-1] if feats else None
         cands = [c for c in candidates_at(last) if c.strategy == artifact["strategy"]]

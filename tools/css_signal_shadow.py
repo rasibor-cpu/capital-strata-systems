@@ -37,7 +37,12 @@ def run(*, router, bridge, producer, approvals, artifacts, instruments, granular
             for inst in instruments:
                 for produced in producer.produce(inst, granularity_s=granularity_s, now=now):
                     rec = {"type": "PRODUCED", "instrument": inst, "reason": produced.reason,
-                           "artifact_sha256": produced.artifact_sha256, "at_utc": now.isoformat()}
+                           "artifact_sha256": produced.artifact_sha256, "at_utc": now.isoformat(),
+                           "data_source": getattr(produced, "data_source", None),
+                           "data_classification": getattr(produced, "data_classification", None),
+                           "data_digest": getattr(produced, "data_digest", None),
+                           "last_bar_ts": getattr(produced, "last_bar_ts", None),
+                           "observed_spread_bps": getattr(produced, "observed_spread_bps", None)}
                     if produced.signal is not None:
                         signals += 1
                         result = bridge.publish_real_data(produced, by_sha[produced.artifact_sha256], approvals, now=now)
@@ -54,7 +59,7 @@ def run(*, router, bridge, producer, approvals, artifacts, instruments, granular
 
 
 def main(argv=None) -> int:  # pragma: no cover - operational entry point
-    from backend.signals.candles import CoinbasePublicCandles, OandaPracticeCandles
+    from backend.signals.market_data import build_provider
     from backend.signals.producer import CalibrationApprovals, SignalProducer
     from backend.signals.research import DEFAULT_COSTS
     from backend.trading_profiles.engine_bridge import CssEngineSignalBridge
@@ -63,7 +68,7 @@ def main(argv=None) -> int:  # pragma: no cover - operational entry point
     ap = argparse.ArgumentParser()
     ap.add_argument("--artifacts", required=True)
     ap.add_argument("--instrument", action="append", required=True)
-    ap.add_argument("--source", choices=["coinbase", "oanda"], required=True)
+    ap.add_argument("--source", choices=["coinbase", "alpaca_crypto", "binance", "alpaca_stock", "oanda"], required=True)
     ap.add_argument("--granularity", type=int, default=3600)
     ap.add_argument("--hours", type=float, required=True)
     ap.add_argument("--poll-seconds", type=float, default=60.0)
@@ -72,7 +77,7 @@ def main(argv=None) -> int:  # pragma: no cover - operational entry point
     artifacts = [json.loads(p.read_text(encoding="utf-8")) for p in sorted(Path(args.artifacts).glob("*.json"))]
     router = _trading_router()
     approvals = CalibrationApprovals(router.engine.root)
-    provider = CoinbasePublicCandles() if args.source == "coinbase" else OandaPracticeCandles()
+    provider = build_provider(args.source)
     producer = SignalProducer(provider, approvals, artifacts, DEFAULT_COSTS)
     summary = run(router=router, bridge=CssEngineSignalBridge(router), producer=producer, approvals=approvals,
                   artifacts=artifacts, instruments=args.instrument, granularity_s=args.granularity, hours=args.hours,
