@@ -4,7 +4,7 @@ This module never places orders or modifies trading gates.
 """
 from __future__ import annotations
 
-from decimal import Decimal, InvalidOperation
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
 DEFAULT_USER_CAPITAL_CAD = Decimal("100000")
 ENGINEERING_CAPITAL_CAD = Decimal("14600")
@@ -61,7 +61,8 @@ def reference_comparison(net_pnl_cad: object, *, simulation_capital_cad: object,
         "simulation_capital_cad": float(sim),
         "reference_capital_cad": float(reference),
         "scale_ratio": float(sim / reference),
-        "illustrative_reference_pnl_cad": float((pnl * reference / sim).quantize(Decimal("0.01"))),
+        # Explicit half-up (away from zero) rounding: illustrative figure, never a charge or fill.
+        "illustrative_reference_pnl_cad": float((pnl * reference / sim).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)),
         "executable_at_reference_capital": False,
         "warning": "Illustrative normalization only; minimum orders, fees, spreads, liquidity, FX and rounding do not scale linearly.",
     }

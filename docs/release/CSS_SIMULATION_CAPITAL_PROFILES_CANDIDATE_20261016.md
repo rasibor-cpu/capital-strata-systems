@@ -19,5 +19,16 @@ Existing per-run metadata persists capital on restart; changing the profile agai
 
 **Governance unchanged:** Track A requires calibration approvals; Track B is research-only; R7 sign-on, AntiBleed CAD 50 minimum, R14F, consent, safety flags, position limits and data outage controls stay intact. Live orders disabled. No 48-hour run was started.
 
-## Acceptance pending
-The new unit tests were committed but have not been executed by this assistant. Linux/Windows full regression, browser UX, runtime integration, capital-selection UI, reset audit trail, operator sign-off, real data access and persistent cloud runtime are outstanding. Do not merge or describe as production ready until independently verified.
+## Validation (branch `claude/css-sim-validation-20261016`)
+Executed, see `tests/test_css_simulation_capital_profiles.py` and `tests/test_css_sim_validation.py`.
+Changes made while validating:
+- Customer paper accounts now actually default to CAD 100,000 (`PaperBook` default was CAD 10,000); existing accounts keep their persisted equity.
+- Illustrative normalisation rounds half-up explicitly (the committed test expected −0.37; banker's rounding gave −0.36).
+- Audited capital reset: `PaperBook.reset_account` (holder or SUPER_USER, reason required, no open positions, never pilot-envelope accounts, permitted capital only), with the prior account kept in a hash-chained log.
+- The simulation now honours the ambient kill switch exactly like the canonical router (it previously passed an empty env).
+- `run` refuses to resume a root with a different capital (no silent reset); report reference comparison no longer crashes on legacy CAD 146 runs.
+- Report adds true max drawdown (from per-cycle equity), unrealized P&L, capital utilisation and per-instrument results.
+
+Note: `.env.paper.example` sets `CSS_LIVE_ORDER_KILL_SWITCH=1`; with it, the canonical router and this simulation reject every entry. The operator must decide whether the paper trial runs with the kill switch clear.
+
+Still outstanding: a capital-selection UI in onboarding, an HTTP endpoint for resets, a continuous host with market-data access, and operator sign-off.

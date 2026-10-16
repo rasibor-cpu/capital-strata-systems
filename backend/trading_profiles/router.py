@@ -63,7 +63,11 @@ from backend.trading_profiles.signal_feed import SignalFeed, SignalFeedError
 
 _CLIENT_ID = re.compile(r"^[A-Za-z0-9_.-]{1,40}$")
 BOOK_SCHEMA = "css.trading_profiles.paper_book.v1"
-DEFAULT_PAPER_EQUITY_CAD = 10_000.0
+# Customer paper accounts start at the standard simulated capital (CAD 100,000); see
+# backend/simulation/capital_profiles.py. Existing accounts keep their persisted equity.
+from backend.simulation.capital_profiles import DEFAULT_USER_CAPITAL_CAD as _DEFAULT_USER_CAPITAL_CAD  # noqa: E402
+
+DEFAULT_PAPER_EQUITY_CAD = float(_DEFAULT_USER_CAPITAL_CAD)
 ROLE_RESOLVER = Callable[[str], str | None]
 # -> (session_id, session_created_epoch) of the user's current sign-on, or None
 SESSION_RESOLVER = Callable[[str], tuple[str, float] | None]
@@ -145,6 +149,50 @@ class PaperBook:
             acct["equity"] = round(acct["equity"] - entry_fee, 2)
             acct["fees"] = round(acct["fees"] + entry_fee, 2)
         self._mutate(fn)
+
+    def reset_account(self, user_id: str, *, capital_cad: Any, actor_ctx: Mapping[str, Any], reason: str,
+                      now: datetime) -> dict[str, Any]:
+        """Restart a paper account at a new simulated capital, with a hash-chained audit record.
+
+        Only the account holder or a SUPER_USER may reset; open positions must be closed first;
+        pilot-envelope accounts are never reset; capital must be a permitted simulated amount
+        (backend.simulation.capital_profiles.validate_capital). The previous account state is
+        preserved in the audit log, never silently discarded. Paper only: no money moves."""
+        from backend.simulation.capital_profiles import validate_capital
+        from backend.trading_profiles.hash_chain import HashChainLog
+
+        actor = dict(actor_ctx or {})
+        actor_id, role = str(actor.get("user_id") or ""), str(actor.get("role") or "").upper()
+        if not actor_id or (actor_id != user_id and role != "SUPER_USER"):
+            raise PaperBookError("reset_not_authorized")
+        if not str(reason or "").strip():
+            raise PaperBookError("reset_reason_required")
+        try:
+            capital = float(validate_capital(capital_cad))
+        except ValueError as exc:
+            raise PaperBookError(str(exc)) from exc
+        log = HashChainLog(self.root, "paper_capital_resets", PaperBookError)
+
+        def fn(doc):
+            if any(r["position"]["follower_user_id"] == user_id for r in doc["positions"].values()):
+                raise PaperBookError("reset_requires_no_open_positions")
+            prior = doc["accounts"].get(user_id)
+            if prior is not None and prior.get("pilot_envelope"):
+                raise PaperBookError("pilot_envelope_account_cannot_be_reset")
+            fresh = self._new_account(now)
+            fresh.update(equity=capital, equity_peak=capital, day_start_equity=capital,
+                         resets=int((prior or {}).get("resets", 0)) + 1)
+            event = log.append({"event": "PAPER_CAPITAL_RESET", "user_id": user_id, "actor": actor_id,
+                                "actor_role": role, "reason": str(reason)[:300], "new_capital_cad": capital,
+                                "prior_account": prior, "at_utc": _iso(now), "money_moved": False})
+            doc["accounts"][user_id] = fresh
+            return {"account": dict(fresh), "audit_entry_hash": event["entry_hash"]}
+        return self._mutate(fn)
+
+    def reset_history(self, user_id: str | None = None) -> list[dict[str, Any]]:
+        from backend.trading_profiles.hash_chain import HashChainLog
+        events = HashChainLog(self.root, "paper_capital_resets", PaperBookError).events()
+        return [e for e in events if user_id is None or e["user_id"] == user_id]
 
     def update_best_price(self, position_id: str, best_price: float) -> None:
         def fn(doc):

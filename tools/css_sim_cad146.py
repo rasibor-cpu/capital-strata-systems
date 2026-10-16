@@ -55,6 +55,10 @@ def _sim(args, presenter=None) -> Cad146Simulation:
 def cmd_run(args) -> int:
     sim = _sim(args, presenter=_terminal_presenter)
     meta = json.loads(sim.meta_path.read_text(encoding="utf-8"))
+    requested = starting_capital(profile=args.capital_profile, custom_cad=args.custom_capital_cad)
+    if float(meta["starting_equity_cad"]) != requested:
+        raise SystemExit(f"refused: {args.root} was initialised with CAD {meta['starting_equity_cad']:.2f}; "
+                         f"requested CAD {requested:.2f}. Use a new --root for a new scenario (no silent reset).")
     end = datetime.fromisoformat(meta["started_utc"]) + timedelta(hours=args.hours)
     provider = build_provider(args.source)
     instruments = sorted({(a["instrument"], int(a["granularity_s"])) for a in sim.artifacts}) or \
@@ -78,10 +82,13 @@ def cmd_attest(args) -> int:
 def cmd_report(args) -> int:
     rep = _sim(args).report()
     initial = rep["run"]["starting_equity_cad"]
-    rep["reference_comparison"] = {
-        name: reference_comparison(track["net_pnl_cad"], simulation_capital_cad=initial)
-        for name, track in rep["tracks"].items()
-    }
+    try:
+        rep["reference_comparison"] = {
+            name: reference_comparison(track["net_pnl_cad"], simulation_capital_cad=initial)
+            for name, track in rep["tracks"].items()
+        }
+    except ValueError as exc:  # e.g. a legacy CAD 146 run: nothing to normalise
+        rep["reference_comparison"] = {"unavailable": str(exc)}
     text = json.dumps(rep, indent=2, sort_keys=True, default=str)
     if args.out:
         Path(args.out).write_text(text + "\n", encoding="utf-8")
