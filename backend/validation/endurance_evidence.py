@@ -38,10 +38,18 @@ class CanonicalEnduranceEvidence:
 
     @staticmethod
     def get_host_boot_time() -> float:
-        """Retrieves host system boot time on Windows using GetTickCount64."""
+        """Host boot time (epoch seconds): GetTickCount64 on Windows, CLOCK_BOOTTIME on Linux.
+
+        Both clocks count time since boot including suspend. Returns 0.0 only when
+        neither is available, which disables reboot detection on that host.
+        """
         try:
             uptime_ms = ctypes.windll.kernel32.GetTickCount64()
             return time.time() - (uptime_ms / 1000.0)
+        except Exception:
+            pass
+        try:
+            return time.time() - time.clock_gettime(time.CLOCK_BOOTTIME)
         except Exception:
             return 0.0
 
