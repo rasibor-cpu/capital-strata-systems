@@ -33,6 +33,9 @@ class Provenance(str, Enum):
     ENGINE_LOOP_CALIBRATED = "ENGINE_LOOP_CALIBRATED"
     LEGACY_RANDOM_CANDIDATE = "LEGACY_RANDOM_CANDIDATE"
     UNCALIBRATED = "UNCALIBRATED"
+    # Real-market-data producer (backend/signals). Never accepted through publish(): only through
+    # publish_real_data(), which re-verifies the dual-control calibration approval itself.
+    REAL_DATA_CALIBRATED = "REAL_DATA_CALIBRATED"
 
 
 ROUTABLE_PROVENANCES = frozenset({Provenance.ENGINE_LOOP_CALIBRATED})
@@ -104,6 +107,27 @@ class CssEngineSignalBridge:
             self.refusals.append({"signal_id": sid, "provenance": provenance.value, "reason": why, "at_utc": now.isoformat()})
             LOGGER.info("CSS engine signal refused: %s %s", sid, why)
             return RouteResult(sid, False, why)
+        return self.router.on_css_engine_signal(signal, now=now)
+
+    def publish_real_data(self, produced: Any, artifact: Mapping[str, Any], approvals: Any, *,
+                          now: datetime | None = None) -> RouteResult:
+        """Route a backend.signals.producer signal only if its calibration is approved right now."""
+        now = now or datetime.now(timezone.utc)
+        signal = getattr(produced, "signal", None)
+        sid = signal.signal_id if signal is not None else "none"
+
+        def refuse(why: str) -> RouteResult:
+            self.refusals.append({"signal_id": sid, "provenance": Provenance.REAL_DATA_CALIBRATED.value,
+                                  "reason": why, "at_utc": now.isoformat()})
+            return RouteResult(sid, False, why)
+
+        if signal is None:
+            return refuse(str(getattr(produced, "reason", "no_signal")))
+        if getattr(produced, "artifact_sha256", None) != artifact.get("artifact_sha256"):
+            return refuse("signal_artifact_mismatch")
+        ok, why = approvals.status(artifact)
+        if not ok:
+            return refuse(f"calibration_not_routable:{why}")
         return self.router.on_css_engine_signal(signal, now=now)
 
     def engine_loop_sink(self, calibration: Calibration | None, *, asset_class: str) -> Callable[[Mapping[str, Any]], None]:
