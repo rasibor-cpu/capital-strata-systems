@@ -187,6 +187,7 @@ class TradingRouter:
         feed: SignalFeed | None = None,
         assessment_provider: ASSESSMENT_PROVIDER | None = None,
         oms: PaperOMS | None = None,
+        fee_ledger: Any = None,
     ) -> None:
         self.engine = engine
         self.book = book
@@ -198,6 +199,11 @@ class TradingRouter:
         self.assessments = MarketAssessmentStore(engine.root)
         self.assessment_provider = assessment_provider
         self.oms = oms
+        # Optional commercial accrual (backend.commercial.fee_ledger.FeeLedger): every closed paper
+        # position is posted once; fees are accrued, never collected. A posting failure is
+        # recorded and never blocks a protective exit.
+        self.fee_ledger = fee_ledger
+        self.fee_posting_errors: list[dict] = []
 
     # -- context (fail closed) ---------------------------------------------------
     def _system(self) -> SystemContext | None:
@@ -411,6 +417,18 @@ class TradingRouter:
             return stub_reject("manual_order_requires_css_market_assessment")
         return self._decide(signal, user_id, now, self._system(), session=session, requested_notional=requested)
 
+    def _post_fee(self, position: CopiedPosition, pnl: float, now: datetime) -> dict | None:
+        if self.fee_ledger is None:
+            return None
+        try:
+            return self.fee_ledger.post_close(position_id=position.position_id, user_id=position.follower_user_id,
+                                              trader_id=position.trader_id, signal_id=position.signal_id,
+                                              notional=position.notional, pnl=pnl, now=now)
+        except Exception as exc:  # accounting must never block a protective exit
+            self.fee_posting_errors.append({"position_id": position.position_id, "error": f"{type(exc).__name__}: {exc}",
+                                            "at_utc": now.isoformat()})
+            return {"status": "POSTING_FAILED", "error": type(exc).__name__}
+
     # -- protective exits (never gated by consent, mandate or pause) ----------------------
     def run_exit_cycle(self, marks: Mapping[str, float], *, now: datetime | None = None,
                        source_exited: set[str] | frozenset[str] = frozenset()) -> list[dict[str, Any]]:
@@ -437,6 +455,7 @@ class TradingRouter:
             pnl = realized_pnl(position, mark, meta["fee_bps"])
             self.engine.record_exit(position, exit_price=mark, reason=exit_decision.reason, pnl=pnl, now=now)
             self.book.close(position.position_id, pnl)
+            fee = self._post_fee(position, pnl, now)
             closed.append({"position_id": position.position_id, "user_id": position.follower_user_id,
-                           "reason": exit_decision.reason, "pnl": pnl})
+                           "reason": exit_decision.reason, "pnl": pnl, "fee": fee})
         return closed

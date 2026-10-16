@@ -1299,8 +1299,17 @@ def _trading_router():
         return SystemContext(engine_mode=str(controls.get("engine_mode") or "SAFE"), safety_flags=flags,
                              mobile_controls=controls, env=env)
 
+    def terms_resolver(user_id: str):
+        # The user's configured and ACCEPTED commercial terms; anything else accrues no fee.
+        from dashboard.enterprise_shell.operator_configuration import load_user_account_profiles
+        return load_user_account_profiles().get(user_id)
+
+    from backend.commercial.fee_ledger import FeeLedger
+
+    # Closeout: commercial accrual on every closed paper position (accounting only; no money moves).
     return TradingRouter(engine, book=PaperBook(root), role_resolver=role_resolver,
-                         session_resolver=session_resolver, system_provider=system_provider)
+                         session_resolver=session_resolver, system_provider=system_provider,
+                         fee_ledger=FeeLedger(root / "commercial", terms_resolver=terms_resolver))
 
 
 def _acceptance_required_message(status) -> str:
