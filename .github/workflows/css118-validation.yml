@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
   push:
     branches:
+      - claude/css129-questrade-binance-readonly  # first: avoids a merge conflict with #130's entry
       - claude/css118-trading-profiles
       - claude/css118-closeout
       - claude/css-rc1-signal-pipeline
@@ -16,7 +17,6 @@ on:
       - claude/css-cad146-simulation
       - claude/css-sim-validation-20261016
       - claude/css-sim-operational-readiness-20261016
-      - claude/css129-questrade-binance-readonly
 
 permissions:
   contents: read
