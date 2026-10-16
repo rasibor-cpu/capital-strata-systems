@@ -5,8 +5,9 @@ Run on a host that can reach the public market-data endpoints (e.g. FINANCE), in
 
   # 0) preflight only (no run directory is created; nothing starts)
   python tools/css_sim_cad146.py preflight --root artifacts/simulation/cad14600-20261016 --operator <id>
-  # 1) start: preflight must PASS, then every manual page is presented for confirmation, then the
-  #    48-hour clock starts. Required: CSS_LIVE_ORDER_KILL_SWITCH=1 (live brokerage stays killed);
+  # 1) start: preflight must PASS, then the operating agreement is shown (Enter/p to page through,
+  #    one ACCEPT on the final screen), then the 48-hour clock starts.
+  #    Required: CSS_LIVE_ORDER_KILL_SWITCH=1 (live brokerage stays killed);
   #    CSS_SIM_ENTRY_HALT unset (it pauses simulated entries only).
   python tools/css_sim_cad146.py run --root artifacts/simulation/cad146-20261016 \
       --artifacts artifacts/calibration --operator <your-user-id> --hours 48 --poll-seconds 300
@@ -43,16 +44,78 @@ def _load_artifacts(folder: str) -> list[dict]:
     return [json.loads(p.read_text(encoding="utf-8")) for p in sorted(Path(folder).glob("*.json"))]
 
 
-def _terminal_presenter(page) -> bool:
-    print(f"\n===== Manual page {page['index']}/{page['total']}: {page['title']} (v{page['manual_version']}) =====\n")
-    print(page["markdown"])
-    return input("\nConfirm you have read this page in full [yes/NO]: ").strip().lower() == "yes"
+_NEXT, _PREV = {"", "n", "next"}, {"p", "prev", "previous", "b", "back"}
+_QUIT, _DECLINE = {"q", "quit"}, {"d", "decline"}
 
 
-def _sim(args, presenter=None) -> Cad146Simulation:
+def _ask(read, prompt: str) -> str | None:
+    try:
+        return str(read(prompt)).strip().lower()
+    except EOFError:
+        return None
+
+
+def terminal_agreement(review, *, read=input, write=print) -> None:
+    """Operating agreement in the terminal: free next/previous paging, ONE acceptance at the end.
+
+    No page needs a per-page confirmation. Unrecognised input never aborts: it is explained and
+    the same prompt is shown again. Quitting, declining or closed input record a decline."""
+    write(f"\nCSS operating agreement {review.manual.document_id} v{review.manual.version} - {review.total} pages.\n"
+          "Read each page; press Enter (or n) for the next page, p for the previous one, q to quit.\n"
+          "Nothing is accepted page by page: you accept once, on the final screen, after the last page.")
+    while review.status == "REVIEWING":
+        if review.at_final_screen:
+            s = review.summary()
+            write("\n===== Final acceptance =====")
+            for label, key in (("Agreement", "document_id"), ("Version", "agreement_version"),
+                               ("Content SHA-256", "agreement_sha256"), ("Operator", "operator_id"),
+                               ("Operating mode", "operating_mode"), ("Risk personality", "risk_personality"),
+                               ("Limits", "limits"), ("Policy hash", "policy_hash")):
+                value = s[key] if s[key] not in ({}, None) else "none (personality defaults apply)"
+                write(f"  {label:17s} {value}")
+            write(f"  Pages reviewed    {s['pages_reviewed']}/{s['pages_total']}")
+            write("  Live trading      NOT authorized (simulation only)")
+            write(f"\n  {s['acknowledgement_text']}\n")
+            answer = _ask(read, "Type ACCEPT to accept, p to go back, or d to decline: ")
+            if answer is None:
+                review.decline("input_closed")
+            elif answer == "accept":
+                receipts = review.accept(acknowledged=True, policy_hash_shown=s["policy_hash"])
+                write(f"Accepted. Receipts: {', '.join(r['receipt_id'] for r in receipts)}")
+            elif answer in _PREV:
+                review.previous()
+            elif answer in _DECLINE or answer in _QUIT:
+                review.decline("declined_by_operator")
+            else:
+                write("Not recognised: nothing has been accepted or declined. Type ACCEPT, p or d.")
+            continue
+        page = review.page()
+        write(f"\n===== Page {page['index']}/{page['total']}: {page['title']} "
+              f"(agreement v{page['manual_version']}) =====\n")
+        write(page["markdown"])
+        while True:
+            answer = _ask(read, f"\n[Enter] next  [p] previous  [q] quit without accepting   ({page['index']}/{page['total']}): ")
+            if answer is None:
+                review.decline("input_closed")
+            elif answer in _NEXT:
+                review.next()
+            elif answer in _PREV:
+                review.previous()
+            elif answer in _QUIT:
+                review.decline("quit_before_acceptance")
+            else:
+                write("Not recognised. Press Enter for the next page, p for the previous page or q to quit.")
+                continue
+            break
+
+
+_terminal_presenter = terminal_agreement
+
+
+def _sim(args, presenter=None, *, read_only=False) -> Cad146Simulation:
     return Cad146Simulation(args.root, artifacts=_load_artifacts(args.artifacts) if getattr(args, "artifacts", None) else [],
                             costs=DEFAULT_COSTS, operational_approvals_root=args.approvals_root,
-                            operator=args.operator, presenter=presenter,
+                            operator=args.operator, presenter=presenter, require_current_agreement=not read_only,
                             quote_provider=CoinbaseQuotes(resilient_http()),
                             starting_equity=starting_capital(profile=args.capital_profile,
                                 custom_cad=args.custom_capital_cad))
@@ -137,7 +200,7 @@ def cmd_attest(args, *, confirm=None) -> int:
 
 def cmd_report(args) -> int:
     _require_existing(args)
-    rep = _sim(args).report()
+    rep = _sim(args, read_only=True).report()
     initial = rep["run"]["starting_equity_cad"]
     try:
         rep["reference_comparison"] = {

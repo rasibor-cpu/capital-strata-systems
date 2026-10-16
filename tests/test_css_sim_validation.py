@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from agreement_support import accept_agreement
+
 from test_css_rc1_signals import ADMIN_A, ADMIN_B, H, _artifact, _now_for, synthetic
 from css118_support import KEY, NOW, SESSION, activate, signal, system
 from backend.signals.producer import CalibrationApprovals
@@ -41,7 +43,7 @@ def make(tmp_path, *, approved, art=None, equity=ENGINEERING, name="sim"):
         appr.approve(art, actor_ctx=ADMIN_A)
         appr.approve(art, actor_ctx=ADMIN_B)
     sim = Cad146Simulation(tmp_path / name, artifacts=[art], costs=DEFAULT_COSTS, operational_approvals_root=ops,
-                           operator="operator-1", starting_equity=equity, presenter=lambda page: True)
+                           operator="operator-1", starting_equity=equity, presenter=accept_agreement)
     return sim, art
 
 
@@ -135,7 +137,7 @@ def test_cli_refuses_resume_with_different_capital(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("css_sim_cad146", REPO / "tools" / "css_sim_cad146.py")
     tool = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(tool)
-    monkeypatch.setattr(tool, "_terminal_presenter", lambda page: True)
+    monkeypatch.setattr(tool, "_terminal_presenter", accept_agreement)
     monkeypatch.setattr(tool, "CoinbaseQuotes", lambda http: None)
     monkeypatch.setattr(tool, "_preflight", lambda args, now=None: {"verdict": "PASS", "checks": []})
     root = tmp_path / "run"
