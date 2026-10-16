@@ -241,6 +241,31 @@ def test_binance_weight_budget_and_ban_backoff():
         WeightGuard().get(FakeHttp(Resp({}, status=451)), "https://data-api.binance.vision/api/v3/time", {})
 
 
+def test_weight_budget_recovers_after_the_window_rolls_over():
+    t = {"now": 0.0}
+    guard = WeightGuard(clock=lambda: t["now"])
+    guard.after_response(Resp({}, headers={"X-MBX-USED-WEIGHT-1M": "4800"}))
+    t["now"] = 59.0
+    with pytest.raises(CandleError, match="weight_budget_exhausted"):
+        guard.before_request()
+    t["now"] = 61.0
+    guard.before_request()  # window rolled over: no permanent lock-out (review H1)
+    assert guard.used == 0
+    stale = WeightGuard(clock=lambda: 10_000.0, used=4800)  # reviewer's repro
+    stale.before_request()
+
+
+def test_default_weight_guard_is_shared_across_calls(monkeypatch):
+    from backend.signals import binance_market_data as bmd
+    t = {"now": 0.0}
+    monkeypatch.setattr(bmd, "_DEFAULT_GUARD", WeightGuard(clock=lambda: t["now"]))
+    with pytest.raises(CandleError, match="binance_ip_banned"):
+        exchange_filters("BTC-USDT", operating_country="GB", http=FakeHttp(Resp({}, status=418, headers={"Retry-After": "120"})))
+    fetch = bmd.public_snapshot_fetcher(operating_country="GB", http=NeverCalledHttp())
+    with pytest.raises(CandleError, match="backoff_in_effect"):
+        asyncio.run(fetch("BTCUSDT"))  # refused with zero HTTP calls (review M1)
+
+
 def _snapshot(last=100):
     return {"lastUpdateId": last, "bids": [["99.0", "1.0"], ["98.0", "2.0"]], "asks": [["101.0", "1.0"], ["102.0", "1.0"]]}
 

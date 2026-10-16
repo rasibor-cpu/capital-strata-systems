@@ -45,19 +45,25 @@ class WeightGuard:
     clock: Callable[[], float] = time.monotonic
     used: int = 0
     blocked_until: float = 0.0
+    window_s: float = 60.0
+    observed_at: float = 0.0  # when the server last reported the used weight
 
     def before_request(self) -> None:
-        if self.clock() < self.blocked_until:
+        now = self.clock()
+        if now < self.blocked_until:
             raise CandleError("binance_backoff_in_effect")
+        if now - self.observed_at >= self.window_s:
+            self.used = 0  # the 1-minute window has rolled over since the last server report
         if self.used >= self.limit * self.budget_fraction:
             raise CandleError("binance_request_weight_budget_exhausted")
 
     def after_response(self, resp: Any) -> None:
         headers = getattr(resp, "headers", None) or {}
-        try:
-            self.used = int(headers.get("X-MBX-USED-WEIGHT-1M", self.used))
-        except (TypeError, ValueError):
-            pass
+        if "X-MBX-USED-WEIGHT-1M" in headers:
+            try:
+                self.used, self.observed_at = int(headers["X-MBX-USED-WEIGHT-1M"]), self.clock()
+            except (TypeError, ValueError):
+                pass
         status = int(getattr(resp, "status_code", 200) or 200)
         if status in (418, 429):
             try:
@@ -92,11 +98,16 @@ class SymbolFilters:
         return self.status == "TRADING"
 
 
+# One budget per process: Binance meters request weight and bans per IP, so every call that is not
+# given its own guard shares this one (budget and 429/418 back-off carry across calls).
+_DEFAULT_GUARD = WeightGuard()
+
+
 def exchange_filters(instrument: str, *, operating_country: str | None, http: Any = None,
                      guard: WeightGuard | None = None) -> SymbolFilters:
     _require_eligible(operating_country)
     symbol = normalize_symbol("binance", instrument)
-    resp = (guard or WeightGuard()).get(http or _requests_session(), f"{BINANCE_PUBLIC_BASE}/api/v3/exchangeInfo",
+    resp = (guard or _DEFAULT_GUARD).get(http or _requests_session(), f"{BINANCE_PUBLIC_BASE}/api/v3/exchangeInfo",
                                         {"symbol": symbol})
     try:
         (info,) = [s for s in resp.json()["symbols"] if s.get("symbol") == symbol]
@@ -266,7 +277,7 @@ class DepthStream:
 def public_snapshot_fetcher(*, operating_country: str | None, http: Any = None, guard: WeightGuard | None = None):
     """REST depth snapshot for DepthStream (public host, weight-guarded, eligibility-checked)."""
     _require_eligible(operating_country)
-    http, guard = http or _requests_session(), guard or WeightGuard()
+    http, guard = http or _requests_session(), guard or _DEFAULT_GUARD
 
     async def fetch(symbol: str) -> Mapping[str, Any]:
         resp = await asyncio.to_thread(guard.get, http, f"{BINANCE_PUBLIC_BASE}/api/v3/depth",
