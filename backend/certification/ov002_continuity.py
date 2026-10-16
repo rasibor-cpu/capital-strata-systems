@@ -490,15 +490,30 @@ def default_identity_probe(pid: int) -> dict[str, Any] | None:
             "$obj | "
             "ConvertTo-Json -Compress"
         )
-        try:
-            completed = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", script],
-                capture_output=True,
-                text=True,
-                check=False,
-                timeout=20,
-            )
-        except Exception:
+        # CSS-118 Windows hardening: under CI load the dual Get-CimInstance probe can
+        # exceed 20s. Raise the per-attempt timeout and allow a single fail-closed retry.
+        # Timeout/exception still returns None — never invent identity fields.
+        identity_timeout = 45
+        last_exc: Exception | None = None
+        completed = None
+        for _attempt in range(2):
+            try:
+                completed = subprocess.run(
+                    ["powershell", "-NoProfile", "-Command", script],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=identity_timeout,
+                )
+                last_exc = None
+                break
+            except subprocess.TimeoutExpired as exc:
+                last_exc = exc
+                completed = None
+                continue
+            except Exception:
+                return None
+        if last_exc is not None or completed is None:
             return None
         if completed.returncode != 0:
             return None
