@@ -98,6 +98,14 @@ def test_uncalibrated_quality_inputs_keep_conservative_defaults_and_are_gated(br
     assert (d.outcome, d.stage) == ("REJECTED", "trade_quality")  # no invented quality: the gate decides
 
 
+@pytest.mark.parametrize("provenance", [Provenance.LEGACY_RANDOM_CANDIDATE, Provenance.UNCALIBRATED])
+def test_valid_signal_with_unapproved_provenance_is_refused(bridge, provenance):
+    signal, _, _ = source_signal_from_engine_event(_event(), CALIBRATED, asset_class="FX")
+    r = bridge.publish(signal, provenance)
+    assert (r.accepted, r.reason) == (False, f"engine_signal_provenance_not_approved:{provenance.value}")
+    assert bridge.router.book.positions() == [] and bridge.router.engine.ledger.records() == []
+
+
 def test_bridge_cannot_widen_routable_provenance(bridge):
     wide = CssEngineSignalBridge(bridge.router, routable=frozenset(Provenance))
     assert wide.routable == frozenset({Provenance.ENGINE_LOOP_CALIBRATED})
