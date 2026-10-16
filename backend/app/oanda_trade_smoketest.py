@@ -85,6 +85,11 @@ def _pick_trade_id_from_order_response(j: Dict[str, Any]) -> Optional[str]:
 
 
 def main() -> int:
+    from backend.runtime.direct_broker_script_guard import refuse_direct_broker_script
+
+    refused = refuse_direct_broker_script("oanda_trade_smoketest")
+    if refused is not None:
+        return refused
     _load_env()
 
     base = _get_env("OANDA_BASE_URL", "https://api-fxpractice.oanda.com")

@@ -12,6 +12,12 @@ R15B_EXIT_PROFILE = {
 }
 
 
+# CSS-118 (owner direction 2): the automatic legacy loop bypasses the governed router (consent,
+# personality, capital governors, AntiBleed via ExecutionGate). Its broker branch is closed in
+# code; re-opening it requires a reviewed source change and owner approval, not configuration.
+LEGACY_LOOP_BROKER_EXECUTION_PERMITTED = False
+
+
 def r15b_profile():
     return R15B_EXIT_PROFILE.get(str(ENGINE_MODE).upper(), R15B_EXIT_PROFILE["BALANCED"])
 
@@ -5326,7 +5332,10 @@ try:
                     print(f"[R15A EXIT] {symbol} signal={exit_signal}")
 
                     if position.get("broker_tested"):
-                        if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+                        if not LEGACY_LOOP_BROKER_EXECUTION_PERMITTED:
+                            # CSS-118: the automatic loop may not send broker orders; the position stays paper.
+                            ok, broker_msg = False, "LEGACY_LOOP_BROKER_PATH_DISABLED_CSS118"
+                        elif asset_class == "FX" and SELECTED_BROKER == "OANDA":
                             live_fx_funded_this_cycle += 1
                             resolved_expected_price = resolve_expected_fx_price(symbol)
                             ok, broker_msg, t_id, f_price, e_time, slippage = attempt_oanda_fx_execution(symbol, expected_price=resolved_expected_price)

@@ -39,7 +39,7 @@ from backend.trading_profiles.signal_feed import sign_signal
 ROLES = {"copy-1": "TRADER", "copy-2": "TRADER", "auto-1": "TRADER", "assist-1": "TRADER", "sim-1": "TRADER",
          "other-copy": "TRADER", "admin-a": "SUPER_USER", "admin-b": "SUPER_USER"}
 ASSESSMENT = {k: v for k, v in asdict(signal()).items()
-              if k not in {"signal_id", "trader_id", "symbol", "asset_class", "side", "reference_price", "stop_distance_pct"}}
+              if k not in {"signal_id", "trader_id", "symbol", "asset_class", "side", "stop_distance_pct"}}
 
 
 @pytest.fixture(autouse=True)
@@ -174,7 +174,7 @@ def test_other_user_cannot_decide_a_proposal(tmp_path):
 
 # ------------------------------------------------------------------ manual orders
 def _order(**kw):
-    return {"symbol": "EUR/USD", "asset_class": "FX", "side": "BUY", "reference_price": 1.08, "stop_distance_pct": 2.5,
+    return {"symbol": "EUR/USD", "asset_class": "FX", "side": "BUY", "notional": 400.0, "stop_distance_pct": 2.5,
             "client_order_id": "c1", **kw}
 
 
