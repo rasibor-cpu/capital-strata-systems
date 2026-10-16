@@ -1,9 +1,9 @@
 {
   "document_id": "CSS-UOM",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "effective_date": "2026-10-16",
-  "sha256": "719dd2e092ad2d483d7c2504dc9a6335385cda21c490861ac6da21780ae0e777",
-  "acknowledgement_sha256": "0d333aeb3db21e725706d53dca3a47fe0575f2a0219616b6233fc79be91d975c",
+  "sha256": "263578c0e95568f596df1ac3436b5883130790a3615d0e1cd99aba271bce4ef4",
+  "acknowledgement_sha256": "74494de43d474cf1d7f3f8213dc29821224632b234efd6333285a005406265de",
   "pages": [
     {
       "page_id": "about",
@@ -63,7 +63,7 @@
     {
       "page_id": "support",
       "title": "12. Support, escalation and acknowledgement",
-      "sha256": "ac2bce3b8a67cb1254bc73dfd3054dbae04297b399936b218794e0495fed2a91"
+      "sha256": "58c62903a4d4d9b76a3452c0f3e08f40c4938cc451c55d5877a7253c246be05c"
     }
   ],
   "history": [
@@ -79,6 +79,13 @@
       "effective_date": "2026-10-16",
       "sha256": "719dd2e092ad2d483d7c2504dc9a6335385cda21c490861ac6da21780ae0e777",
       "summary": "Approved-trader registry and signed signals; platform capital limits on personalities; CAD pilot envelope (CAD 20 per position incl. fees, 2 positions, CAD 40 total); sign-in acceptance enforcement",
+      "material": true
+    },
+    {
+      "version": "1.2.0",
+      "effective_date": "2026-10-16",
+      "sha256": "263578c0e95568f596df1ac3436b5883130790a3615d0e1cd99aba271bce4ef4",
+      "summary": "Owner-mandated acknowledgement text (substantial risk / applicable law)",
       "material": true
     }
   ]
