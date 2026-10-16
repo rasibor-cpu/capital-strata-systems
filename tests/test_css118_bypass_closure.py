@@ -127,6 +127,25 @@ def test_legacy_dashboard_loop_broker_branch_is_closed_in_code():
     assert window.index("LEGACY_LOOP_BROKER_PATH_DISABLED_CSS118") < window.index("attempt_oanda_fx_execution")
 
 
+def test_legacy_dashboard_random_candidate_opens_are_retired():
+    """CSS-118 B5: random candidates must not open operator paper positions."""
+    source = (REPO / "scripts" / "css_live_dashboard.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    consts = {t.id: n.value.value for n in tree.body if isinstance(n, ast.Assign)
+              for t in n.targets if isinstance(t, ast.Name) and isinstance(n.value, ast.Constant)}
+    assert consts["LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED"] is False
+    assert "elif not LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED:" in source
+    # Import-time constant gates select_cycle_candidates to [].
+    import importlib
+    import sys
+    sys.modules.pop("scripts.css_live_dashboard", None)
+    # The dashboard module is heavy; assert via AST that the empty-return guard exists.
+    fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "select_cycle_candidates")
+    src_fn = ast.get_source_segment(source, fn) or ""
+    assert "LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED" in src_fn
+    assert "return []" in src_fn
+
+
 def test_run_live_manual_remains_retired_at_import():
     import importlib
     import sys
