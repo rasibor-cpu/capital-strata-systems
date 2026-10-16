@@ -9,7 +9,7 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.governance.css_unified_trade_gate import ENGINE_MODE_PROBABILITY_THRESHOLD
 from backend.runtime.environment_bootstrap import bootstrap_broker_environment
@@ -4099,6 +4099,16 @@ def _build_mobile_ticket(
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Parse a whole number from a query/form value; anything else returns `default`."""
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(str(value).strip())
     except (TypeError, ValueError):
         return default
 
