@@ -137,6 +137,7 @@ def test_cli_refuses_resume_with_different_capital(tmp_path, monkeypatch):
     spec.loader.exec_module(tool)
     monkeypatch.setattr(tool, "_terminal_presenter", lambda page: True)
     monkeypatch.setattr(tool, "CoinbaseQuotes", lambda http: None)
+    monkeypatch.setattr(tool, "_preflight", lambda args, now=None: {"verdict": "PASS", "checks": []})
     root = tmp_path / "run"
     base = ["run", "--root", str(root), "--artifacts", str(tmp_path / "none"), "--approvals-root",
             str(tmp_path / "ops"), "--operator", "op", "--hours", "0"]
@@ -146,13 +147,43 @@ def test_cli_refuses_resume_with_different_capital(tmp_path, monkeypatch):
 
 
 # ------------------------------------------------------------------ safety
-def test_kill_switch_halts_simulated_entries(tmp_path, monkeypatch):
+def test_sim_entry_halt_stops_simulated_entries_and_live_switch_does_not(tmp_path, monkeypatch):
+    s = live()
+    halted, _ = make(tmp_path, approved=True, name="halted")
+    monkeypatch.setenv("CSS_SIM_ENTRY_HALT", "1")
+    halted.cycle(lambda i, g: s, [("BTC-USD", H)], now=_now_for(s))
+    rep = halted.report()
+    assert all(t["fills"] == 0 and t["decisions"] == 0 for t in rep["tracks"].values())
+    assert rep["sim_entry_halted_cycles"] == 1
+    # Lifting the halt while the bar is current: the bar is decided (it was not marked processed).
+    monkeypatch.delenv("CSS_SIM_ENTRY_HALT")
+    monkeypatch.setenv("CSS_LIVE_ORDER_KILL_SWITCH", "1")  # live brokerage stays killed
+    halted.cycle(lambda i, g: s, [("BTC-USD", H)], now=_now_for(s))
+    rep = halted.report()
+    assert rep["tracks"][TRACK_A]["fills"] == 1 and rep["live_kill_switch_engaged_all_cycles"] is False
+    assert [json.loads(x) for x in halted.journal.read_text().splitlines() if '"HEARTBEAT"' in x][-1][
+        "live_kill_switch_engaged"] is True
+
+
+def test_global_emergency_stop_still_halts_simulation(tmp_path, monkeypatch):
     s = live()
     sim, _ = make(tmp_path, approved=True)
-    monkeypatch.setenv("CSS_LIVE_ORDER_KILL_SWITCH", "1")
+    monkeypatch.setenv("REA_KILL_SWITCH", "1")
     sim.cycle(lambda i, g: s, [("BTC-USD", H)], now=_now_for(s))
     for t in sim.report()["tracks"].values():
         assert t["fills"] == 0 and any("kill_switch" in k for k in t["reasons"]), t["reasons"]
+
+
+def test_live_kill_switch_still_blocks_the_canonical_router(tmp_path, monkeypatch):
+    """Separation is local to the simulation harness: the operational router is unchanged."""
+    monkeypatch.setenv("CSS_LIVE_ORDER_KILL_SWITCH", "1")
+    root = tmp_path / "tp"
+    engine = CopyTradeEngine(root, key_provider=lambda: KEY)
+    router = TradingRouter(engine, book=PaperBook(root), role_resolver=lambda u: "TRADER",
+                           session_resolver=lambda u: (SESSION, time.time()), system_provider=lambda: system())
+    activate(engine.consent, "auto-1", "CSS Autonomous Trading", "Balanced")
+    (d,) = router.on_css_engine_signal(signal(trader_id=AUTONOMOUS_SOURCE_ID), now=NOW).decisions
+    assert d.outcome == "REJECTED" and "kill_switch" in d.reason
 
 
 def test_r14f_low_quality_signal_is_rejected_in_both_tracks(tmp_path):

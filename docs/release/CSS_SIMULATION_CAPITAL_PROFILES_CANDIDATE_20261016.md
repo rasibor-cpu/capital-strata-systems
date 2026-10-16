@@ -32,3 +32,9 @@ Changes made while validating:
 Note: `.env.paper.example` sets `CSS_LIVE_ORDER_KILL_SWITCH=1`; with it, the canonical router and this simulation reject every entry. The operator must decide whether the paper trial runs with the kill switch clear.
 
 Still outstanding: a capital-selection UI in onboarding, an HTTP endpoint for resets, a continuous host with market-data access, and operator sign-off.
+
+## Operational readiness (branch `claude/css-sim-operational-readiness-20261016`)
+- **Entry control separated from the live kill switch.** `CSS_SIM_ENTRY_HALT=1` pauses simulated entries; exits continue. `CSS_LIVE_ORDER_KILL_SWITCH` governs live brokerage only, is required ENGAGED by preflight for the whole trial and is recorded every cycle. The global emergency stop (`REA_KILL_SWITCH`, `runtime/kill.switch`) still halts simulated entries. The canonical router is unchanged: the live kill switch still rejects every entry there (tested).
+- **Preflight** (`tools/css_sim_cad146.py preflight`): broker isolation, no live arming, live kill switch engaged, simulation entries enabled, global stop clear, designated trader, CAD 14,600, artifacts present, cost model, ledger isolation, durable persistence, fresh complete LIVE bars per instrument, live quote, clock skew ≤ 5 s. Track A approvals are reported as WARN (zero approved → zero Track A trades by design). `run` executes preflight first; on FAIL no run directory is initialised and the 48-hour clock never starts.
+- **R7 re-attestation:** `attest` requires an existing run and the operator typing their own id; the report counts cycles with an expired sign-on.
+- Also fixed: `test_css118_router.py::test_http_assisted_flow_and_paper_book` used a fixed 12:00 UTC 2026-10-16 timestamp against a wall-clock 5-minute proposal TTL and began failing at 12:05 UTC that day.
