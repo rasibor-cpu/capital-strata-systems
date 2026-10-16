@@ -17,6 +17,11 @@ R15B_EXIT_PROFILE = {
 # code; re-opening it requires a reviewed source change and owner approval, not configuration.
 LEGACY_LOOP_BROKER_EXECUTION_PERMITTED = False
 
+# CSS-118 B5: random candidates from select_cycle_candidates must not open operator paper
+# positions. Re-opening requires a reviewed source change after B1 calibrated producer is wired.
+# Observability may still call CssEngineSignalBridge.publish_legacy_candidate (always refused).
+LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED = False
+
 
 def r15b_profile():
     return R15B_EXIT_PROFILE.get(str(ENGINE_MODE).upper(), R15B_EXIT_PROFILE["BALANCED"])
@@ -5225,6 +5230,14 @@ try:
         elif mtm_engine.count_open_positions() < hard_position_limit():
             if not role_profile.get("can_execute_paper_trading", False):
                 print("[RBAC] New position generation blocked for current role.")
+            elif not LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED:
+                # CSS-118 B5: random candidates are retired as trade openers. Existing
+                # positions continue to be marked and exited; calibrated signals must
+                # enter through CssEngineSignalBridge (B1), not this loop.
+                print(
+                    "[CSS-118 B5] Legacy random-candidate opens disabled; "
+                    "operator paper opens require calibrated ENGINE_LOOP_CALIBRATED signals."
+                )
             else:
                 for asset_class, symbol, sig, prob in select_cycle_candidates():
                     # =========================

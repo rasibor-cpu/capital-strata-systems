@@ -21,10 +21,9 @@ MANIFEST_PATH = REPO_ROOT / "docs" / "user" / "CSS_USER_OPERATING_MANUAL.manifes
 DOCUMENT_ID = "CSS-UOM"
 
 ACKNOWLEDGEMENT_TEXT = (
-    "I confirm that I have read and understood the CSS User Operating Manual, Trading Assumptions "
-    "and Risk Disclosure Agreement. I understand that trading involves the risk of losing some or all "
-    "of my invested capital, that profits are not guaranteed, and that I bear the investment risks "
-    "associated with my trading decisions and authorized CSS trading activities."
+    "I understand that trading involves substantial risk, including the possible loss of my invested "
+    "capital. I accept responsibility for the trading decisions and authorizations I make, subject to "
+    "applicable law."
 )
 ACKNOWLEDGEMENT_SHA256 = hashlib.sha256(ACKNOWLEDGEMENT_TEXT.encode("utf-8")).hexdigest()
 

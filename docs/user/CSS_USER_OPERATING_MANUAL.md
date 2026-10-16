@@ -337,7 +337,7 @@ This document is version-controlled. Each version has a version number, an effec
 
 To accept, you will be asked to check the following statement. It is never pre-checked:
 
-> I confirm that I have read and understood the CSS User Operating Manual, Trading Assumptions and Risk Disclosure Agreement. I understand that trading involves the risk of losing some or all of my invested capital, that profits are not guaranteed, and that I bear the investment risks associated with my trading decisions and authorized CSS trading activities.
+> I understand that trading involves substantial risk, including the possible loss of my invested capital. I accept responsibility for the trading decisions and authorizations I make, subject to applicable law.
 
 Your acceptance is recorded with your account, session, this document's version and fingerprint, and the exact settings you are activating.
 
