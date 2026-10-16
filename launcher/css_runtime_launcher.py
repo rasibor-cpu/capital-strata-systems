@@ -425,6 +425,9 @@ def discover_canonical_runtime_processes(
             )
             if completed.returncode != 0:
                 return _discovery_failure("discovery_ps_failed", "subprocess_error")
+            # Same distinction as the Windows path: no output at all is not "self missing".
+            if not (completed.stdout or "").strip():
+                return _discovery_failure("discovery_empty_output", "empty_output")
             process_rows = []
             for line in (completed.stdout or "").splitlines():
                 parts = line.strip().split(None, 2)

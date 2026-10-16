@@ -58,6 +58,7 @@ from backend.validation.endurance_validation import (
 )
 from launcher.css_runtime_launcher import (
     DISCOVERY_SCHEMA,
+    _parse_windows_discovery_payload,
     discover_canonical_runtime_processes,
     duplicate_canonical_runtime_owners,
 )
@@ -746,20 +747,30 @@ def test_monitor_reconciliation_cannot_rely_only_on_matching_json() -> None:
 
 
 def test_missing_required_live_field_rejected() -> None:
+    # Hermetic: an explicit probe that observes nothing. (The original relied on PID 10
+    # not existing, which holds on Windows but not on Linux.)
+    kwargs = dict(
+        pid=10,
+        role="launcher",
+        attempt_id="OV002-A",
+        baseline_commit="abc123",
+        repo_root="c:/repo",
+        parent_pid=1,
+        creation_time="2026-08-01T00:00:00+00:00",
+        executable_path=sys.executable,
+        command_line=None,
+        require_live_fields=True,
+    )
     with pytest.raises(ContinuityError) as exc:
-        build_process_identity_record(
-            pid=10,
-            role="launcher",
-            attempt_id="OV002-A",
-            baseline_commit="abc123",
-            repo_root="c:/repo",
-            parent_pid=1,
-            creation_time="2026-08-01T00:00:00+00:00",
-            executable_path=sys.executable,
-            command_line=None,
-            require_live_fields=True,
-        )
+        build_process_identity_record(**kwargs, probe=lambda _pid: None)
     assert exc.value.code == "identity_probe_unavailable"
+
+    # A probe that sees the process but cannot establish its identity is incomplete.
+    partial = {"pid": 10, "parent_pid": 1, "command_line": "python"}
+    with pytest.raises(ContinuityError) as exc:
+        build_process_identity_record(**kwargs, probe=lambda _pid: partial)
+    assert exc.value.code == "identity_probe_incomplete"
+    assert exc.value.detail == "creation_time,executable_path,executable_sha256"
 
 
 def test_more_than_1000_newer_alerts_cannot_hide_older_critical(tmp_path: Path) -> None:
@@ -2221,10 +2232,28 @@ def test_r6_discovery_empty_output_and_missing_self_fail_closed() -> None:
     def _run(stdout: str):
         return lambda *_a, **_k: SimpleNamespace(returncode=0, stdout=stdout, stderr="")
 
+    # Empty enumeration output is distinct from "self missing" on every platform.
     with patch("launcher.css_runtime_launcher.subprocess.run", _run("")):
         empty = discover_canonical_runtime_processes(current_pid=4242)
     assert empty["ok"] is False
     assert empty["error_code"] == "discovery_empty_output"
+
+    # The Windows envelope rules, checked on every platform via the envelope parser.
+    assert _parse_windows_discovery_payload([], expected_pid=4242)[2] == "discovery_envelope_malformed"
+
+    if os.name != "nt":
+        # POSIX `ps` path: output that does not include the current process is unanchored.
+        with patch("launcher.css_runtime_launcher.subprocess.run", _run("1 0 /sbin/init\n")):
+            unanchored = discover_canonical_runtime_processes(current_pid=4242)
+        assert unanchored["ok"] is False
+        assert unanchored["error_code"] == "discovery_self_missing"
+        with patch("launcher.css_runtime_launcher.subprocess.run", _run("4242 1 python -m launcher\n")):
+            anchored = discover_canonical_runtime_processes(current_pid=4242)
+        assert anchored["ok"] is True
+        failed_envelope = {"schema_version": DISCOVERY_SCHEMA, "ok": False, "anchor_pid": 4242,
+                           "self_observed": True, "processes": [], "error_code": None, "error_type": None}
+        assert _parse_windows_discovery_payload(failed_envelope, expected_pid=4242)[2] == "discovery_reported_failure"
+        return
 
     with patch("launcher.css_runtime_launcher.subprocess.run", _run("[]")):
         unanchored = discover_canonical_runtime_processes(current_pid=4242)

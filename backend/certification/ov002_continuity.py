@@ -10,6 +10,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -393,6 +394,77 @@ def command_identity_hash(command_identity: str) -> str:
     return hashlib.sha256(str(command_identity or "").encode("utf-8")).hexdigest()
 
 
+def _linux_proc_stat(pid: int) -> tuple[int, int] | None:
+    """Return (parent_pid, start_ticks) from /proc/<pid>/stat, or None."""
+    try:
+        raw = Path(f"/proc/{pid}/stat").read_text(encoding="ascii", errors="strict")
+    except (OSError, UnicodeDecodeError):
+        return None
+    # The command name (field 2) is parenthesised and may contain spaces or ")".
+    head, sep, tail = raw.rpartition(")")
+    if not sep or _optional_int(head.split(" (", 1)[0]) != pid:
+        return None
+    fields = tail.split()
+    # tail starts at field 3 (state): ppid is field 4, starttime is field 22.
+    if len(fields) < 20:
+        return None
+    parent, start_ticks = _optional_int(fields[1]), _optional_int(fields[19])
+    if parent is None or start_ticks is None:
+        return None
+    return parent, start_ticks
+
+
+def _linux_boot_time() -> int | None:
+    try:
+        for line in Path("/proc/stat").read_text(encoding="ascii").splitlines():
+            if line.startswith("btime "):
+                return _optional_int(line.split()[1])
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
+
+
+def _linux_proc_identity_probe(pid: int) -> dict[str, Any] | None:
+    """Live identity from /proc. Every field comes from the kernel; None on any doubt.
+
+    Like the Windows probe, the process is read twice and must be unchanged in
+    between (same parent, start time and executable), which rejects PID reuse.
+    """
+    first = _linux_proc_stat(pid)
+    try:
+        executable = os.readlink(f"/proc/{pid}/exe")
+        cmdline = Path(f"/proc/{pid}/cmdline").read_bytes()
+    except OSError:
+        return None
+    second = _linux_proc_stat(pid)
+    boot = _linux_boot_time()
+    try:
+        clock_ticks = os.sysconf("SC_CLK_TCK")
+    except (OSError, ValueError):
+        return None
+    if first is None or first != second or boot is None or clock_ticks <= 0:
+        return None
+    # A replaced or deleted binary reads as "<path> (deleted)"; it has no verifiable identity.
+    if not executable or executable.endswith(" (deleted)"):
+        return None
+    try:
+        if os.readlink(f"/proc/{pid}/exe") != executable:
+            return None
+    except OSError:
+        return None
+    parent_pid, start_ticks = first
+    started = datetime.fromtimestamp(boot + start_ticks // clock_ticks, tz=timezone.utc)
+    args = [part.decode("utf-8", errors="replace") for part in cmdline.split(b"\0") if part]
+    return {
+        "pid": pid,
+        "parent_pid": parent_pid,
+        "creation_time": started.isoformat(),
+        "executable_path": executable,
+        "executable_sha256": _sha256_file(executable),
+        "command_line": " ".join(args),
+    }
+
+
 def default_identity_probe(pid: int) -> dict[str, Any] | None:
     """Best-effort live process probe. Returns None on failure (fail closed upstream)."""
     try:
@@ -452,6 +524,9 @@ def default_identity_probe(pid: int) -> dict[str, Any] | None:
             "executable_sha256": _sha256_file(executable),
             "command_line": row.get("CommandLine"),
         }
+
+    if sys.platform.startswith("linux"):
+        return _linux_proc_identity_probe(pid_i)
 
     try:
         completed = subprocess.run(
