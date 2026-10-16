@@ -328,9 +328,12 @@ def _client(w):
 
 
 def test_http_assisted_flow_and_paper_book(tmp_path):
+    from datetime import datetime, timezone
     w = World(tmp_path)
     w.user("assist-1", "CSS-Assisted Trading")
-    w.router.on_css_engine_signal(_engine_signal(), now=NOW)
+    # The HTTP listing filters proposals by wall-clock expiry (5 min TTL), so the proposal must be
+    # created at wall-clock time; with the fixed NOW this test started failing at 12:05 UTC 2026-10-16.
+    w.router.on_css_engine_signal(_engine_signal(), now=datetime.now(timezone.utc))
     c = _client(w)
     h = {"x-test-user": "assist-1"}
     (proposal,) = c.get(PREFIX + "/proposals", headers=h).json()["proposals"] or [None]
