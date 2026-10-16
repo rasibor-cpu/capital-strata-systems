@@ -7,6 +7,13 @@ their own records. No endpoint can place an order or enable live trading.
 Risk-enabling actions (activating or changing settings, resuming, reauthorizing) require
 a valid acceptance of the current CSS User Operating Manual. Risk-reducing actions
 (pause, mandate revocation) never do.
+
+When a `router_factory` is supplied, paper-routing endpoints are added: the user's paper
+book, CSS-Assisted proposals and decisions, manual paper orders (all through
+TradingRouter -> CopyTradeEngine, which revalidates acceptance at every decision), the
+SUPER_USER trader-registry administration (dual control enforced by the registry), and
+the trader signal feed, which is authenticated by the trader's Ed25519 signature rather
+than a user session.
 """
 from __future__ import annotations
 
@@ -25,6 +32,7 @@ from backend.trading_profiles.manual import ManualIntegrityError, render_html
 from backend.trading_profiles.onboarding_page import onboarding_html
 from backend.trading_profiles.preferences import PreferencesError
 from backend.trading_profiles.service import TradingProfileService
+from backend.trading_profiles.trader_registry import TraderRegistryError
 
 UserResolver = Callable[[Request], Mapping[str, Any] | None]
 PREFIX = "/api/v1/trading-profiles"
@@ -43,6 +51,7 @@ def create_trading_profiles_router(
     *,
     user_resolver: UserResolver,
     service_factory: Callable[[], TradingProfileService],
+    router_factory: Callable[[], Any] | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["trading-profiles"])
 
@@ -187,6 +196,10 @@ def create_trading_profiles_router(
     def statement(request: Request) -> Any:
         return _guard(request, lambda svc, uid, sid: svc.statement(uid))
 
+    # -- paper routing (optional) ------------------------------------------------------
+    if router_factory is not None:
+        _add_routing_endpoints(router, user_resolver, router_factory)
+
     # -- onboarding UI -------------------------------------------------------------
     @router.get(ONBOARDING_PATH, response_class=HTMLResponse)
     def onboarding(request: Request) -> Any:
@@ -196,3 +209,108 @@ def create_trading_profiles_router(
         return HTMLResponse(onboarding_html(api_prefix=PREFIX))
 
     return router
+
+
+def _add_routing_endpoints(router: APIRouter, user_resolver: UserResolver, router_factory: Callable[[], Any]) -> None:
+    from backend.trading_profiles.router import PaperBookError
+    from backend.trading_profiles.signal_feed import SignalFeedError
+
+    def _ctx(request: Request) -> dict[str, Any] | None:
+        try:
+            ident = dict(user_resolver(request) or {})
+        except Exception:
+            return None
+        if not ident.get("user_id") or not ident.get("session_id"):
+            return None
+        return ident
+
+    def _run(request: Request, action: Callable[[Any, dict[str, Any]], Any], *, admin: bool = False) -> Any:
+        ctx = _ctx(request)
+        if ctx is None:
+            return _error(401, "authentication_required")
+        if admin and str(ctx.get("role") or "").upper() != "SUPER_USER":
+            return _error(403, "super_user_required")
+        try:
+            result = action(router_factory(), ctx)
+        except (ProposalError, TraderRegistryError, PaperBookError, ConsentError, ValueError, KeyError, TypeError) as exc:
+            reason = str(exc).strip("'")
+            if reason.endswith("not_found"):
+                return _error(404, reason)
+            if reason == "super_user_required":
+                return _error(403, reason)
+            return _error(400, reason)
+        return {"ok": True, **result}
+
+    def _session(ctx: dict[str, Any]) -> tuple[str, float]:
+        return str(ctx["session_id"]), float(ctx.get("session_created") or 0.0)
+
+    def _decision(d: Any) -> dict[str, Any]:
+        return {"decision": {k: getattr(d, k) for k in ("signal_id", "outcome", "stage", "reason", "operating_mode",
+                                                       "personality", "notional", "proposal_id", "position_id",
+                                                       "pipeline_status")}}
+
+    @router.get(PREFIX + "/paper/book")
+    def paper_book(request: Request) -> Any:
+        def action(r, ctx):
+            uid = ctx["user_id"]
+            return {"account": r.book.account(uid, _now()),
+                    "positions": [{**p.__dict__, "opened_at": p.opened_at.isoformat()} for p in r.book.positions(uid)],
+                    "live_trading": False}
+        return _run(request, action)
+
+    @router.get(PREFIX + "/proposals")
+    def proposals(request: Request) -> Any:
+        return _run(request, lambda r, ctx: {"proposals": r.engine.pending_proposals(ctx["user_id"])})
+
+    @router.post(PREFIX + "/proposals/{proposal_id}/decision")
+    def decide(request: Request, proposal_id: str, payload: dict = Body(...)) -> Any:
+        approve = payload.get("approve")
+        if type(approve) is not bool:
+            return _error(400, "approve_must_be_boolean")
+        return _run(request, lambda r, ctx: _decision(r.decide_proposal(
+            ctx["user_id"], _session(ctx), proposal_id, approve=approve, now=_now())))
+
+    @router.post(PREFIX + "/orders")
+    def manual_order(request: Request, payload: dict = Body(...)) -> Any:
+        return _run(request, lambda r, ctx: _decision(r.submit_manual_order(
+            ctx["user_id"], _session(ctx), payload, now=_now())))
+
+    # -- trader registry administration (SUPER_USER; dual control in the registry) ----
+    @router.get(PREFIX + "/admin/traders")
+    def traders(request: Request) -> Any:
+        return _run(request, lambda r, ctx: {"traders": [t.summary() for t in r.engine.trader_registry.list()]},
+                    admin=True)
+
+    @router.post(PREFIX + "/admin/traders")
+    def propose_trader(request: Request, payload: dict = Body(...)) -> Any:
+        return _run(request, lambda r, ctx: {"trader": r.engine.trader_registry.propose(
+            trader_id=str(payload.get("trader_id") or ""), display_name=str(payload.get("display_name") or ""),
+            public_key_b64=str(payload.get("public_key_b64") or ""),
+            asset_classes=list(payload.get("asset_classes") or []), actor_ctx=ctx).summary()}, admin=True)
+
+    @router.post(PREFIX + "/admin/traders/{trader_id}/{action_name}")
+    def govern_trader(request: Request, trader_id: str, action_name: str, payload: dict = Body(default={})) -> Any:
+        if action_name not in {"approve", "suspend", "revoke", "reinstate"}:
+            return _error(404, "action_not_found")
+
+        def action(r, ctx):
+            reg = r.engine.trader_registry
+            if action_name == "approve":
+                trader = reg.approve(trader_id, actor_ctx=ctx)
+            else:
+                trader = getattr(reg, action_name)(trader_id, actor_ctx=ctx, reason=str(payload.get("reason") or ""))
+            return {"trader": trader.summary()}
+        return _run(request, action, admin=True)
+
+    # -- trader signal feed: authenticated by the trader's signature, not a session ------
+    @router.post(PREFIX + "/feed/signals")
+    def ingest_signal(payload: dict = Body(...)) -> Any:
+        try:
+            result = router_factory().on_trader_signal(payload, now=_now())
+        except SignalFeedError as exc:
+            return _error(400, str(exc))
+        if not result.accepted:
+            status = 403 if result.reason.startswith(("signature", "trader_not_authorized")) else 400
+            return _error(status, result.reason)
+        return {"ok": True, "signal_id": result.signal_id, "followers_evaluated": len(result.decisions),
+                "copied": sum(1 for d in result.decisions if d.copied)}

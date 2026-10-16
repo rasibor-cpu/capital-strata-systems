@@ -139,33 +139,57 @@ Rules that apply to every mode:
 1. Safety: observed safety-flag verdict SAFE, live-order and global kill switches, known engine mode.
 2. **Consent:** active accepted settings, not paused, `verify_active` passes; personality tightened by the user's limits.
 3. Authority:
-   - copy: the consented signed mandate (trader, scope, reauthorization);
+   - copy: the consented signed mandate (trader, scope, reauthorization) **and** the trader still ACTIVE in the dual-control registry for that asset class;
    - autonomous: CSS engine signals only;
    - assisted: CSS proposals or the user's own manual orders.
 4. Personality eligibility, drawdown and daily-loss halts.
-5. Sizing and exposure caps; personality open-position limit; global cap of 10.
-6. TradeQualityScoringEngine and CAIE floors.
-7. R14F (`backend/governance/r14f_profitability_gate.py`; parity with the dashboard is proven by executing its own functions).
-8. Assisted mode stops here and creates a proposal. On approval, everything above re-runs.
-9. `CanonicalExecutionIntegration`:
-   - **R7** (real per-asset counts);
-   - **ExecutionGate**: AntiBleedGuard (net edge ≥ 25 bps, minimum size 50, per-follower cooldown), MarginTradeGate, RiskGovernor;
-   - validation-only pipeline (rejects live).
-10. Deterministic simulated fill; hash-chained attribution record.
+5. Sizing, only ever reduced: personality risk/position/symbol/total caps, mandate allocation, the existing
+   capital governors (`CapitalAllocationGovernor` 5% single trade, 2% futures/options; `PortfolioGovernor`
+   25% total, per-asset caps) and, for pilot-scope accounts, the CAD pilot envelope (§5a).
+6. Counts: personality open-position limit; global cap of 10. Then the formal `UnifiedRiskExecutionGate` check.
+7. TradeQualityScoringEngine and CAIE floors.
+8. R14F (`backend/governance/r14f_profitability_gate.py`; parity with the dashboard is proven by executing its own functions).
+9. Assisted mode stops here and creates a proposal. On approval, everything above re-runs.
+10. `CanonicalExecutionIntegration`:
+    - **R7** (real per-asset counts, session age, role, capital state);
+    - **ExecutionGate**: AntiBleedGuard (net edge ≥ 25 bps, minimum size 50, per-follower cooldown), MarginTradeGate, RiskGovernor;
+    - validation-only pipeline (rejects live).
+11. Deterministic simulated fill; hash-chained attribution record.
+
+### 5a. CAD pilot envelope (`backend/trading_profiles/pilot_envelope.py`)
+
+- CAD 20 per parent including estimated fees (rounded up to the cent), CAD 40 aggregate, at most 2 concurrent parents.
+- Fixed ceilings: `PilotEnvelopeConfig` can tighten but never raise them; malformed state, duplicates, non-CAD currency and fractional cents fail closed.
+- Independent of, and in addition to, the canonical live caps in `backend/config/order_limit_config.py` (CAD 20 total, CAD 20 per position, 1 position), which are **unchanged** (asserted by test).
+- AntiBleedGuard's minimum size (50) still rejects every pilot-sized order; nothing is relaxed (min-size exception stays disabled).
+
+### 5b. Sign-in and route enforcement (`backend/trading_profiles/gatekeeper.py`)
+
+- Sign-in lands on `/trading-profiles/onboarding` unless acceptance is valid and trading is not paused (unreadable stores fail closed).
+- `POST /trade`, risk-increasing `POST /controls` (mode/engine-mode escalation, kill switch off, unknown values) and live-micro-pilot `configure`/`arm` return 403 `MANUAL_ACCEPTANCE_REQUIRED` without valid acceptance. Acceptance is necessary, never sufficient: the existing ticket and pilot governors still decide.
+- Never blocked: kill-switch engagement, lowering modes, pause, disarm, mandate revocation, protective exits.
+
+### 5c. Approved traders and the signal feed
+
+- `trader_registry.py`: event-sourced, hash-chained with a head anchor (edits, deletions and truncation fail closed). **Ships empty.** SUPER_USER proposes (Ed25519 public key + asset scope); a **different** SUPER_USER approves. Suspend/revoke: one SUPER_USER, immediate. Reinstate after suspension: a different SUPER_USER. Revoked: new proposal required.
+- `signal_feed.py`: canonical-JSON payload signed with the trader's key; registered trader + valid signature (else rejected without writing), then ACTIVE + scope, freshness ≤ 120 s (≤ 5 s future skew), replay protection; authenticated decisions go to a hash-chained ledger.
+- Consent: copy-mode proposals and acceptances require an ACTIVE trader whose scope covers the mandate.
+
+### 5d. Canonical paper router (`router.py`)
+
+- `on_trader_signal` → feed → COPY followers with that trader's mandate; `on_css_engine_signal` → AUTONOMOUS (decide), ASSISTED (proposal), SIMULATED (no route); `decide_proposal`; `submit_manual_order` (needs a CSS market assessment, else rejected; assisted → proposal to confirm); `run_exit_cycle` (exempt from consent, pause and mandate state).
+- Context fails closed: no current sign-on session, unknown or locked role, or unreadable safety flags reject the follower with a recorded reason. The R7 one-hour session rule applies to fan-out, so followers must have signed in within the last hour.
+- `PaperBook`: persistent paper account (CAD, realized-PnL equity, peak, day start) and open positions per user.
+- HTTP (mounted on the mobile app): `/paper/book`, `/proposals`, `/proposals/{id}/decision`, `/orders`, `/admin/traders[...]` (SUPER_USER), `/feed/signals` (signature-authenticated).
 
 ## 6. Integration status and open items (not claimed as done)
 
-- **Not wired yet:**
-  - no trader-signal feed or trader registry exists (`trader_id` is free text);
-  - the legacy dashboard loop and the mobile ticket path are unchanged and do not use this layer (the owner places them out of scope until canonical-routing tests exist);
-  - the mobile sign-in does not yet redirect to onboarding. The gate is enforced server-side wherever this layer is used.
+- **Not wired:** the legacy dashboard loop and the existing mobile ticket executor do not route through this layer (the ticket route is now gated by acceptance; its execution path is unchanged). No CSS engine process calls `on_css_engine_signal` yet, and the mobile router has no market-assessment provider, so manual paper orders through `/orders` are rejected (`manual_order_requires_css_market_assessment`).
 - **Owner decisions:**
-  - the parameter values in §2;
-  - the support contact;
-  - jurisdiction-specific legal review of the manual;
-  - signing-key provisioning and custody;
-  - the default reauthorization frequency.
-- **Ceilings that don't exist in code:** CAD40 aggregate and "two concurrent parents" are absent, so they cannot be enforced here. CAD20 exists, and this layer never reaches live.
+  - the parameter values in §2, in particular personalities whose position (6/8/10%) and total exposure (30/40%) exceed the existing capital governors (5% / 25%), which currently bind;
+  - whether mobile paper accounts run under the pilot envelope (default off; on, AntiBleed's minimum size rejects every order);
+  - which real traders, if any, to propose and approve, and custody of their signing keys;
+  - the support contact; jurisdiction-specific legal review of the manual; mandate signing-key provisioning; the default reauthorization frequency.
 - **Follow-up:** have the dashboard import the shared R14F module, so only one copy of the thresholds exists.
 - **Profitability:** no profitability claim is made. Cost-adjusted out-of-sample evidence is still required.
 
@@ -177,6 +201,7 @@ The change is additive:
 - `docs/user/` (manual and manifest);
 - `tools/build_css_manual_manifest.py`;
 - tests;
-- one router mount in `dashboard/mobile/mobile_app.py`.
+- the router mount, sign-in redirect and route guards in `dashboard/mobile/mobile_app.py`;
+- `.github/workflows/css118-validation.yml`.
 
 To roll back, revert the branch commits, or remove the router mount. Data lives only under `artifacts/trading_profiles/` (hash-chained ledgers; archive rather than delete).

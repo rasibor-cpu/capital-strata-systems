@@ -93,7 +93,8 @@ def _reissue(manual_path: Path, manifest_path: Path, *, version: str, material: 
 def test_manual_is_controlled_complete_and_uses_owner_acknowledgement():
     manual = load_manual()
     assert ACKNOWLEDGEMENT_TEXT == OWNER_ACK
-    assert manual.version == "1.0.0" and manual.history[-1]["material"] is True
+    assert manual.version == "1.1.0" and manual.history[-1]["material"] is True
+    assert [h["version"] for h in manual.history] == ["1.0.0", "1.1.0"]
     assert len(manual.pages) == 12
     text = manual.text
     for required in ("Simulated Trading", "CSS-Assisted Trading", "Copy a CSS Trader", "CSS Autonomous Trading",
@@ -228,7 +229,7 @@ def test_restart_persistence_receipts_and_history(tmp_path):
     assert restarted.consent.verify_active("u1") == (True, "consent_valid")
     receipts = restarted.consent.receipts("u1")
     assert [r["receipt_id"] for r in receipts] == [receipt["receipt_id"]]
-    assert receipts[0]["document"]["version"] == "1.0.0" and receipts[0]["pages_reviewed"] == 12
+    assert receipts[0]["document"]["version"] == "1.1.0" and receipts[0]["pages_reviewed"] == 12
     assert restarted.consent.receipts("someone-else") == []
 
 
@@ -264,7 +265,7 @@ def test_material_update_requires_renewal_but_never_blocks_risk_reduction(tmp_pa
     d = engine.evaluate(sig, follower("u1"), system(), now=NOW)
     position = engine.position_from_decision(d, sig, opened_at=NOW)
 
-    _reissue(manual_path, manifest_path, version="1.1.0", material=True, append="Material addition.")
+    _reissue(manual_path, manifest_path, version="9.0.0", material=True, append="Material addition.")
     blocked = engine.evaluate(replace(sig, signal_id="s2", symbol="GBP/USD"), follower("u1"), system(), now=NOW)
     assert (blocked.stage, blocked.reason) == ("consent", "consent_renewal_required")
     service = TradingProfileService(tmp_path / "tp", key_provider=lambda: KEY, manual_provider=provider["fn"])
@@ -277,7 +278,7 @@ def test_material_update_requires_renewal_but_never_blocks_risk_reduction(tmp_pa
         service.resume("u1")
     # Renewal of the same settings under the new version restores trading.
     receipt = activate(engine.consent, "u1", "CSS Autonomous Trading", "Balanced")
-    assert receipt["kind"] == "RENEWAL" and receipt["document"]["version"] == "1.1.0"
+    assert receipt["kind"] == "RENEWAL" and receipt["document"]["version"] == "9.0.0"
     service.resume("u1")
     assert engine.evaluate(replace(sig, signal_id="s3", symbol="AUD/USD"), follower("u1"), system(), now=NOW).outcome == "COPIED"
 
@@ -295,9 +296,9 @@ def test_review_restarts_if_manual_changes_mid_review(tmp_path):
     engine = _engine(tmp_path, manual_provider=lambda: load_manual(manual_path, manifest_path))
     change, review = _prepared(engine)
     review_all_pages(engine.consent, "u1", review)
-    _reissue(manual_path, manifest_path, version="1.1.0", material=True, append="Changed.")
+    _reissue(manual_path, manifest_path, version="9.0.0", material=True, append="Changed.")
     with pytest.raises(ConsentError, match="manual_version_mismatch|manual_changed_restart_review"):
-        _accept(engine, change, review, manual_version="1.0.0")
+        _accept(engine, change, review, manual_version="1.1.0")
     manual = engine.consent.manual_provider()
     with pytest.raises(ConsentError, match="manual_changed_restart_review"):
         _accept(engine, change, review, manual_version=manual.version, manual_sha256=manual.sha256)

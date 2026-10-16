@@ -44,6 +44,7 @@ class TradingProfileService:
         self.ledger = AttributionLedger(self.root)
         self.consent = ConsentService(self.root, preferences=self.preferences, mandates=self.mandates,
                                       manual_provider=manual_provider)
+        self.trader_registry = self.consent.trader_registry
 
     def catalog(self) -> dict[str, Any]:
         manual = self.manual_provider()

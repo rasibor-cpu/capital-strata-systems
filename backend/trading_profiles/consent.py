@@ -43,6 +43,7 @@ from backend.trading_profiles.manual import ACKNOWLEDGEMENT_SHA256, ControlledMa
 from backend.trading_profiles.operating_modes import OperatingMode, permissions_for
 from backend.trading_profiles.preferences import ActiveSettings, PreferencesStore, UserTradingState
 from backend.trading_profiles.risk_personalities import RiskPersonality, policy_for
+from backend.trading_profiles.trader_registry import TraderRegistry, TraderRegistryError
 
 CONSENT_STATE_SCHEMA = "css.trading_profiles.consent_state.v1"
 POLICY_SCHEMA = "css.trading_profiles.policy.v1"
@@ -209,10 +210,13 @@ class ConsentService:
         preferences: PreferencesStore,
         mandates: MandateRegistry,
         manual_provider: Callable[[], ControlledManual] = current_manual,
+        trader_registry: TraderRegistry | None = None,
     ) -> None:
         self.root = Path(root)
         self.preferences = preferences
         self.mandates = mandates
+        # Copy mandates are only possible for traders approved (dual control) in this registry.
+        self.trader_registry = trader_registry or TraderRegistry(self.root)
         self.manual_provider = manual_provider
         self.ledger = ConsentLedger(self.root)
         self.state_path = self.root / "consent_state.json"
@@ -271,6 +275,7 @@ class ConsentService:
             outside = set(terms["asset_classes"]) - set(policy.allowed_asset_classes)
             if outside:
                 raise ConsentError(f"mandate_scope_outside_policy:{sorted(outside)}")
+            self._require_approved_trader(terms)
         elif mandate_request:
             raise ConsentError("mandate_request_not_allowed_for_mode")
         phash = policy_hash(mode, personality, user_limits, terms)
@@ -303,6 +308,12 @@ class ConsentService:
             state["changes"][change.change_id] = asdict(change)
             self._write_state(state)
         return change
+
+    def _require_approved_trader(self, terms: Mapping[str, Any]) -> None:
+        try:
+            self.trader_registry.require_active(terms["trader_id"], tuple(terms["asset_classes"]))
+        except TraderRegistryError as exc:
+            raise ConsentError(f"trader_not_copyable:{exc}") from exc
 
     # -- 2/3. review ------------------------------------------------------------
     def _get_review(self, state, review_id: str, user_id: str, auth_session_hash: str, now: datetime) -> dict:
@@ -414,6 +425,8 @@ class ConsentService:
             if policy_hash_shown != change["policy_hash"]:
                 raise ConsentError("policy_hash_mismatch")
             effective_policy(policy_for(personality or SIMULATION_DEFAULT_PERSONALITY), limits)  # revalidate
+            if change["mandate_terms"]:
+                self._require_approved_trader(change["mandate_terms"])  # trader may have been suspended since
 
             receipt_id = "rcpt-" + secrets.token_hex(12)
             body = {

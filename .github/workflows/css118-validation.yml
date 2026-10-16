@@ -1,0 +1,109 @@
+name: CSS-118 Validation (Linux + Windows)
+
+# Independent regression for draft PR #119 (trading profiles, paper only).
+# Runs the full suite on Linux and Windows at the pushed commit, plus the Playwright
+# onboarding UX tests on Linux, and uploads logs, JUnit XML and a SHA-256 manifest.
+# No secrets, no broker access, no deployment.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/css118-trading-profiles
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: full-suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      CSS_TEST_MODE: "1"
+      PYTHONPATH: .
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies (no Playwright: baseline-comparable run)
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record environment
+        run: |
+          mkdir -p evidence
+          {
+            echo "head_sha=$(git rev-parse HEAD)"
+            echo "runner_os=${{ runner.os }}"
+            python --version
+            pip freeze
+          } > evidence/environment.txt
+
+      - name: Full pytest suite
+        run: |
+          set -o pipefail
+          python -m pytest -q -p no:cacheprovider -rs --junitxml=evidence/junit-full.xml \
+            2>&1 | tee evidence/pytest-full.log
+
+      - name: SHA-256 manifest
+        if: always()
+        run: |
+          cd evidence && (sha256sum * 2>/dev/null || shasum -a 256 *) > SHA256SUMS.txt; cat SHA256SUMS.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: css118-full-suite-${{ runner.os }}
+          path: evidence/
+          if-no-files-found: error
+
+  onboarding-ux:
+    name: onboarding-ux (playwright, ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CSS_TEST_MODE: "1"
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: CSS-118 targeted suite including UX
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head_sha.txt
+          python -m pytest -q -p no:cacheprovider -rs --junitxml=evidence/junit-css118.xml \
+            tests/test_css118_*.py tests/test_r14f_gate_parity.py 2>&1 | tee evidence/pytest-css118.log
+      - name: SHA-256 manifest
+        if: always()
+        run: cd evidence && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: css118-targeted-ux
+          path: evidence/
+          if-no-files-found: error

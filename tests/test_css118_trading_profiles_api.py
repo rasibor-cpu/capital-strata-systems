@@ -4,10 +4,11 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from css118_support import KEY, mandate_request
+from css118_support import KEY, approve_trader, mandate_request
 from backend.trading_profiles.api import ONBOARDING_PATH, PREFIX, create_trading_profiles_router
 from backend.trading_profiles.manual import ACKNOWLEDGEMENT_SHA256, ACKNOWLEDGEMENT_TEXT, current_manual
 from backend.trading_profiles.service import TradingProfileService
+from backend.trading_profiles.trader_registry import TraderRegistry
 
 
 def _client(tmp_path, key=KEY) -> TestClient:
@@ -16,6 +17,7 @@ def _client(tmp_path, key=KEY) -> TestClient:
         session = request.headers.get("x-test-session") or ("sess-" + str(user))
         return {"user_id": user, "session_id": session} if user else None
 
+    approve_trader(TraderRegistry(tmp_path))  # synthetic dual-control approval of trader-alpha
     app = FastAPI()
     app.include_router(create_trading_profiles_router(
         user_resolver=resolver,

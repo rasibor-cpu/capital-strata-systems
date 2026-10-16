@@ -146,6 +146,9 @@ class PreferencesStore:
             raise PreferencesError("preference record user mismatch")
         return state
 
+    def user_ids(self) -> list[str]:
+        return sorted(self._read_all())
+
     def _update(self, user_id: str, change) -> UserTradingState:
         """Read-modify-write of one user's state under the store lock."""
         if not isinstance(user_id, str) or not user_id.strip():

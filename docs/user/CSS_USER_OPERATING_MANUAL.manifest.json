@@ -1,8 +1,8 @@
 {
   "document_id": "CSS-UOM",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "effective_date": "2026-10-16",
-  "sha256": "5f64a2e10c7641182e783a7fcb4891fe3e508c7fb6a5c27aecb1cd9a6ceb3374",
+  "sha256": "719dd2e092ad2d483d7c2504dc9a6335385cda21c490861ac6da21780ae0e777",
   "acknowledgement_sha256": "0d333aeb3db21e725706d53dca3a47fe0575f2a0219616b6233fc79be91d975c",
   "pages": [
     {
@@ -13,12 +13,12 @@
     {
       "page_id": "modes",
       "title": "2. The four trading modes and who decides",
-      "sha256": "3cbbe8fe70d6730dc371bc34711683d5d137628a6e050abb68eaceebf5f5a800"
+      "sha256": "36c101f6cc0ec2b38ad478808615b1039bd68fe98647354f252229da59bc40ee"
     },
     {
       "page_id": "personalities",
       "title": "3. Risk personalities and your own limits",
-      "sha256": "20a4ae56123fc3833fc67302daaf6d6f5b20d92423a4c00b26eef1005bb01db7"
+      "sha256": "0eba7d2a6ed50e9a88826ccc1daa89295586cc6c42b021f8c76f2484c705d4f1"
     },
     {
       "page_id": "gates",
@@ -38,7 +38,7 @@
     {
       "page_id": "operations",
       "title": "7. Operating procedures, outages and security",
-      "sha256": "374fd8295426bc47c27277baeab7c53c918e371f83ff9fd5902259ad52741c11"
+      "sha256": "3a3d66840dc336c66f821a28796ec2e45dccc312d0daa268c13f50cf3c645293"
     },
     {
       "page_id": "emergency",
@@ -53,7 +53,7 @@
     {
       "page_id": "scenarios",
       "title": "10. Example scenarios",
-      "sha256": "5c36046b7bf19c020edc16efd41f87e923c83d16d0e97bc56a657ecb93d9d78c"
+      "sha256": "74b731453cf0bc495cbe454e3eb54e4c276f16e01fdc285e8cbb0ef231b9236d"
     },
     {
       "page_id": "glossary",
@@ -72,6 +72,13 @@
       "effective_date": "2026-10-16",
       "sha256": "5f64a2e10c7641182e783a7fcb4891fe3e508c7fb6a5c27aecb1cd9a6ceb3374",
       "summary": "Initial issue: four modes, five personalities, configurable limits, assumptions, risks, procedures",
+      "material": true
+    },
+    {
+      "version": "1.1.0",
+      "effective_date": "2026-10-16",
+      "sha256": "719dd2e092ad2d483d7c2504dc9a6335385cda21c490861ac6da21780ae0e777",
+      "summary": "Approved-trader registry and signed signals; platform capital limits on personalities; CAD pilot envelope (CAD 20 per position incl. fees, 2 positions, CAD 40 total); sign-in acceptance enforcement",
       "material": true
     }
   ]

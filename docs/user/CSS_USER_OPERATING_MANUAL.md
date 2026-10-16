@@ -61,6 +61,8 @@ CSS proposes trades. Nothing happens until **you** approve the specific order. A
 
 You choose a CSS trader and authorize a **mandate**: the trader, your risk personality, the asset classes, an allocation ceiling, a currency and an expiry. CSS does **not** copy the trader's orders one-for-one: your personality and your limits decide which signals you take, how large your positions are, and when they exit. Your fills, positions and profit or loss will differ from the trader's.
 
+Only traders approved by two different CSS administrators can be copied, and only for the asset classes they were approved for. CSS accepts a trader's signal only if it is signed with that trader's registered key, is recent and has not been used before. Approval is not an endorsement or a guarantee of the trader's results. If CSS suspends or revokes a trader, no new trades are copied from that moment; your open positions keep their protective exits.
+
 ## 2.4 CSS Autonomous Trading
 
 CSS decides without asking you about each trade, but only inside the settings you accepted: your mode, personality, limits and the platform's hard safety limits. Autonomous decisions are made by software that can be wrong. Autonomous mode does not mean unlimited risk, and it is never live trading authorization.
@@ -92,6 +94,8 @@ Your risk personality governs which trades you take and how much risk each one c
 | Take profit (multiple of the stop) | 1.5 | 1.75 | 2.0 | 2.5 | 3.0 |
 | Time exit (hours) | 24 | 48 | 72 | 120 | 168 |
 
+**Platform capital limits also apply.** CSS's capital and portfolio governors cap any single new position at 5% of your available capital (2% for futures and options) and your total exposure at 25% of your equity. Where a personality value above is higher, the lower platform limit applies. Today this means Balanced, Aggressive and Ultra Aggressive positions reach the same maximum size; they still differ in which trades they take, their stops, exits and pauses.
+
 **Implications.** A more aggressive personality takes more trades, larger positions and wider stops, so it can lose more, faster. "Aggressive" and "Ultra Aggressive" do **not** remove any safety gate and do not allow live trading. A safer personality will skip many signals, and a small account may be unable to trade at all because orders below the platform minimum are rejected rather than enlarged.
 
 ## 3.2 Your own limits (they can only tighten)
@@ -103,6 +107,8 @@ You may set your own, stricter limits: risk per trade, maximum position size, to
 3. your risk personality and, in copy mode, your mandate;
 4. your own limits;
 5. in CSS-Assisted mode, your approval of each order.
+
+In an approved CAD pilot account, each position, including its estimated fees, is limited to CAD 20, at most two positions may be open at once, and their total is limited to CAD 40. These pilot limits are fixed ceilings: they can be lowered but never raised by configuration. Positions this small are currently below the platform's minimum trade size, so they are rejected rather than enlarged.
 
 A limit you enter that is looser than your personality is rejected. Changing limits takes effect only after you accept the new settings, applies to **new** trades, and never silently changes the protection of positions that are already open.
 
@@ -222,7 +228,7 @@ In CSS-Assisted Trading each approval is your decision. Approving quickly, or ap
 
 ## 7.1 Operating procedures
 
-1. Sign in with your own account; never share credentials.
+1. Sign in with your own account; never share credentials. If you have not accepted the current version of this agreement, or your trading is paused, sign-in takes you to the review first, and every new trading action is refused until you accept. Reducing risk (pausing, the kill switch, disarming, revoking a mandate, protective exits) is never blocked.
 2. Choose or confirm your mode, personality, limits and (in copy mode) mandate.
 3. Review the summary of the exact settings and their implications.
 4. Review every page of this agreement and accept the acknowledgement.
@@ -281,7 +287,7 @@ If you see an unexpected trade, missing position, wrong balance or system error:
 <!-- css-manual-page: scenarios | 10. Example scenarios -->
 # 10. Example scenarios
 
-**A. Same signal, different personalities.** A CSS trader issues one FX signal. With a 10,000 account, a Safe follower may skip it (quality too low for Safe), a Conservative follower may take a 400 position with a 1.5% stop, and an Ultra Aggressive follower a 1,000 position with a 2.5% stop. Each gets a different fill, exit and result.
+**A. Same signal, different personalities.** A CSS trader issues one FX signal. With a 10,000 account, a Safe follower may skip it (quality too low for Safe), a Conservative follower may take a 400 position with a 1.5% stop, and an Ultra Aggressive follower a 500 position (its 10% personality cap reduced to the platform's 5% single-position cap) with a 2.5% stop. Each gets a different fill, exit and result.
 
 **B. Small account.** A Conservative follower with a 1,000 account is sized at 40. The platform minimum is 50, so the order is rejected rather than enlarged. The follower sees "trade size too small".
 

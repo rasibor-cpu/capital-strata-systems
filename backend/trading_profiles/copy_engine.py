@@ -4,13 +4,19 @@ For one source signal and one follower, the engine applies:
   1. safety:       observed safety-flag verdict SAFE; live-order and global kill switches
   2. consent:      active settings accepted under the current agreement (revalidated now),
                    not paused; personality tightened by the user's own limits
-  3. authority:    copy mode needs the consented, valid signed mandate for this trader;
+  3. authority:    copy mode needs the consented, valid signed mandate for this trader,
+                   and the trader must still be ACTIVE in the dual-control registry;
                    autonomous mode only takes CSS engine signals; assisted mode takes CSS
                    proposals or the user's own manual orders and stops for approval
   4. personality:  asset class, probability, drawdown and daily-loss halts, margin state
   5. sizing:       risk budget / stop, capped by position, symbol, total exposure and
                    mandate allocation. Never scaled UP to satisfy any gate minimum.
+                   Pilot-scope accounts additionally get the CAD pilot envelope
+                   (CAD 20 per parent incl. fees, CAD 40 aggregate, 2 concurrent parents).
   6. counts:       personality open-position limit and the global 10-position hard cap
+  6b. capital:     UnifiedRiskExecutionGate (portfolio governor 25% / per-asset caps,
+                   capital-allocation governor 5% single trade / per-asset caps). Its caps
+                   also bound sizing in step 5, so higher personalities are reduced, not raised.
   7. trade quality (TradeQualityScoringEngine) and CAIE score floors
   8. R14F (legacy engine mode in force, unchanged thresholds)
   9. canonical paper chain (CanonicalExecutionIntegration):
@@ -31,6 +37,7 @@ import re
 import secrets
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timedelta, timezone
+from decimal import ROUND_UP, Decimal
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Callable, Mapping
@@ -44,6 +51,9 @@ from backend.analytics.trade_quality_scoring_engine import (
 from backend.app.observability.kill_switch import check_kill_switch
 from backend.certification.ov002_persistence import PersistenceError, atomic_write_json, read_json_object
 from backend.app.risk.anti_bleed_guard import AntiBleedGuard
+from backend.app.risk.capital_allocation_governor import CapitalAllocationGovernor
+from backend.app.risk.portfolio_governor import PortfolioGovernor
+from backend.app.risk.unified_risk_execution_gate import UnifiedRiskExecutionGate
 from backend.execution.canonical_execution_integration import (
     CanonicalExecutionIntegration,
     CanonicalExecutionIntegrationError,
@@ -60,7 +70,13 @@ from backend.trading_profiles.limits import LimitsError, effective_policy
 from backend.trading_profiles.manual import ControlledManual, current_manual
 from backend.trading_profiles.preferences import PreferencesError, PreferencesStore
 from backend.runtime.interprocess_lock import exclusive_file_lock
+from backend.trading_profiles.pilot_envelope import (
+    PilotParentExposure,
+    evaluate_pilot_envelope,
+    remaining_parent_budget,
+)
 from backend.trading_profiles.risk_personalities import RiskPersonality, policy_for
+from backend.trading_profiles.trader_registry import TraderRegistry, TraderRegistryError
 from engine.execution.execution_gate import ExecutionGate
 from engine.execution.live_order_kill_switch import evaluate_live_order_kill_switch
 
@@ -118,6 +134,9 @@ class FollowerContext:
     buying_power: float
     margin_state: str = "NORMAL"
     open_positions: tuple[CopiedPosition, ...] = ()
+    # Pilot-scope account: the CAD pilot envelope applies in addition to every other cap.
+    pilot_envelope: bool = False
+    account_currency: str = "CAD"
 
 
 @dataclass(frozen=True)
@@ -172,6 +191,27 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _cad(value: float, rounding=ROUND_UP) -> Decimal:
+    return Decimal(str(value)).quantize(Decimal("0.01"), rounding=rounding)
+
+
+def _pilot_parents(open_positions: list[CopiedPosition]) -> list[PilotParentExposure]:
+    # Each open paper position is one parent. Amounts round UP so the envelope never under-counts.
+    return [PilotParentExposure(p.position_id, _cad(p.notional)) for p in open_positions]
+
+
+def _evaluate_pilot(open_positions, signal: SourceSignal, follower: FollowerContext, notional: float):
+    fees = _cad(max(0.0, notional * signal.fee_bps / 10_000.0))  # rounded up to the cent
+    try:
+        parents = _pilot_parents(open_positions)
+    except ValueError:
+        parents = None
+    return evaluate_pilot_envelope(
+        parents if parents is not None else [object()],  # malformed state -> fails closed inside
+        parent_id="new:" + signal.signal_id, proposed_child_cad=_cad(notional),
+        estimated_fees_cad=fees, currency=follower.account_currency)
+
+
 class CopyTradeEngine:
     def __init__(
         self,
@@ -183,14 +223,16 @@ class CopyTradeEngine:
         ledger: AttributionLedger | None = None,
         integration_factory: Callable[[ExecutionGate, bool], CanonicalExecutionIntegration] | None = None,
         manual_provider: Callable[[], ControlledManual] = current_manual,
+        trader_registry: TraderRegistry | None = None,
     ) -> None:
         self.root = Path(root)
         self.key_provider = key_provider
+        self.trader_registry = trader_registry or TraderRegistry(self.root)
         self.preferences = preferences or PreferencesStore(self.root)
         self.mandates = mandates or MandateRegistry(self.root, key_provider=key_provider)
         self.ledger = ledger or AttributionLedger(self.root)
         self.consent = ConsentService(self.root, preferences=self.preferences, mandates=self.mandates,
-                                      manual_provider=manual_provider)
+                                      manual_provider=manual_provider, trader_registry=self.trader_registry)
         self.proposals_path = self.root / "assisted_proposals.json"
         self._integration_factory = integration_factory or self._default_integration
         self._quality = TradeQualityScoringEngine()
@@ -301,6 +343,10 @@ class CopyTradeEngine:
             state["mandate_id"] = md.mandate_id
             if not md.valid_for_new_trades:
                 return reject("authority", md.reason)
+            try:  # a suspended or revoked trader stops all new copies at once
+                self.trader_registry.require_active(signal.trader_id, (asset,))
+            except TraderRegistryError as exc:
+                return reject("authority", f"trader_not_copyable:{exc}")
         elif mode is OperatingMode.CSS_AUTONOMOUS_TRADING:
             if signal.trader_id != AUTONOMOUS_SOURCE_ID:
                 return reject("authority", "autonomous_mode_accepts_css_engine_signals_only")
@@ -335,13 +381,29 @@ class CopyTradeEngine:
             equity * policy.max_symbol_exposure_pct_of_equity / 100 - symbol_exposure,
             equity * policy.max_total_exposure_pct_of_equity / 100 - total_exposure,
         ]
+        # Existing capital governors (most restrictive wins; they only ever reduce size).
+        capital_alloc_pct = min(CapitalAllocationGovernor.DEFAULT_MAX_SINGLE_TRADE_ALLOCATION_PCT,
+                                CapitalAllocationGovernor.DEFAULT_MAX_ALLOCATION_BY_ASSET_CLASS.get(asset, 0.0))
+        caps += [
+            follower.buying_power * capital_alloc_pct,
+            equity * PortfolioGovernor.DEFAULT_MAX_PORTFOLIO_EXPOSURE_PCT - total_exposure,
+            equity * PortfolioGovernor.DEFAULT_MAX_ASSET_CLASS_EXPOSURE.get(asset, 0.0),
+        ]
         if mandate is not None:
             mandate_exposure = sum(p.notional for p in open_positions if p.mandate_id == mandate.mandate_id)
             caps.append(mandate.max_allocation - mandate_exposure)
         if approved_proposal is not None:
             # An approval never authorizes more than the size the user approved.
             caps.append(float(approved_proposal["notional"]))
+        if follower.pilot_envelope:
+            # Room left for a new parent, net of its estimated entry fee.
+            budget = float(remaining_parent_budget(_pilot_parents(open_positions)))
+            caps.append(budget / (1 + signal.fee_bps / 10_000.0))
         notional = int(min(caps) * 100) / 100.0
+        if follower.pilot_envelope:
+            envelope = _evaluate_pilot(open_positions, signal, follower, max(notional, 0.01))
+            if not envelope.approved:
+                return reject("pilot_envelope", envelope.reason, notional=max(notional, 0.0), stop_distance_pct=stop_pct)
         if notional <= 0:
             return reject("sizing", "exposure_limit_reached", stop_distance_pct=stop_pct)
 
@@ -351,6 +413,12 @@ class CopyTradeEngine:
         if len(open_positions) >= HARD_TOTAL_OPEN_POSITION_CAP:
             return reject("exposure", "global_open_position_cap", notional=notional, stop_distance_pct=stop_pct)
         sized = {"notional": notional, "stop_distance_pct": stop_pct}
+        capital = UnifiedRiskExecutionGate().evaluate(
+            asset_class=asset, symbol=signal.symbol, requested_exposure=notional, requested_allocation=notional,
+            current_portfolio_exposure=total_exposure, account_equity=equity, available_capital=follower.buying_power,
+            mode="paper")
+        if not capital.approved:
+            return reject("capital_governor", f"{capital.reason}:{capital.portfolio_reason}:{capital.capital_reason}", **sized)
 
         # 7. Trade quality and CAIE.
         try:
@@ -502,6 +570,14 @@ class CopyTradeEngine:
             quality_recommendation=quality["quality_recommendation"], caie_score=caie_score, r14f=r14f,
             proposal_id=proposal["proposal_id"],
         )
+
+    def pending_proposals(self, user_id: str, *, now: datetime | None = None) -> list[dict[str, Any]]:
+        now = now or _now()
+        return [{k: p[k] for k in ("proposal_id", "signal", "notional", "stop_distance_pct", "created_at_utc",
+                                   "expires_at_utc")}
+                for p in self._read_proposals().values()
+                if p["user_id"] == user_id and p["status"] == "PENDING_USER_APPROVAL"
+                and now < datetime.fromisoformat(p["expires_at_utc"])]
 
     def decide_proposal(self, proposal_id: str, follower: FollowerContext, system: SystemContext, *,
                         approve: bool, now: datetime | None = None) -> CopyDecision:
