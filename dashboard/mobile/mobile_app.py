@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -1159,6 +1160,34 @@ def _get_session(request: Request) -> Optional[Dict[str, Any]]:
 
     session["last_activity"] = now
     return session
+
+
+# Issue #118: user trading profiles (startup mode, risk personality, copy mandates).
+# Identity comes only from the server-side session; the session id given to mandates is
+# a hash of the cookie token, never the token itself. Paper/simulation only.
+def _trading_profiles_identity(request: Request) -> Optional[Dict[str, Any]]:
+    token = request.cookies.get(SESSION_COOKIE)
+    session = _get_session(request)
+    if not token or not session:
+        return None
+    user_ctx = session.get("user_ctx") or {}
+    return {
+        "user_id": user_ctx.get("user_id"),
+        "session_id": hashlib.sha256(token.encode("utf-8")).hexdigest()[:32],
+    }
+
+
+from backend.trading_profiles.api import create_trading_profiles_router
+from backend.trading_profiles.service import TradingProfileService, env_key_provider
+
+app.include_router(
+    create_trading_profiles_router(
+        user_resolver=_trading_profiles_identity,
+        service_factory=lambda: TradingProfileService(
+            PROJECT_ROOT / "artifacts" / "trading_profiles", key_provider=env_key_provider()
+        ),
+    )
+)
 
 
 def _create_password_change_token(user_id: str) -> str:
