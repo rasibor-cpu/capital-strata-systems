@@ -74,12 +74,26 @@ Also unchanged:
 
 **Re-acceptance does not restart a trial that already started.**
 
-**Policy for new runs:** a new `--root` is a new isolated ledger and needs its own single acceptance. This is a policy choice; carrying an acceptance across runs would need an owner decision on its validity period.
+**Policy for new runs (owner decision, approved 2026-10-16):** each new isolated simulation `--root` requires one fresh final-screen acceptance. Consent is never reused across runs. A material change to the agreement version or content, or to the accepted trading settings, requires re-acceptance. The audit evidence (version, hash, operator, session, timestamp) and all fail-closed controls are preserved.
 
 ## Operator action (FINANCE)
-1. **Check the aborted run directory.** If the aborted activation left a `run.json`, check whether its directory contains `track_a/consent_ledger.jsonl` with an `ACCEPTED` record. Under the old flow, it will not.
-2. **Re-run the same `run` command and `--root` on this branch.** Preflight runs first. You then page through the agreement and type `ACCEPT` once.
-   - Because no cycle had ever run and neither track was ever activated, the trial clock starts at acceptance.
-   - `run.json` records `clock_restarted_reason=activation_never_completed` and the old `aborted_started_utc`.
-   - Capital and calibration artifacts are not touched.
-3. **Alternatively, start with a new `--root`.**
+**The FINANCE trial that is already running is out of scope for this change.** Its output shows:
+- `run started_utc=2026-10-16T21:04:25.564210+00:00`;
+- a scheduled end of `2026-10-18T21:04:25.564210+00:00`;
+- monitoring observations at 21:07 and 21:12 UTC.
+
+Leave it alone:
+- **Do not** switch its worktree to this branch.
+- **Do not** re-run, edit or reset its `run.json`, ledgers, capital or clock.
+- **Do not** intervene before its status has been confirmed read-only, for example with `python tools/css_sim_cad146.py report --root <its root> --out <file>`.
+
+**The code cannot restart a started run's clock.** The clock is restarted only when both conditions hold:
+1. neither track was ever activated;
+2. the journal has no cycle (no `HEARTBEAT`).
+
+A running trial meets neither condition. `test_started_trial_is_never_reset_even_when_reacceptance_is_needed` covers this.
+
+**Use this flow for the next new run.**
+1. Choose a new `--root`.
+2. Run preflight, then `run`.
+3. Page through the agreement with Enter and type `ACCEPT` once. The clock starts at that acceptance.

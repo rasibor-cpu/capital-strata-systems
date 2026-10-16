@@ -312,6 +312,18 @@ def test_run_interrupted_before_acceptance_restarts_its_clock_with_a_recorded_re
     assert meta["aborted_started_utc"] == "2026-10-16T20:00:00+00:00" and meta["starting_equity_cad"] == 14_600.0
 
 
+def test_started_trial_is_never_reset_even_when_reacceptance_is_needed(tmp_path, monkeypatch):
+    root = tmp_path / "run"
+    _sim(root, accept_agreement)
+    with (root / "journal.jsonl").open("a", encoding="utf-8") as fh:  # the trial has cycled
+        fh.write(json.dumps({"type": "HEARTBEAT", "at_utc": T0.isoformat()}) + "\n")
+    before = (root / "run.json").read_text()
+    monkeypatch.setattr(cad146, "_desired_policy_hash", lambda: "0" * 64)  # force a re-presentation
+    with pytest.raises(SimulationError):
+        _sim(root, lambda review: review.decline("declined_by_operator"), now=T0 + timedelta(hours=5))
+    assert (root / "run.json").read_text() == before  # clock, capital and start untouched
+
+
 # ------------------------------------------------------------------ audit integrity
 def test_tampered_acceptance_record_breaks_the_chain_and_blocks_trading(tmp_path):
     root = tmp_path / "run"
