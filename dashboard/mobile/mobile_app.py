@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -691,6 +692,10 @@ async def api_live_micro_pilot_configure(request: Request):
     session = _get_session(request)
     if not session:
         return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    acceptance = _trading_acceptance(session["user_ctx"])
+    if not acceptance.allowed:  # configuring/arming adds risk; disarm stays exempt
+        return JSONResponse({"ok": False, "status": "MANUAL_ACCEPTANCE_REQUIRED", "reason": acceptance.reason,
+                             "onboarding_path": acceptance.onboarding_path}, status_code=403)
     form = await _read_form(request)
     try:
         status = LiveMicroPilotGovernor().write_config(
@@ -710,6 +715,10 @@ async def api_live_micro_pilot_arm(request: Request):
     session = _get_session(request)
     if not session:
         return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    acceptance = _trading_acceptance(session["user_ctx"])
+    if not acceptance.allowed:  # configuring/arming adds risk; disarm stays exempt
+        return JSONResponse({"ok": False, "status": "MANUAL_ACCEPTANCE_REQUIRED", "reason": acceptance.reason,
+                             "onboarding_path": acceptance.onboarding_path}, status_code=403)
     form = await _read_form(request)
     try:
         status = LiveMicroPilotGovernor().arm(
@@ -802,6 +811,18 @@ async def controls_submit(request: Request):
         )
 
     form = await _read_form(request)
+    requested_controls = {
+        "mobile_trading_mode": form.get("mobile_trading_mode", "MOBILE_READ_ONLY"),
+        "engine_mode": form.get("engine_mode", "SAFE"),
+        "live_order_kill_switch": form.get("live_order_kill_switch", "off") == "on",
+    }
+    if controls_change_increases_risk(load_mobile_controls(), requested_controls):
+        acceptance = _trading_acceptance(user_ctx)
+        if not acceptance.allowed:
+            return HTMLResponse(
+                _controls_page(user_ctx, message=_acceptance_required_message(acceptance), status="error"),
+                status_code=403,
+            )
     if form.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED" and form.get("legal_acceptance") != "on":
         return HTMLResponse(
             _controls_page(
@@ -878,6 +899,11 @@ async def trade_ticket_submit(request: Request):
     session = _get_session(request)
     if not session:
         return RedirectResponse("/login", status_code=303)
+
+    acceptance = _trading_acceptance(session["user_ctx"])
+    if not acceptance.allowed:
+        result = {"ok": False, "status": "MANUAL_ACCEPTANCE_REQUIRED", "error": _acceptance_required_message(acceptance)}
+        return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status="error"), status_code=403)
 
     form = await _read_form(request)
     result = execute_mobile_trade_ticket(session["user_ctx"], form)
@@ -1115,7 +1141,9 @@ def _login_success_response(request: Request, user_ctx: Dict[str, Any]) -> Redir
     from backend.security.mutation_guard import secure_cookie_kwargs
 
     token = _create_session(user_ctx)
-    response = RedirectResponse("/dashboard", status_code=303)
+    # Issue #118: no new risk-taking workflow without valid manual acceptance.
+    status = _trading_acceptance(user_ctx)
+    response = RedirectResponse("/dashboard" if status.allowed else status.onboarding_path, status_code=303)
     kwargs = secure_cookie_kwargs(str(request.url.scheme))
     response.set_cookie(
         SESSION_COOKIE,
@@ -1159,6 +1187,96 @@ def _get_session(request: Request) -> Optional[Dict[str, Any]]:
 
     session["last_activity"] = now
     return session
+
+
+# Issue #118: user trading profiles (startup mode, risk personality, copy mandates).
+# Identity comes only from the server-side session; the session id given to mandates is
+# a hash of the cookie token, never the token itself. Paper/simulation only.
+def _trading_profiles_identity(request: Request) -> Optional[Dict[str, Any]]:
+    token = request.cookies.get(SESSION_COOKIE)
+    session = _get_session(request)
+    if not token or not session:
+        return None
+    user_ctx = session.get("user_ctx") or {}
+    return {
+        "user_id": user_ctx.get("user_id"),
+        "session_id": _session_hash(token),
+        "session_created": float(session.get("created") or 0.0),
+        "role": _normalize_role(user_ctx.get("role", "")),
+    }
+
+
+def _session_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+
+
+from backend.trading_profiles.api import create_trading_profiles_router
+from backend.trading_profiles.gatekeeper import controls_change_increases_risk, risk_taking_status
+from backend.trading_profiles.service import TradingProfileService, env_key_provider
+
+
+def _trading_profiles_service() -> TradingProfileService:
+    return TradingProfileService(PROJECT_ROOT / "artifacts" / "trading_profiles", key_provider=env_key_provider())
+
+
+def _trading_acceptance(user_ctx: Optional[Dict[str, Any]]):
+    return risk_taking_status(_trading_profiles_service(), (user_ctx or {}).get("user_id"))
+
+
+def _trading_router():
+    """Canonical paper router (Assisted / Copy / Autonomous). Every context source fails closed."""
+    from backend.trading_profiles.copy_engine import CopyTradeEngine, SystemContext
+    from backend.trading_profiles.router import PaperBook, TradingRouter
+
+    root = PROJECT_ROOT / "artifacts" / "trading_profiles"
+    service = _trading_profiles_service()
+    engine = CopyTradeEngine(root, key_provider=service.key_provider, trader_registry=service.trader_registry)
+
+    def role_resolver(user_id: str) -> Optional[str]:
+        record = load_users().get(user_id)
+        if not isinstance(record, dict) or record.get("locked"):
+            return None
+        return _normalize_role(record.get("role", "")) or None
+
+    def session_resolver(user_id: str):
+        # The user's most recent unexpired sign-on; R7 additionally requires it to be recent.
+        _hydrate_sessions()
+        now = time.time()
+        live = [(float(s.get("created") or 0.0), token) for token, s in list(_SESSIONS.items())
+                if (s.get("user_ctx") or {}).get("user_id") == user_id
+                and now - float(s.get("created") or 0.0) <= SESSION_MAX_SECONDS]
+        if not live:
+            return None
+        created, token = max(live)
+        return _session_hash(token), created
+
+    def system_provider() -> SystemContext:
+        from backend.runtime.safety_flag_observation import authoritative_safety_flags_payload
+        from launcher.css_mobile_launcher import get_launcher_observed_safety_flags
+
+        flags = authoritative_safety_flags_payload(get_launcher_observed_safety_flags(),
+                                                   observed_at=datetime.now(timezone.utc).isoformat())
+        controls = load_mobile_controls()
+        env = {k: v for k, v in os.environ.items() if k in {"CSS_LIVE_ORDER_KILL_SWITCH", "REA_KILL_SWITCH"}}
+        return SystemContext(engine_mode=str(controls.get("engine_mode") or "SAFE"), safety_flags=flags,
+                             mobile_controls=controls, env=env)
+
+    return TradingRouter(engine, book=PaperBook(root), role_resolver=role_resolver,
+                         session_resolver=session_resolver, system_provider=system_provider)
+
+
+def _acceptance_required_message(status) -> str:
+    return (f"New trading is blocked until you accept the CSS User Operating Manual and risk agreement "
+            f"({status.reason}). Open {status.onboarding_path} to review and accept.")
+
+
+app.include_router(
+    create_trading_profiles_router(
+        user_resolver=_trading_profiles_identity,
+        service_factory=_trading_profiles_service,
+        router_factory=lambda: _trading_router(),
+    )
+)
 
 
 def _create_password_change_token(user_id: str) -> str:
