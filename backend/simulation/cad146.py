@@ -44,7 +44,9 @@ from backend.trading_profiles.copy_engine import (
     SystemContext,
 )
 from backend.trading_profiles.engine_bridge import CssEngineSignalBridge
-from backend.trading_profiles.manual import ACKNOWLEDGEMENT_SHA256
+from backend.trading_profiles.agreement_review import ACCEPTED, REVIEWING, AgreementReview
+from backend.trading_profiles.consent import ConsentError, policy_hash
+from backend.trading_profiles.limits import UserRiskLimits
 from backend.trading_profiles.operating_modes import OperatingMode
 from backend.trading_profiles.router import PaperBook, TradingRouter
 
@@ -154,42 +156,74 @@ def _key(root: Path) -> bytes:
     return path.read_bytes()
 
 
-Presenter = Callable[[Mapping[str, Any]], bool]
+Presenter = Callable[[AgreementReview], None]
+"""Displays the operating agreement and drives the AgreementReview to its single final accept()
+or decline(). The CLI implementation is tools/css_sim_cad146.py:terminal_agreement."""
 
 
-def _activate(engine: CopyTradeEngine, *, operator: str, now: datetime, presenter: Presenter | None) -> None:
-    """The operator activates Simulated Trading for the simulation user through the real consent
-    flow: every manual page is presented in full by `presenter` and must be confirmed. Nothing is
-    recorded as reviewed unless the presenter confirmed it."""
+def _desired_policy_hash() -> str:
+    return policy_hash(OperatingMode.SIMULATED_TRADING, SIMULATED_DEFAULT_PERSONALITY,
+                       UserRiskLimits.from_mapping(None), None)
+
+
+def consent_status(engine: CopyTradeEngine) -> tuple[bool, str]:
+    """Valid, current acceptance of the simulation's exact settings? Otherwise (none yet, agreement
+    version or content changed, tampered or different settings) the agreement must be accepted."""
+    active = engine.preferences.get(SIM_USER).active
+    if active is None:
+        return False, "no_acceptance"
+    ok, why = engine.consent.verify_active(SIM_USER)
+    if not ok:
+        return False, why
+    if active.policy_hash != _desired_policy_hash():
+        return False, "accepted_settings_differ"
+    return True, "consent_valid"
+
+
+def obtain_agreement(engines: Sequence[CopyTradeEngine], *, operator: str, presenter: Presenter | None,
+                     clock: Callable[[], datetime]) -> AgreementReview | None:
+    """One presentation and one acceptance for every track that needs it; None if all are current.
+    A review that ends without acceptance (declined, quit, interrupted, error) is recorded as
+    declined and nothing is activated."""
+    pending = [e for e in engines if not consent_status(e)[0]]
+    if not pending:
+        return None
     if presenter is None:
         raise SimulationError("consent_activation_required")
-    consent = engine.consent
-    change = consent.propose_change(SIM_USER, operating_mode=OperatingMode.SIMULATED_TRADING.value,
-                                    risk_personality=SIMULATED_DEFAULT_PERSONALITY.value, limits=None,
-                                    mandate_request=None, now=now)
-    review = consent.open_review(SIM_USER, auth_session_hash=SIM_SESSION, change_id=change.change_id, now=now)
-    for page_id in review.pages:
-        page = consent.present_page(SIM_USER, auth_session_hash=SIM_SESSION, review_id=review.review_id,
-                                    page_id=page_id, now=now)
-        if not presenter(page):
-            raise SimulationError(f"consent_page_not_confirmed:{page_id}")
-        consent.mark_reviewed(SIM_USER, auth_session_hash=SIM_SESSION, review_id=review.review_id, page_id=page_id,
-                              method="non_scrollable_presented", page_sha256=page["sha256"], now=now)
-    manual = consent.manual_provider()
-    consent.accept(SIM_USER, auth_session_hash=SIM_SESSION, review_id=review.review_id, acknowledgement_checked=True,
-                   acknowledgement_sha256=ACKNOWLEDGEMENT_SHA256, manual_version=manual.version,
-                   manual_sha256=manual.sha256, policy_hash_shown=change.policy_hash, now=now)
+    try:
+        review = AgreementReview([e.consent for e in pending], user_id=SIM_USER, auth_session_hash=SIM_SESSION,
+                                 operator_id=operator, operating_mode=OperatingMode.SIMULATED_TRADING.value,
+                                 risk_personality=SIMULATED_DEFAULT_PERSONALITY.value, limits=None, clock=clock)
+    except ConsentError as exc:
+        raise SimulationError(f"agreement_unavailable:{exc}") from exc
+    try:
+        presenter(review)
+    except ConsentError as exc:
+        raise SimulationError(f"agreement_not_accepted:{exc}") from exc
+    finally:
+        if review.status == REVIEWING:
+            try:
+                review.decline("review_ended_without_acceptance")
+            except ConsentError:
+                pass  # review already expired/closed server-side: nothing can be accepted anyway
+    if review.status != ACCEPTED:
+        raise SimulationError(f"agreement_not_accepted:{review.decline_reason}")
+    return review
 
 
-def build_track(name: str, root: Path, *, approvals: Any, operator: str, now: datetime,
-                starting_equity: float = STARTING_EQUITY_CAD,
-                session_created: Callable[[], float] | None = None, presenter: Presenter | None = None) -> Track:
+def make_engine(root: Path) -> CopyTradeEngine:
     root = Path(root)
     if _is_operational(root):
         raise SimulationError("simulation_cannot_use_operational_paper_book")
     root.mkdir(parents=True, exist_ok=True)
     key = _key(root)
-    engine = CopyTradeEngine(root, key_provider=lambda: key)
+    return CopyTradeEngine(root, key_provider=lambda: key)
+
+
+def build_track(name: str, engine: CopyTradeEngine, *, approvals: Any, now: datetime,
+                starting_equity: float = STARTING_EQUITY_CAD,
+                session_created: Callable[[], float] | None = None, require_consent: bool = True) -> Track:
+    root = engine.root
     created = session_created or (lambda: now.timestamp())
     router = TradingRouter(
         engine, book=PaperBook(root, starting_equity=starting_equity),
@@ -206,48 +240,87 @@ def build_track(name: str, root: Path, *, approvals: Any, operator: str, now: da
         system_provider=lambda: SystemContext(engine_mode="SAFE", safety_flags=dict(SAFE_FLAGS), mobile_controls={},
                                               env={"CSS_EXECUTION_CONTEXT": "SIMULATION_NO_BROKER"}),
     )
-    if engine.preferences.get(SIM_USER).active is None:
-        _activate(engine, operator=operator, now=now, presenter=presenter)
+    ok, why = consent_status(engine)
+    if require_consent and not ok:
+        raise SimulationError(f"consent_not_current:{why}")  # never trade without a current acceptance
     track = Track(name, root, router, approvals, root / "sim_state.json")
     track.load()
     return track
 
 
 class Cad146Simulation:
-    """Runs one cycle at a time; the caller owns the clock (wall-clock in operation, fixed in tests)."""
+    """Runs one cycle at a time; the caller owns the clock (wall-clock in operation, fixed in tests).
+
+    Order of start-up: live-arming refusal -> agreement (one review, one acceptance, only when no
+    current acceptance exists) -> run.json. The 48-hour clock therefore starts only after the
+    operator accepted; a declined or interrupted review leaves no started run behind."""
 
     def __init__(self, root: Path | str, *, artifacts: Sequence[Mapping[str, Any]], costs: Mapping[str, CostModel],
                  operational_approvals_root: Path | str, operator: str, now: datetime | None = None,
                  starting_equity: float = STARTING_EQUITY_CAD, quote_provider: Any = None,
-                 env: Mapping[str, str] | None = None, presenter: Presenter | None = None) -> None:
+                 env: Mapping[str, str] | None = None, presenter: Presenter | None = None,
+                 require_current_agreement: bool = True) -> None:
+        """require_current_agreement=False is for read-only use (reports): no agreement is presented
+        and nothing is activated; the router still verifies consent at every decision."""
         refuse_if_live_armed(env)
+        if not require_current_agreement and not (Path(root) / "run.json").exists():
+            raise SimulationError("read_only_requires_existing_run")
+        fixed_now = now is not None
         now = _utc(now)
+        clock = (lambda: now) if fixed_now else (lambda: datetime.now(timezone.utc))
         self.root = Path(root)
         if _is_operational(self.root):
             raise SimulationError("simulation_cannot_use_operational_paper_book")
         self.artifacts, self.costs, self.quote_provider = list(artifacts), dict(costs), quote_provider
         self.journal = self.root / "journal.jsonl"
         self.meta_path = self.root / "run.json"
+        self.session_path = self.root / "operator_session.json"
+        engine_a, engine_b = make_engine(self.root / "track_a"), make_engine(self.root / "track_b")
+        never_activated = all(e.preferences.get(SIM_USER).active is None for e in (engine_a, engine_b))
+        self.agreement = obtain_agreement([engine_a, engine_b], operator=operator, presenter=presenter, clock=clock) \
+            if require_current_agreement else None
+        start = clock()  # after acceptance
+        if self.meta_path.exists() and self.agreement is not None and never_activated and not self._cycles_recorded():
+            # An earlier start was interrupted before the agreement was accepted (no cycle ever ran):
+            # the trial never began, so its clock starts now. Recorded, never silent.
+            meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
+            meta.update(started_utc=start.isoformat(), clock_restarted_reason="activation_never_completed",
+                        aborted_started_utc=meta.get("started_utc"))
+            self.meta_path.write_text(json.dumps(meta, indent=2, sort_keys=True), encoding="utf-8")
         if not self.meta_path.exists():
             self.root.mkdir(parents=True, exist_ok=True)
             self.meta_path.write_text(json.dumps({
-                "starting_equity_cad": starting_equity, "started_utc": now.isoformat(), "operator": operator,
+                "starting_equity_cad": starting_equity, "started_utc": start.isoformat(), "operator": operator,
                 "designated_trader": AUTONOMOUS_SOURCE_ID, "operating_mode": OperatingMode.SIMULATED_TRADING.value,
                 "risk_personality": SIMULATED_DEFAULT_PERSONALITY.value, "engine_mode": "SAFE",
                 "safety_flags": SAFE_FLAGS, "real_orders": 0}, indent=2, sort_keys=True), encoding="utf-8")
         meta = json.loads(self.meta_path.read_text(encoding="utf-8"))
-        self.session_path = self.root / "operator_session.json"
+        if self.agreement is not None:
+            summary = self.agreement.summary()
+            self._write({"type": "AGREEMENT_ACCEPTED", "operator": operator, "at_utc": start.isoformat(),
+                         "agreement_session_id": summary["agreement_session_id"],
+                         "agreement_version": summary["agreement_version"],
+                         "agreement_sha256": summary["agreement_sha256"], "policy_hash": summary["policy_hash"],
+                         "operating_mode": summary["operating_mode"], "risk_personality": summary["risk_personality"],
+                         "limits": summary["limits"],
+                         "receipts": [r["record_hash"] for r in self.agreement.receipts]})
         if not self.session_path.exists():
-            self.attest_operator(operator, now=now)
+            self.attest_operator(operator, now=start)
         session_created = self._session_created
         # Track A reads the OPERATIONAL approvals ledger (read-only use: status() only).
-        self.track_a = build_track(TRACK_A, self.root / "track_a",
-                                   approvals=CalibrationApprovals(operational_approvals_root), operator=operator,
-                                   now=now, starting_equity=meta["starting_equity_cad"], session_created=session_created,
-                                   presenter=presenter)
-        self.track_b = build_track(TRACK_B, self.root / "track_b", approvals=_ResearchApprovals(), operator=operator,
-                                   now=now, starting_equity=meta["starting_equity_cad"], session_created=session_created,
-                                   presenter=presenter)
+        self.track_a = build_track(TRACK_A, engine_a, approvals=CalibrationApprovals(operational_approvals_root),
+                                   now=start, starting_equity=meta["starting_equity_cad"],
+                                   session_created=session_created, require_consent=require_current_agreement)
+        self.track_b = build_track(TRACK_B, engine_b, approvals=_ResearchApprovals(), now=start,
+                                   starting_equity=meta["starting_equity_cad"], session_created=session_created,
+                                   require_consent=require_current_agreement)
+
+    def _cycles_recorded(self) -> bool:
+        try:
+            return any(json.loads(line).get("type") == "HEARTBEAT"
+                       for line in self.journal.read_text(encoding="utf-8").splitlines() if line.strip())
+        except (OSError, ValueError):
+            return False
 
     # ------------------------------------------------------------------ operator sign-on (R7)
     def attest_operator(self, operator: str, *, now: datetime | None = None) -> None:

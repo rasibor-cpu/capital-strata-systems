@@ -10,6 +10,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from agreement_support import accept_agreement
+
 from test_css_rc1_signals import ADMIN_A, ADMIN_B, H, _artifact, _now_for, synthetic
 from backend.signals.candles import CandleError
 from backend.signals.producer import CalibrationApprovals
@@ -113,14 +115,14 @@ def _args(tmp_path, **kw):
 def test_run_never_starts_the_clock_when_preflight_fails(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "_preflight", lambda args, now=None: {"verdict": "FAIL", "checks": []})
     with pytest.raises(SystemExit):
-        tool.cmd_run(_args(tmp_path), presenter=lambda p: True)
+        tool.cmd_run(_args(tmp_path), presenter=accept_agreement)
     assert not (tmp_path / "run" / "run.json").exists()
 
 
 def test_run_starts_only_after_preflight_pass_and_records_it(tmp_path, monkeypatch):
     monkeypatch.setattr(tool, "_preflight", lambda args, now=None: {"verdict": "PASS", "checks": [], "x": 1})
     monkeypatch.setattr(tool, "CoinbaseQuotes", lambda http: None)
-    assert tool.cmd_run(_args(tmp_path), presenter=lambda p: True) == 0
+    assert tool.cmd_run(_args(tmp_path), presenter=accept_agreement) == 0
     meta = json.loads((tmp_path / "run" / "run.json").read_text())
     assert meta["starting_equity_cad"] == 14_600.0
     assert json.loads((tmp_path / "run" / "preflight.json").read_text())["verdict"] == "PASS"
@@ -132,7 +134,7 @@ def test_reattestation_requires_present_operator_and_existing_run(tmp_path, monk
         tool.cmd_attest(args, confirm=lambda: "robert")
     monkeypatch.setattr(tool, "_preflight", lambda a, now=None: {"verdict": "PASS", "checks": []})
     monkeypatch.setattr(tool, "CoinbaseQuotes", lambda http: None)
-    tool.cmd_run(args, presenter=lambda p: True)
+    tool.cmd_run(args, presenter=accept_agreement)
     session = tmp_path / "run" / "operator_session.json"
     before = json.loads(session.read_text())["created"]
     with pytest.raises(SystemExit, match="not confirmed"):
@@ -152,7 +154,7 @@ def test_report_flags_cycles_where_r7_sign_on_had_expired(tmp_path):
     appr.approve(art, actor_ctx=ADMIN_B)
     sim = cad146.Cad146Simulation(tmp_path / "sim", artifacts=[art], costs=DEFAULT_COSTS,
                                   operational_approvals_root=tmp_path / "ops", operator="robert",
-                                  starting_equity=14_600.0, presenter=lambda p: True)
+                                  starting_equity=14_600.0, presenter=accept_agreement)
     sim.attest_operator("robert", now=_now_for(s) - timedelta(hours=2))
     sim.cycle(lambda i, g: s, [("BTC-USD", H)], now=_now_for(s))
     rep = sim.report()

@@ -390,7 +390,8 @@ class ConsentService:
     # -- 4. accept ---------------------------------------------------------------
     def accept(self, user_id: str, *, auth_session_hash: str, review_id: str, acknowledgement_checked: Any,
                acknowledgement_sha256: str, manual_version: str, manual_sha256: str, policy_hash_shown: str,
-               now: datetime) -> dict[str, Any]:
+               now: datetime, operator_id: str | None = None,
+               agreement_session_id: str | None = None) -> dict[str, Any]:
         if acknowledgement_checked is not True:
             raise ConsentError("acknowledgement_not_checked")
         if acknowledgement_sha256 != ACKNOWLEDGEMENT_SHA256:
@@ -443,6 +444,12 @@ class ConsentService:
                                    for pid in manual.page_ids],
                 "accepted_at_utc": _iso(now), "effective_from_utc": _iso(now),
             }
+            # Who accepted (an operator acting for a simulation user) and which single review
+            # produced it; added only when given so earlier records keep their exact shape.
+            if operator_id:
+                body["operator_id"] = str(operator_id)
+            if agreement_session_id:
+                body["agreement_session_id"] = str(agreement_session_id)
             # (a) evidence first: an acceptance record without activation is harmless
             record = self.ledger.append("ACCEPTED", body)
             change["status"] = "ACCEPTED"
@@ -487,8 +494,33 @@ class ConsentService:
             "operating_mode": record["operating_mode"], "risk_personality": record["risk_personality"],
             "limits": record["limits"], "mandate_terms": record["mandate_terms"], "mandate_id": mandate_id,
             "pages_reviewed": len(record["pages_reviewed"]),
+            "operator_id": record.get("operator_id"), "agreement_session_id": record.get("agreement_session_id"),
             "live_trading_authorized": False,
         }
+
+    def decline(self, user_id: str, *, auth_session_hash: str, review_id: str, reason: str, now: datetime,
+                operator_id: str | None = None, agreement_session_id: str | None = None) -> dict[str, Any]:
+        """Record an explicit decline (or an abandoned review). Nothing is activated; the pending
+        change and the review are closed so they can never be accepted later."""
+        manual = self._manual()
+        with self._locked():
+            state = self._read_state()
+            review = self._get_review(state, review_id, user_id, auth_session_hash, now)
+            change = state["changes"].get(review["change_id"])
+            if change is None or change["user_id"] != user_id:
+                raise ConsentError("change_not_found")
+            body = {"user_id": user_id, "change_id": change["change_id"], "review_id": review_id,
+                    "reason": str(reason)[:200], "operator_id": operator_id,
+                    "agreement_session_id": agreement_session_id, "policy_hash": change["policy_hash"],
+                    "manual_version": manual.version, "manual_sha256": manual.sha256,
+                    "pages_reviewed": sum(1 for e in review["pages"].values() if e.get("reviewed_at_utc")),
+                    "declined_at_utc": _iso(now)}
+            record = self.ledger.append("DECLINED", body)
+            if change["status"] == "PENDING":
+                change["status"] = "DECLINED"
+            review["status"] = "DECLINED"
+            self._write_state(state)
+        return record
 
     # -- 5. verification -----------------------------------------------------------
     def verify_active(self, user_id: str, state: UserTradingState | None = None) -> tuple[bool, str]:
