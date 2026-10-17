@@ -3,13 +3,14 @@ import unittest
 from backend.app.brokers.ngx_bridge import (
     BROKERS, SOURCE_CATALOG, NGXSource, reconcile_ngx_positions,
     summarize_pension_snapshot, register_institution,
+    summarize_bank_snapshot, CANADIAN_BANKS, CANADIAN_SIMULATION_CAPITAL_CAD,
 )
 
 
 class NGXBridgeTests(unittest.TestCase):
     def test_four_brokers_and_registrar_disabled(self):
         self.assertEqual(len(BROKERS), 4)
-        self.assertEqual(len(SOURCE_CATALOG), 6)
+        self.assertEqual(len(SOURCE_CATALOG), 12)
         self.assertTrue(all(not source.execution_allowed for source in SOURCE_CATALOG))
         self.assertTrue(all(source.api_status == "not_authorized" for source in SOURCE_CATALOG))
 
@@ -81,3 +82,28 @@ class ConfigurableInstitutionTests(unittest.TestCase):
             register_institution("bad/id", "broker", display_name="Invalid")
         with self.assertRaises(ValueError):
             register_institution("valid", "exchange", display_name="Invalid kind")
+
+
+class CanadianBankBridgeTests(unittest.TestCase):
+    def test_canadian_bank_directory_is_metadata_only(self):
+        self.assertEqual(len(CANADIAN_BANKS), 6)
+        self.assertEqual(str(CANADIAN_SIMULATION_CAPITAL_CAD), "14600")
+        self.assertEqual(register_institution("my_credit_union", "bank",
+                         display_name="Credit Union").api_status, "not_authorized")
+
+    def test_bank_balance_never_funds_simulation(self):
+        result = summarize_bank_snapshot({"provider": "rbc", "account_key": "alias",
+                                          "balance": "5000", "currency": "CAD"})
+        self.assertEqual(result["balance"], "5000")
+        self.assertFalse(result["included_in_trading_capital"])
+        self.assertFalse(result["execution_allowed"])
+        self.assertFalse(result["transfer_authority"])
+
+    def test_user_defined_bank_and_bad_balances(self):
+        result = summarize_bank_snapshot({"provider": "my_credit_union",
+                                          "account_key": "alias", "balance": "25"})
+        self.assertEqual(result["currency"], "CAD")
+        for value in ("NaN", "-1", None, "Infinity"):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                summarize_bank_snapshot({"provider": "td", "account_key": "alias",
+                                         "balance": value})
