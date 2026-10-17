@@ -2,13 +2,14 @@ import unittest
 
 from backend.app.brokers.ngx_bridge import (
     BROKERS, SOURCE_CATALOG, NGXSource, reconcile_ngx_positions,
+    summarize_pension_snapshot,
 )
 
 
 class NGXBridgeTests(unittest.TestCase):
     def test_four_brokers_and_registrar_disabled(self):
         self.assertEqual(len(BROKERS), 4)
-        self.assertEqual(len(SOURCE_CATALOG), 5)
+        self.assertEqual(len(SOURCE_CATALOG), 6)
         self.assertTrue(all(not source.execution_allowed for source in SOURCE_CATALOG))
         self.assertTrue(all(source.api_status == "not_authorized" for source in SOURCE_CATALOG))
 
@@ -49,3 +50,18 @@ class NGXBridgeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PensionBridgeTests(unittest.TestCase):
+    def test_pension_is_not_trading_capital(self):
+        result = summarize_pension_snapshot({"provider": "stanbic_ibtc_pension_managers",
+                                            "account_key": "pension-alias", "balance": "150000"})
+        self.assertEqual(result["balance"], "150000")
+        self.assertFalse(result["included_in_trading_capital"])
+        self.assertFalse(result["execution_allowed"])
+
+    def test_bad_pension_balance_rejected(self):
+        for value in ("NaN", "-1", None):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                summarize_pension_snapshot({"provider": "stanbic_ibtc_pension_managers",
+                                            "account_key": "alias", "balance": value})
