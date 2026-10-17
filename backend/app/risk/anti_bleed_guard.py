@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
@@ -51,6 +52,31 @@ class AntiBleedGuard:
         slippage_bps: float,
         side: str = "UNKNOWN",
     ) -> Dict[str, Any]:
+
+        # Fail closed before arithmetic: NaN and infinity can bypass ordinary
+        # threshold comparisons, while negative costs overstate net edge.
+        numeric_inputs = {
+            "trade_size": trade_size,
+            "expected_move_bps": expected_move_bps,
+            "fee_bps": fee_bps,
+            "spread_bps": spread_bps,
+            "slippage_bps": slippage_bps,
+        }
+        try:
+            values = {name: float(value) for name, value in numeric_inputs.items()}
+        except (TypeError, ValueError, OverflowError):
+            return {"approved": False, "reason": "invalid_numeric_input"}
+        if not all(math.isfinite(value) for value in values.values()):
+            return {"approved": False, "reason": "nonfinite_numeric_input"}
+        if values["trade_size"] <= 0 or any(
+            values[name] < 0 for name in ("fee_bps", "spread_bps", "slippage_bps")
+        ):
+            return {"approved": False, "reason": "invalid_size_or_cost"}
+        trade_size = values["trade_size"]
+        expected_move_bps = values["expected_move_bps"]
+        fee_bps = values["fee_bps"]
+        spread_bps = values["spread_bps"]
+        slippage_bps = values["slippage_bps"]
 
         total_cost_bps = fee_bps + spread_bps + slippage_bps
         net_edge_bps = expected_move_bps - total_cost_bps
