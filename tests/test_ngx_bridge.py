@@ -5,13 +5,14 @@ from backend.app.brokers.ngx_bridge import (
     summarize_pension_snapshot, register_institution,
     summarize_bank_snapshot, CANADIAN_BANKS, CANADIAN_SIMULATION_CAPITAL_CAD,
     CANADIAN_BROKERS, summarize_broker_account,
+    US_BANKS, US_BROKERS, summarize_us_institution_account,
 )
 
 
 class NGXBridgeTests(unittest.TestCase):
     def test_four_brokers_and_registrar_disabled(self):
         self.assertEqual(len(BROKERS), 4)
-        self.assertEqual(len(SOURCE_CATALOG), 13)
+        self.assertEqual(len(SOURCE_CATALOG), 24)
         self.assertTrue(all(not source.execution_allowed for source in SOURCE_CATALOG))
         self.assertTrue(all(source.api_status == "not_authorized" for source in SOURCE_CATALOG))
 
@@ -124,3 +125,29 @@ class CanadianBrokerTests(unittest.TestCase):
         self.assertEqual(result["connection_status"], "NOT_AUTHORIZED")
         self.assertFalse(result["execution_allowed"])
         self.assertFalse(result["transfer_authority"])
+
+
+class USInstitutionBridgeTests(unittest.TestCase):
+    def test_us_directory_is_not_a_connector(self):
+        self.assertEqual(len(US_BANKS), 6)
+        self.assertEqual(len(US_BROKERS), 5)
+        self.assertTrue(all(not entry.execution_allowed for entry in SOURCE_CATALOG))
+        self.assertEqual(register_institution("local_credit_union", "bank",
+                         display_name="Local Credit Union").api_status, "not_authorized")
+
+    def test_us_bank_and_broker_funding_denied(self):
+        for provider, kind in (("chase", "bank"), ("fidelity", "broker"),
+                               ("custom_us_bank", "bank")):
+            with self.subTest(provider=provider):
+                result = summarize_us_institution_account({
+                    "provider": provider, "kind": kind, "account_key": "alias", "currency": "USD"})
+                self.assertFalse(result["transfer_authority"])
+                self.assertFalse(result["ach_authority"])
+                self.assertFalse(result["wire_authority"])
+                self.assertFalse(result["execution_allowed"])
+
+    def test_us_account_validation(self):
+        for bad in ("NaN", "CAD", ""):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                summarize_us_institution_account({
+                    "provider": "chase", "kind": "bank", "account_key": "alias", "currency": bad})
