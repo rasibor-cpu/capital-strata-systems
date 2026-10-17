@@ -17,7 +17,12 @@ Run on a host that can reach the public market-data endpoints (e.g. FINANCE), in
   python tools/css_sim_cad146.py report --root artifacts/simulation/cad146-20261016 --out cad146_report.json
 
 Stopping and re-running `run` with the same --root resumes the same 48-hour window: the start
-time, ledger, positions and processed bars persist; a bar is never decided twice.
+time, ledger, positions and processed bars persist; a bar is never decided twice. Every start,
+resume and stop is journalled (RUN_STARTED / RUN_RESUMED / RUN_STOPPED); a resume after an
+unrecorded stop journals RUN_INTERRUPTION_DETECTED, bars that closed while down are journalled as
+BARS_MISSED (never decided late), and <root>/status.json always holds the current state.
+Exit codes: 0 completed, 1 error, 2 preflight failed, 3 R7 sign-on expired (--on-session-expiry exit),
+4 root already running, 5 refused (consent/agreement), 128+N stopped by signal N (Ctrl+C = 130).
 """
 from __future__ import annotations
 
@@ -112,13 +117,14 @@ def terminal_agreement(review, *, read=input, write=print) -> None:
 _terminal_presenter = terminal_agreement
 
 
-def _sim(args, presenter=None, *, read_only=False) -> Cad146Simulation:
+def _sim(args, presenter=None, *, read_only=False, bar_settle_seconds=None) -> Cad146Simulation:
     return Cad146Simulation(args.root, artifacts=_load_artifacts(args.artifacts) if getattr(args, "artifacts", None) else [],
                             costs=DEFAULT_COSTS, operational_approvals_root=args.approvals_root,
                             operator=args.operator, presenter=presenter, require_current_agreement=not read_only,
                             quote_provider=CoinbaseQuotes(resilient_http()),
                             starting_equity=starting_capital(profile=args.capital_profile,
-                                custom_cad=args.custom_capital_cad))
+                                custom_cad=args.custom_capital_cad),
+                            bar_settle_seconds=bar_settle_seconds)
 
 
 def _require_existing(args) -> None:
@@ -159,41 +165,146 @@ def cmd_preflight(args) -> int:
     return 0 if result["verdict"] == "PASS" else 2
 
 
-def cmd_run(args, *, presenter=None, sleep=time.sleep, clock=lambda: datetime.now(timezone.utc)) -> int:
+# Exit codes for a supervisor (Task Scheduler, a wrapper loop, systemd). A signal exit is 128+signum.
+EXIT_COMPLETED = 0            # the run window ended normally
+EXIT_ERROR = 1                # unexpected error (journalled as RUN_STOPPED reason=error:<type>)
+EXIT_PREFLIGHT_FAILED = 2     # nothing started
+EXIT_SESSION_EXPIRED = 3      # --on-session-expiry exit and the R7 sign-on expired
+EXIT_ALREADY_RUNNING = 4      # another `run` holds <root>/run.lock
+EXIT_REFUSED = 5              # consent / agreement / capital / live-arming refusal
+
+
+class _Stop(Exception):
+    def __init__(self, reason: str, code: int):
+        super().__init__(reason)
+        self.reason, self.code = reason, code
+
+
+def _install_stop_handlers():
+    """SIGINT (Ctrl+C), SIGTERM, SIGHUP and Windows SIGBREAK (Ctrl+Break, console close on some hosts)
+    stop the loop between steps and journal RUN_STOPPED. A hard kill, power loss or a console closed
+    without a signal cannot be caught: the next `run` journals RUN_INTERRUPTION_DETECTED instead."""
+    import signal
+    import threading
+
+    if threading.current_thread() is not threading.main_thread():
+        return lambda: None
+    previous = {}
+
+    def handler(signum, _frame):
+        name = signal.Signals(signum).name
+        raise _Stop(f"signal:{name}", 128 + int(signum))
+
+    for name in ("SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"):
+        sig = getattr(signal, name, None)
+        if sig is None:
+            continue
+        try:
+            previous[sig] = signal.signal(sig, handler)
+        except (OSError, ValueError):
+            pass
+
+    def restore():
+        for sig, old in previous.items():
+            try:
+                signal.signal(sig, old)
+            except (OSError, ValueError):
+                pass
+    return restore
+
+
+def _code_revision() -> str | None:
+    import subprocess
+
+    try:
+        out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=Path(__file__).resolve().parents[1],
+                             capture_output=True, text=True, timeout=5)
+        return out.stdout.strip() or None
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
+def cmd_run(args, *, presenter=None, sleep=time.sleep, clock=lambda: datetime.now(timezone.utc), fetch=None) -> int:
+    from backend.runtime.interprocess_lock import InterprocessLockTimeout, exclusive_file_lock
+    from backend.simulation.cad146 import SimulationError
+
     existing = (Path(args.root) / "run.json").exists()
     result = _preflight(args)
     _print_preflight(result)
     if result["verdict"] != "PASS":
-        raise SystemExit(2)  # the 48-hour clock never starts on a failed preflight
-    if not existing:
-        Path(args.root).mkdir(parents=True, exist_ok=True)
-        (Path(args.root) / "preflight.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
-    sim = _sim(args, presenter=presenter or _terminal_presenter)
+        raise SystemExit(EXIT_PREFLIGHT_FAILED)  # the 48-hour clock never starts on a failed preflight
+    Path(args.root).mkdir(parents=True, exist_ok=True)
+    try:
+        with exclusive_file_lock(Path(args.root) / "run.lock", timeout_seconds=1.0, poll_seconds=0.05):
+            if not existing:
+                (Path(args.root) / "preflight.json").write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
+            return _run_locked(args, presenter=presenter, sleep=sleep, clock=clock, fetch=fetch,
+                               simulation_error=SimulationError)
+    except InterprocessLockTimeout:
+        print(f"refused: another `run` is active on {args.root} (run.lock held)", file=sys.stderr)
+        return EXIT_ALREADY_RUNNING
+
+
+def _run_locked(args, *, presenter, sleep, clock, fetch, simulation_error) -> int:
+    try:
+        sim = _sim(args, presenter=presenter or _terminal_presenter,
+                   bar_settle_seconds=getattr(args, "bar_settle_seconds", None))
+    except simulation_error as exc:
+        print(f"refused: {exc}", file=sys.stderr)
+        return EXIT_REFUSED
     meta = json.loads(sim.meta_path.read_text(encoding="utf-8"))
     requested = starting_capital(profile=args.capital_profile, custom_cad=args.custom_capital_cad)
     if float(meta["starting_equity_cad"]) != requested:
         raise SystemExit(f"refused: {args.root} was initialised with CAD {meta['starting_equity_cad']:.2f}; "
                          f"requested CAD {requested:.2f}. Use a new --root for a new scenario (no silent reset).")
     end = datetime.fromisoformat(meta["started_utc"]) + timedelta(hours=args.hours)
-    provider = build_provider(args.source)
+    if fetch is None:
+        provider = build_provider(args.source)
+        fetch = lambda inst, g: provider.fetch(inst, granularity_s=g)  # noqa: E731
     instruments = sorted({(a["instrument"], int(a["granularity_s"])) for a in sim.artifacts})
-    print(f"run started_utc={meta['started_utc']} ends_utc={end.isoformat()} instruments={instruments}")
-    while clock() < end:
-        summary = sim.cycle(lambda inst, g: provider.fetch(inst, granularity_s=g), instruments)
-        print(json.dumps(summary, sort_keys=True), flush=True)
-        sleep(args.poll_seconds)
-    print(json.dumps(sim.report(), indent=2, sort_keys=True, default=str))
-    return 0
+    on_expiry = getattr(args, "on_session_expiry", "continue")
+    restore = _install_stop_handlers()
+    reason, code = "completed", EXIT_COMPLETED
+    sim.begin_session(now=clock(), hours=args.hours, poll_seconds=args.poll_seconds, code_revision=_code_revision())
+    print(f"run started_utc={meta['started_utc']} ends_utc={end.isoformat()} instruments={instruments}", flush=True)
+    try:
+        while clock() < end:
+            summary = sim.cycle(fetch, instruments, now=clock(), poll_seconds=args.poll_seconds)
+            print(json.dumps(summary, sort_keys=True), flush=True)
+            if on_expiry == "exit" and not summary["operator_session_valid"]:
+                raise _Stop("operator_session_expired", EXIT_SESSION_EXPIRED)
+            sleep(args.poll_seconds)
+    except _Stop as stop:
+        reason, code = stop.reason, stop.code
+    except KeyboardInterrupt:
+        reason, code = "signal:SIGINT", 130
+    except simulation_error as exc:
+        reason, code = f"refused:{exc}"[:300], EXIT_REFUSED
+    except Exception as exc:  # noqa: BLE001 - journal it, then the supervisor sees exit 1
+        reason, code = f"error:{type(exc).__name__}:{exc}"[:300], EXIT_ERROR
+    finally:
+        restore()
+        sim.end_session(reason, code, now=clock())
+    print(f"run stopped reason={reason} exit_code={code}", file=sys.stderr if code else sys.stdout, flush=True)
+    if code == EXIT_COMPLETED:
+        print(json.dumps(sim.report(), indent=2, sort_keys=True, default=str))
+    return code
 
 
 def cmd_attest(args, *, confirm=None) -> int:
-    """R7 re-attestation: the operator must be present and type their own id. Never automated."""
+    """R7 re-attestation: the operator must be present and type their own id. Never automated.
+    Safe while `run` is active on the same root: it never loads or recovers track state."""
+    from backend.simulation.cad146 import SimulationError, record_sign_on, verify_attest_allowed
+
     _require_existing(args)
     typed = (confirm or (lambda: input(f"Type your operator id ({args.operator}) to sign on for 1 hour: ")))()
     if str(typed).strip() != args.operator:
         raise SystemExit("refused: operator id not confirmed")
-    sim = _sim(args)
-    sim.attest_operator(args.operator)
+    try:
+        verify_attest_allowed(args.root)
+    except SimulationError as exc:
+        raise SystemExit(f"refused: {exc}") from None
+    record_sign_on(args.root, args.operator)
     print("operator sign-on recorded (valid for R7 for 1 hour)")
     return 0
 
@@ -261,6 +372,10 @@ def main(argv=None) -> int:
         if name == "run":
             p.add_argument("--hours", type=float, default=48.0)
             p.add_argument("--poll-seconds", type=float, default=300.0)
+            p.add_argument("--bar-settle-seconds", type=float, default=None,
+                           help="decide a bar only this long after its close (default 600: Coinbase revises recent bars)")
+            p.add_argument("--on-session-expiry", choices=("continue", "exit"), default="continue",
+                           help="continue: keep observing with R7 refusing entries (alerted); exit: stop with code 3")
         if name in ("report", "preflight"):
             p.add_argument("--out")
     args = ap.parse_args(argv)

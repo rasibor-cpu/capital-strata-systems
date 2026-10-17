@@ -150,12 +150,16 @@ class Track:
     inflight: str | None = None
     recovered_inflight: str | None = None
 
-    def load(self) -> None:
+    def load(self, *, recover: bool = True) -> None:
+        """recover=False is for read-only users (report, attest) that may run beside a live `run`:
+        they never touch the state file, so they cannot interfere with an in-flight decision."""
         if self.state_path.exists():
             doc = json.loads(self.state_path.read_text(encoding="utf-8"))
             self.processed = set(doc.get("processed", []))
             pending = doc.get("inflight")
-            if pending:
+            if pending and not recover:
+                self.inflight = pending
+            elif pending:
                 # The previous process stopped mid-decision. Fail closed: the bar counts as decided
                 # (a possible fill is kept, never duplicated); the recovery is journalled by the caller.
                 self.processed.add(pending)
@@ -320,7 +324,7 @@ def build_track(name: str, engine: CopyTradeEngine, *, approvals: Any, now: date
     if require_consent and not ok:
         raise SimulationError(f"consent_not_current:{why}")  # never trade without a current acceptance
     track = Track(name, root, router, approvals, root / "sim_state.json")
-    track.load()
+    track.load(recover=require_consent)
     return track
 
 
@@ -430,14 +434,7 @@ class Cad146Simulation:
     # ------------------------------------------------------------------ operator sign-on (R7)
     def attest_operator(self, operator: str, *, now: datetime | None = None) -> None:
         """An operator's explicit sign-on for this simulation. Never refreshed automatically."""
-        if not str(operator or "").strip():
-            raise SimulationError("operator_required")
-        now = _utc(now)
-        self.root.mkdir(parents=True, exist_ok=True)
-        self.session_path.write_text(json.dumps({"operator": operator, "created": now.timestamp(),
-                                                 "created_utc": now.isoformat()}), encoding="utf-8")
-        if self.journal.parent.exists():
-            self._write({"type": "OPERATOR_SIGN_ON", "operator": operator, "at_utc": now.isoformat()})
+        record_sign_on(self.root, operator, now=now)
 
     def _session_created(self) -> float:
         try:
@@ -447,8 +444,7 @@ class Cad146Simulation:
 
     # ------------------------------------------------------------------ journal
     def _write(self, rec: Mapping[str, Any]) -> None:
-        with self.journal.open("a", encoding="utf-8") as fh:
-            fh.write(json.dumps(rec, sort_keys=True, default=str) + "\n")
+        _append_journal(self.journal, rec)
 
     # ------------------------------------------------------------------ one cycle
     def cycle(self, fetch: Callable[[str, int], CandleSeries], instruments: Sequence[tuple[str, int]], *,
@@ -701,7 +697,16 @@ class Cad146Simulation:
                "sim_entry_halted_cycles": sum(1 for e in events if e["type"] == "HEARTBEAT"
                                               and e.get("sim_entry_halted")),
                "live_kill_switch_engaged_all_cycles": all(e.get("live_kill_switch_engaged", False) for e in events
-                                                          if e["type"] == "HEARTBEAT")}
+                                                          if e["type"] == "HEARTBEAT"),
+               # lifecycle and data-integrity events, so an interrupted or degraded run is never
+               # mistaken for a clean 48 hours
+               "lifecycle": {t: sum(1 for e in events if e["type"] == t) for t in (
+                   "RUN_STARTED", "RUN_RESUMED", "RUN_STOPPED", "RUN_INTERRUPTION_DETECTED", "SUSPENSION_DETECTED",
+                   "DECISION_INFLIGHT_RECOVERED", "OPERATOR_SESSION_EXPIRED", "OPERATOR_SESSION_RESTORED",
+                   "BAR_REVISED_AFTER_DECISION", "OUTAGE")},
+               "bars_missed": sum(int(e.get("count", 0)) for e in events if e["type"] == "BARS_MISSED"),
+               "stops": [{"reason": e.get("reason"), "exit_code": e.get("exit_code"), "at_utc": e.get("at_utc")}
+                         for e in events if e["type"] == "RUN_STOPPED"]}
         last_close = {}
         for e in events:
             if e["type"] == "OBSERVATION":
@@ -786,3 +791,46 @@ def _signal_ids_for_bar(key: str, artifacts: Sequence[Mapping[str, Any]]) -> set
             raw = f"{a.get('artifact_sha256')}|{instrument}|{bar_ts}|{side}".encode()
             out.add("rd-" + hashlib.sha256(raw).hexdigest()[:20])
     return out
+
+
+def _append_journal(journal: Path, rec: Mapping[str, Any]) -> None:
+    """One JSON line per record, under a short cross-process lock: `attest` may run beside `run`."""
+    from backend.runtime.interprocess_lock import exclusive_file_lock
+    journal.parent.mkdir(parents=True, exist_ok=True)
+    with exclusive_file_lock(journal.with_name("journal.lock"), timeout_seconds=10.0):
+        with journal.open("a", encoding="utf-8") as fh:
+            fh.write(json.dumps(rec, sort_keys=True, default=str) + "\n")
+            fh.flush()
+            os.fsync(fh.fileno())
+
+
+def record_sign_on(root: Path | str, operator: str, *, now: datetime | None = None) -> None:
+    """R7 sign-on for one run root: writes operator_session.json atomically and journals it. It does
+    not construct the tracks, so it is safe to call while `run` is active on the same root."""
+    if not str(operator or "").strip():
+        raise SimulationError("operator_required")
+    now = _utc(now)
+    root = Path(root)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "operator_session.json"
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps({"operator": operator, "created": now.timestamp(), "created_utc": now.isoformat()}),
+                   encoding="utf-8")
+    tmp.replace(path)
+    _append_journal(root / "journal.jsonl", {"type": "OPERATOR_SIGN_ON", "operator": operator, "at_utc": now.isoformat()})
+
+
+def verify_attest_allowed(root: Path | str, *, key_store: Any = None, env: Mapping[str, str] | None = None) -> None:
+    """Before a re-attestation: an initialised run, no live arming, and a current acceptance in both
+    tracks (checked read-only, without loading or recovering track state)."""
+    refuse_if_live_armed(env)
+    root = Path(root)
+    if not (root / "run.json").exists():
+        raise SimulationError("no_run_at_root")
+    if _is_operational(root):
+        raise SimulationError("simulation_cannot_use_operational_paper_book")
+    run_id = read_run_id(root)
+    for sub in ("track_a", "track_b"):
+        ok, why = consent_status(make_engine(root / sub, key_store), run_id=run_id)
+        if not ok:
+            raise SimulationError(f"consent_not_current:{why}")
