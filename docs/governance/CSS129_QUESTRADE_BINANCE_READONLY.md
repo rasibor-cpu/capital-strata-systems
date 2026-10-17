@@ -48,6 +48,8 @@
 
 **Signed read-only account adapter (`backend/app/brokers/binance_live_read_only_adapter.py`; Grok audit A-H1 and A-M1).** This existing adapter had no jurisdiction gate. With `CSS_OPERATING_COUNTRY=CA` it still sent a signed request to `api.binance.com`, and its base URL could be redirected anywhere through the environment. It now:
 - refuses **every** request, signed or not, when `binance_eligibility` refuses the country, with `BinanceJurisdictionError` and nothing sent. The operational validation reports this as `JURISDICTION_RESTRICTED`;
+- accepts the operating country only as a strict **ASCII** ISO 3166-1 alpha-2 code from the assigned list. The ASCII check runs before any case folding, so Unicode look-alikes are refused before any signing (Grok F-3): Cyrillic `СА`, fullwidth `ＣＡ`, `UЅ`, zero-width characters, the Kelvin sign and the long s. `eligible` is a read-only property;
+- never follows HTTP redirects (`allow_redirects=False`), and treats every 3xx as an error (`redirect_refused`). `requests` strips only `Authorization` on a cross-host redirect, so following one would forward `X-MBX-APIKEY` (Grok F-4). A loopback test with two servers proves the key never reaches the redirect target;
 - accepts only `https://` on Binance's REST hosts (`api.binance.com`, `api1`–`api4`, `api-gcp`) with no credentials, path or non-443 port. Any other `BINANCE_BASE_URL` / `BINANCE_API_URL` / `BINANCE_REST_URL` is refused, so the API key and signatures cannot be sent elsewhere.
 
 ## Tests
