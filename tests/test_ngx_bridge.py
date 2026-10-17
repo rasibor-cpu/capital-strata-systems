@@ -12,7 +12,7 @@ from backend.app.brokers.ngx_bridge import (
 class NGXBridgeTests(unittest.TestCase):
     def test_four_brokers_and_registrar_disabled(self):
         self.assertEqual(len(BROKERS), 4)
-        self.assertEqual(len(SOURCE_CATALOG), 24)
+        self.assertEqual(len(SOURCE_CATALOG), 26)
         self.assertTrue(all(not source.execution_allowed for source in SOURCE_CATALOG))
         self.assertTrue(all(source.api_status == "not_authorized" for source in SOURCE_CATALOG))
 
@@ -130,13 +130,13 @@ class CanadianBrokerTests(unittest.TestCase):
 class USInstitutionBridgeTests(unittest.TestCase):
     def test_us_directory_is_not_a_connector(self):
         self.assertEqual(len(US_BANKS), 6)
-        self.assertEqual(len(US_BROKERS), 5)
+        self.assertEqual(len(US_BROKERS), 7)
         self.assertTrue(all(not entry.execution_allowed for entry in SOURCE_CATALOG))
         self.assertEqual(register_institution("local_credit_union", "bank",
                          display_name="Local Credit Union").api_status, "not_authorized")
 
     def test_us_bank_and_broker_funding_denied(self):
-        for provider, kind in (("chase", "bank"), ("fidelity", "broker"),
+        for provider, kind in (("chase", "bank"), ("fidelity", "broker"), ("alpaca", "broker"), ("oanda", "broker"),
                                ("custom_us_bank", "bank")):
             with self.subTest(provider=provider):
                 result = summarize_us_institution_account({
