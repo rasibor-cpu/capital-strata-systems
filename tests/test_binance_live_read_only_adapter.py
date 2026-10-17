@@ -11,6 +11,7 @@ import requests
 from backend.app.brokers.binance_live_read_only_adapter import (
     SOURCE_BINANCE_LIVE_READ_ONLY,
     BinanceConfigurationError,
+    BinanceJurisdictionError,
     BinanceLiveReadOnlyAdapter,
     BinanceReadOnlyError,
     BinanceReadOnlyMethodError,
@@ -20,6 +21,9 @@ from backend.app.brokers.binance_live_read_only_adapter import (
 NOW = datetime(2026, 9, 4, 22, 0, tzinfo=timezone.utc)
 API_KEY = "test-binance-api-key"
 API_SECRET = "test-binance-api-secret-material"
+# SYNTHETIC attestation of an operating country Binance serves; the adapter refuses every request
+# when the country is unattested or restricted (CA, US, ...).
+SYNTHETIC_COUNTRY = "DE"
 
 
 class FakeResponse:
@@ -54,6 +58,7 @@ def _env(**overrides):
         "BINANCE_API_KEY": API_KEY,
         "BINANCE_API_SECRET": API_SECRET,
         "BINANCE_BASE_URL": "https://api.binance.com",
+        "CSS_OPERATING_COUNTRY": SYNTHETIC_COUNTRY,
     }
     payload.update(overrides)
     return payload
@@ -105,7 +110,7 @@ def test_adapter_exposes_no_write_or_execution_methods() -> None:
 
 def test_missing_credentials_fail_before_authenticated_network() -> None:
     transport = RecordingTransport(lambda _call: FakeResponse({"balances": []}))
-    adapter = BinanceLiveReadOnlyAdapter(env={}, transport=transport, now=lambda: NOW)
+    adapter = BinanceLiveReadOnlyAdapter(env={"CSS_OPERATING_COUNTRY": SYNTHETIC_COUNTRY}, transport=transport, now=lambda: NOW)
     with pytest.raises(BinanceConfigurationError):
         adapter.get_account()
     assert transport.calls == []
@@ -242,3 +247,171 @@ def test_safety_flags_remain_fail_closed() -> None:
     assert BinanceLiveReadOnlyAdapter.live_trading_blocked is True
     assert BinanceLiveReadOnlyAdapter.broker_execution_armed is False
     assert BinanceLiveReadOnlyAdapter.advisory_only is True
+
+
+# --------------------------------------------------------------- jurisdiction gate and host allowlist
+@pytest.mark.parametrize("country", ["CA", "ca", "US", "", "XX1", None])
+def test_restricted_or_unattested_country_sends_no_request_signed_or_not(country) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1, "balances": []}))
+    env = _env()
+    if country is None:
+        env.pop("CSS_OPERATING_COUNTRY")
+    else:
+        env["CSS_OPERATING_COUNTRY"] = country
+    adapter = BinanceLiveReadOnlyAdapter(env=env, transport=transport, now=lambda: NOW)
+    assert adapter.eligible is False
+    for call in (adapter.get_account, adapter.server_time, adapter.get_exchange_info, adapter.get_ticker):
+        with pytest.raises(BinanceJurisdictionError):
+            call()
+    assert transport.calls == []  # neither the API key nor a signature ever left the process
+    assert adapter.credential_diagnostics()["binance_eligible"] is False
+
+
+@pytest.mark.parametrize("url", [
+    "http://api.binance.com",
+    "https://evil.example.com",
+    "https://api.binance.com.evil.example.com",
+    "https://user:pw@api.binance.com",
+    "https://api.binance.com:8443",
+    "https://api.binance.com/proxy",
+    "https://testnet.binance.vision",
+    "ftp://api.binance.com",
+    "https://api.binance.com:notaport",
+    "https://[::1",
+])
+def test_non_allowlisted_base_url_is_refused_before_any_request(url) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1, "balances": []}))
+    for var in ("BINANCE_BASE_URL", "BINANCE_API_URL", "BINANCE_REST_URL"):
+        env = _env()
+        env.pop("BINANCE_BASE_URL")
+        env[var] = url
+        adapter = BinanceLiveReadOnlyAdapter(env=env, transport=transport, now=lambda: NOW)
+        assert adapter.base_url == "" and adapter.is_configured() is False
+        assert adapter.credential_diagnostics()["binance_base_url_rejected"] is True
+        with pytest.raises(BinanceConfigurationError, match="binance_base_url_not_allowlisted"):
+            adapter._request("GET", "/api/v3/time")
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize("url", ["https://api.binance.com", "https://api1.binance.com/", "https://API-GCP.binance.com"])
+def test_allowlisted_binance_hosts_are_accepted(url) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1}))
+    adapter = _adapter(transport, BINANCE_BASE_URL=url)
+    adapter.server_time()
+    assert transport.calls[0]["url"].startswith(f"https://{url.split('//')[1].strip('/').lower()}/api/v3/time")
+
+
+# --------------------------------------------------------------- Grok final audit F-3 (Unicode look-alikes)
+@pytest.mark.parametrize("country", [
+    "СА",            # Cyrillic ES + A, renders as "CA"
+    "ＣＡ",            # fullwidth "ＣＡ"
+    "СA",                 # mixed Cyrillic/Latin "СA"
+    "UЅ",                 # "UЅ" (Cyrillic DZE)
+    "C​A",                # zero-width space inside
+    "KR",                 # Kelvin sign + R (case-folds to "KR")
+    "ſE",                 # long s (upper() -> "SE")
+    "XX", "ZZ", "QQ",          # ASCII but not assigned ISO 3166-1 alpha-2
+    "C A", "CA ", "1A",
+])
+def test_unicode_confusable_or_unassigned_country_sends_nothing(country) -> None:
+    signed = []
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1, "balances": []}))
+    adapter = _adapter(transport, CSS_OPERATING_COUNTRY=country)
+    real_new = hmac.new
+    try:
+        hmac.new = lambda *a, **k: signed.append(1) or real_new(*a, **k)  # spy: no signing may happen
+        with pytest.raises(BinanceJurisdictionError):
+            adapter.get_account()
+    finally:
+        hmac.new = real_new
+    assert adapter.eligible is False and transport.calls == [] and signed == []
+
+
+@pytest.mark.parametrize("country", ["DE", "de", " gb ", "Jp"])
+def test_valid_ascii_iso_country_is_accepted(country) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1}))
+    adapter = _adapter(transport, CSS_OPERATING_COUNTRY=country)
+    adapter.server_time()
+    assert adapter.eligible is True and len(transport.calls) == 1
+
+
+def test_eligibility_cannot_be_overridden_after_construction() -> None:
+    adapter = _adapter(RecordingTransport(lambda _call: FakeResponse({})), CSS_OPERATING_COUNTRY="CA")
+    with pytest.raises(AttributeError):
+        adapter.eligible = True
+    assert adapter.eligible is False
+
+
+# --------------------------------------------------------------- Grok final audit F-4 (redirects)
+def _two_local_servers():
+    """Server A answers every request with a 302 to server B (a different host:port); B records
+    whatever headers reach it. Loopback only; synthetic credentials only."""
+    import http.server
+    import threading
+
+    received = []
+
+    class B(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            received.append(dict(self.headers))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"balances": []}')
+
+        def log_message(self, *a):
+            pass
+
+    b = http.server.HTTPServer(("127.0.0.1", 0), B)
+
+    class A(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://localhost:{b.server_port}/collect")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    a = http.server.HTTPServer(("127.0.0.1", 0), A)
+    for srv in (a, b):
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return a, b, received
+
+
+def test_default_transport_never_forwards_the_api_key_across_a_redirect(monkeypatch) -> None:
+    for var in ("NO_PROXY", "no_proxy"):  # loopback traffic must not go through any configured proxy
+        monkeypatch.setenv(var, "127.0.0.1,localhost")
+    a, b, received = _two_local_servers()
+    try:
+        adapter = BinanceLiveReadOnlyAdapter(env=_env(), now=lambda: NOW)  # real requests transport
+        adapter.base_url = f"http://127.0.0.1:{a.server_port}"  # test only: stand-in for a redirecting host
+        with pytest.raises(BinanceReadOnlyError, match="redirect_refused:302"):
+            adapter.get_account()
+        assert received == []  # server B was never contacted: the key header never left for another host
+        # The defect it guards against: a redirect-following GET carries X-MBX-APIKEY to server B.
+        requests.get(f"http://127.0.0.1:{a.server_port}/api/v3/account", headers={"X-MBX-APIKEY": API_KEY}, timeout=5)
+        assert received and received[0].get("X-MBX-APIKEY") == API_KEY
+    finally:
+        a.shutdown()
+        b.shutdown()
+
+
+@pytest.mark.parametrize("status", [301, 302, 303, 307, 308])
+def test_every_3xx_is_an_error(status) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1}, status_code=status))
+    with pytest.raises(BinanceReadOnlyError, match=f"redirect_refused:{status}"):
+        _adapter(transport).get_account()
+    assert len(transport.calls) == 1
+
+
+def test_default_transport_disables_redirects(monkeypatch) -> None:
+    seen = {}
+
+    def fake_get(url, **kwargs):
+        seen.update(kwargs)
+        return FakeResponse({"serverTime": 1})
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    BinanceLiveReadOnlyAdapter(env=_env(), now=lambda: NOW).server_time()
+    assert seen.get("allow_redirects") is False

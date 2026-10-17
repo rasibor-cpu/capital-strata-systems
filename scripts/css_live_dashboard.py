@@ -12,6 +12,17 @@ R15B_EXIT_PROFILE = {
 }
 
 
+# CSS-118 (owner direction 2): the automatic legacy loop bypasses the governed router (consent,
+# personality, capital governors, AntiBleed via ExecutionGate). Its broker branch is closed in
+# code; re-opening it requires a reviewed source change and owner approval, not configuration.
+LEGACY_LOOP_BROKER_EXECUTION_PERMITTED = False
+
+# CSS-118 B5: random candidates from select_cycle_candidates must not open operator paper
+# positions. Re-opening requires a reviewed source change after B1 calibrated producer is wired.
+# Observability may still call CssEngineSignalBridge.publish_legacy_candidate (always refused).
+LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED = False
+
+
 def r15b_profile():
     return R15B_EXIT_PROFILE.get(str(ENGINE_MODE).upper(), R15B_EXIT_PROFILE["BALANCED"])
 
@@ -4616,18 +4627,15 @@ def active_execution_scope_label() -> str:
 
 
 def select_cycle_candidates() -> list[tuple[str, str, float, float]]:
-    candidates = [
-        ("CRYPTO", random.choice(SYMBOLS), 12.0, 0.68),
-        ("CRYPTO", random.choice(SYMBOLS), 12.2, 0.69),
-        ("FX", random.choice(FX_SYMBOLS), 11.5, 0.66),
-        ("FX", random.choice(FX_SYMBOLS), 11.7, 0.67),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.0, 0.71),
-        ("OPTIONS", random.choice(OPTION_SYMBOLS), 14.2, 0.72),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.0, 0.69),
-        ("FUTURES", random.choice(FUTURES_SYMBOLS), 13.2, 0.70),
-    ]
-    random.shuffle(candidates)
-    return candidates
+    """RETIRED (RC1 R3): returns no candidates.
+
+    This loop used to open paper positions from random.choice() symbols with hard-coded
+    scores and probabilities, outside the governed router (consent, personality, capital
+    governors, ExecutionGate/AntiBleed). New entries now come only from approved, calibrated
+    signals via backend.signals.producer -> CssEngineSignalBridge.publish_real_data ->
+    TradingRouter. Existing legacy positions are still managed (exits) by this loop.
+    """
+    return []
 
 
 def pnl_divergence_warning(
@@ -5222,6 +5230,14 @@ try:
         elif mtm_engine.count_open_positions() < hard_position_limit():
             if not role_profile.get("can_execute_paper_trading", False):
                 print("[RBAC] New position generation blocked for current role.")
+            elif not LEGACY_LOOP_RANDOM_CANDIDATE_OPENS_PERMITTED:
+                # CSS-118 B5: random candidates are retired as trade openers. Existing
+                # positions continue to be marked and exited; calibrated signals must
+                # enter through CssEngineSignalBridge (B1), not this loop.
+                print(
+                    "[CSS-118 B5] Legacy random-candidate opens disabled; "
+                    "operator paper opens require calibrated ENGINE_LOOP_CALIBRATED signals."
+                )
             else:
                 for asset_class, symbol, sig, prob in select_cycle_candidates():
                     # =========================
@@ -5326,7 +5342,10 @@ try:
                     print(f"[R15A EXIT] {symbol} signal={exit_signal}")
 
                     if position.get("broker_tested"):
-                        if asset_class == "FX" and SELECTED_BROKER == "OANDA":
+                        if not LEGACY_LOOP_BROKER_EXECUTION_PERMITTED:
+                            # CSS-118: the automatic loop may not send broker orders; the position stays paper.
+                            ok, broker_msg = False, "LEGACY_LOOP_BROKER_PATH_DISABLED_CSS118"
+                        elif asset_class == "FX" and SELECTED_BROKER == "OANDA":
                             live_fx_funded_this_cycle += 1
                             resolved_expected_price = resolve_expected_fx_price(symbol)
                             ok, broker_msg, t_id, f_price, e_time, slippage = attempt_oanda_fx_execution(symbol, expected_price=resolved_expected_price)

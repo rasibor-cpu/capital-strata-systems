@@ -1,0 +1,92 @@
+{
+  "document_id": "CSS-UOM",
+  "version": "1.2.0",
+  "effective_date": "2026-10-16",
+  "sha256": "263578c0e95568f596df1ac3436b5883130790a3615d0e1cd99aba271bce4ef4",
+  "acknowledgement_sha256": "74494de43d474cf1d7f3f8213dc29821224632b234efd6333285a005406265de",
+  "pages": [
+    {
+      "page_id": "about",
+      "title": "1. About this agreement and who it is for",
+      "sha256": "2f651f146a71507f3ae5d480bd58ab4f57feb9979de0c65910ffd148fb085165"
+    },
+    {
+      "page_id": "modes",
+      "title": "2. The four trading modes and who decides",
+      "sha256": "36c101f6cc0ec2b38ad478808615b1039bd68fe98647354f252229da59bc40ee"
+    },
+    {
+      "page_id": "personalities",
+      "title": "3. Risk personalities and your own limits",
+      "sha256": "0eba7d2a6ed50e9a88826ccc1daa89295586cc6c42b021f8c76f2484c705d4f1"
+    },
+    {
+      "page_id": "gates",
+      "title": "4. Safety gates and trading assumptions",
+      "sha256": "784d9e8824741e944b9906ab4b4967613380349a1e1d7e7e32681e117ceb9d9e"
+    },
+    {
+      "page_id": "instruments",
+      "title": "5. Instrument, cost, margin and exit risks",
+      "sha256": "959f812c5f8b62fa5d03cd5824f258e69d0270363b9850a77760ba3ca2b7cc0b"
+    },
+    {
+      "page_id": "signals",
+      "title": "6. Signals, models, copy-trading and autonomy",
+      "sha256": "5309ebb570ccd3f9c8621e03fa53f6b6e943f7fcc790124b48d4184ea1d2b124"
+    },
+    {
+      "page_id": "operations",
+      "title": "7. Operating procedures, outages and security",
+      "sha256": "3a3d66840dc336c66f821a28796ec2e45dccc312d0daa268c13f50cf3c645293"
+    },
+    {
+      "page_id": "emergency",
+      "title": "8. Pausing, kill switch and incidents",
+      "sha256": "de5a435d35729ef84c7737f618f938e76f28de2cf63bc0afb105665524c80634"
+    },
+    {
+      "page_id": "legal",
+      "title": "9. Tax, regulatory and jurisdictional matters",
+      "sha256": "42f3c41f989682f3a24c5e25fdd5333eb29e53e25ee80fc0ff47c2f1eba3796d"
+    },
+    {
+      "page_id": "scenarios",
+      "title": "10. Example scenarios",
+      "sha256": "74b731453cf0bc495cbe454e3eb54e4c276f16e01fdc285e8cbb0ef231b9236d"
+    },
+    {
+      "page_id": "glossary",
+      "title": "11. Glossary",
+      "sha256": "23b91e0760cec3ea152cda64f2a4ab4a6f53e60f0a0460de7a840db3a25471cd"
+    },
+    {
+      "page_id": "support",
+      "title": "12. Support, escalation and acknowledgement",
+      "sha256": "58c62903a4d4d9b76a3452c0f3e08f40c4938cc451c55d5877a7253c246be05c"
+    }
+  ],
+  "history": [
+    {
+      "version": "1.0.0",
+      "effective_date": "2026-10-16",
+      "sha256": "5f64a2e10c7641182e783a7fcb4891fe3e508c7fb6a5c27aecb1cd9a6ceb3374",
+      "summary": "Initial issue: four modes, five personalities, configurable limits, assumptions, risks, procedures",
+      "material": true
+    },
+    {
+      "version": "1.1.0",
+      "effective_date": "2026-10-16",
+      "sha256": "719dd2e092ad2d483d7c2504dc9a6335385cda21c490861ac6da21780ae0e777",
+      "summary": "Approved-trader registry and signed signals; platform capital limits on personalities; CAD pilot envelope (CAD 20 per position incl. fees, 2 positions, CAD 40 total); sign-in acceptance enforcement",
+      "material": true
+    },
+    {
+      "version": "1.2.0",
+      "effective_date": "2026-10-16",
+      "sha256": "263578c0e95568f596df1ac3436b5883130790a3615d0e1cd99aba271bce4ef4",
+      "summary": "Owner-mandated acknowledgement text (substantial risk / applicable law)",
+      "material": true
+    }
+  ]
+}

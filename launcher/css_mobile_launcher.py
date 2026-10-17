@@ -1142,6 +1142,11 @@ def validate_mobile_paper_trade_request(payload: Dict[str, Any]) -> Dict[str, An
         "status": "REQUESTED",
         "execution_allowed": False,
         "live_trading_blocked": True,
+        # RC1 R3: a request-log entry is not an order. Nothing executes it; governed paper
+        # orders are placed only through the mobile ticket (TradingRouter.submit_manual_order).
+        "record_kind": "REQUEST_LOG_ONLY_NOT_AN_ORDER",
+        "order_submitted": False,
+        "governed_order_path": "/trade",
     }
 
 
@@ -6043,19 +6048,30 @@ def _wants_json(request: Request) -> bool:
 
 @launcher_router.post("/mobile/trade/paper")
 async def mobile_trade_paper(request: Request):
-    """Record a validated paper-only mobile trade request.
+    """CSS-118 B6: audit-write then route through the canonical governed paper router.
 
-    This endpoint intentionally writes an artifact only. It does not call broker
-    APIs, does not place orders, and does not enable live execution.
+    Does not call broker APIs. Live/broker tickets are refused. Missing session or
+    market assessment fails closed at the router (governed fields report the reason).
     """
     from backend.security.mutation_guard import require_mutation_auth
-    require_mutation_auth(request)
+    from backend.trading_profiles.governed_launcher_entry import (
+        session_from_identity,
+        submit_governed_launcher_paper_order,
+    )
+
+    identity = require_mutation_auth(request)
     try:
         payload = await _read_mobile_trade_payload(request)
         payload = dict(payload)
         payload.setdefault("broker", "PAPER")
         payload.setdefault("source", "mobile_dashboard")
         trade_request = write_mobile_paper_trade_request(payload)
+        governed = submit_governed_launcher_paper_order(
+            user_id=str(identity.get("user_id") or ""),
+            session=session_from_identity(identity),
+            payload=trade_request,
+        )
+        trade_request = {**trade_request, "governed": governed}
     except ValueError as exc:
         return JSONResponse(
             {"ok": False, "error": str(exc)},
@@ -6068,7 +6084,7 @@ async def mobile_trade_paper(request: Request):
         )
 
     if _wants_json(request):
-        return JSONResponse({"ok": True, "trade_request": trade_request})
+        return JSONResponse({"ok": True, "trade_request": trade_request, "governed": trade_request.get("governed")})
 
     return RedirectResponse("/mobile#execution", status_code=303)
 
@@ -6193,9 +6209,26 @@ async def operator_trade_request(request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
+    from backend.trading_profiles.governed_launcher_entry import (
+        session_from_identity,
+        submit_governed_launcher_paper_order,
+    )
+
+    # Operator route: authenticate then submit through the same governed paper router.
+    # Non-CSS_PAPER brokers were already constrained to paper_only above; router still
+    # refuses anything other than CSS_PAPER/PAPER as LIVE_TICKET_DISABLED_CSS118.
+    governed = submit_governed_launcher_paper_order(
+        user_id=actor["user_id"],
+        # The operator's real sign-on (if the auth layer exposes it); never a fabricated one.
+        session=session_from_identity(actor),
+        payload={**trade_request, "broker": "CSS_PAPER"},
+    )
+    trade_request = {**trade_request, "governed": governed}
+
     return JSONResponse({
         "status": "REQUESTED",
         "trade_request": trade_request,
+        "governed": governed,
         "execution_allowed": False,
         "live_trading_blocked": True,
     })

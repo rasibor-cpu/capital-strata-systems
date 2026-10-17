@@ -1,0 +1,134 @@
+name: CSS-118 Validation (Linux + Windows)
+
+# Independent regression for draft PR #119 (trading profiles, paper only).
+# Runs the full suite on Linux and Windows at the pushed commit, plus the Playwright
+# onboarding UX tests on Linux, and uploads logs, JUnit XML and a SHA-256 manifest.
+# No secrets, no broker access, no deployment.
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - claude/css129-questrade-binance-readonly  # first: avoids a merge conflict with #130's entry
+      - claude/css118-trading-profiles
+      - claude/css118-closeout
+      - claude/css-rc1-signal-pipeline
+      - claude/css-final-closeout
+      - claude/css-cad146-simulation
+      - claude/css-sim-validation-20261016
+      - claude/css-sim-operational-readiness-20261016
+      - claude/css-agreement-single-acceptance
+      - grok/css-129-h2-questrade-refresh-hardening
+      - claude/css-integration-proposal-128-132
+      - claude/css-h2-lowfindings-followup
+      - claude/css-final-release-candidate
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    name: full-suite (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+    env:
+      CSS_TEST_MODE: "1"
+      PYTHONPATH: .
+      PYTHONDONTWRITEBYTECODE: "1"
+      PYTHONIOENCODING: utf-8
+    steps:
+      - name: Checkout exact commit
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: "Install dependencies (no Playwright: baseline-comparable run)"
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Record environment
+        run: |
+          mkdir -p evidence
+          {
+            echo "head_sha=$(git rev-parse HEAD)"
+            echo "runner_os=${{ runner.os }}"
+            python --version
+            pip freeze
+          } > evidence/environment.txt
+
+      - name: Full pytest suite
+        run: |
+          set -o pipefail
+          python -m pytest -q -p no:cacheprovider -rfEs --junitxml=evidence/junit-full.xml \
+            2>&1 | tee evidence/pytest-full.log
+
+      - name: Summary annotation (counts readable via the checks API)
+        if: always()
+        run: |
+          line=$(grep -E "^(=+ )?[0-9]+ (passed|failed)|(passed|failed|error).* in [0-9.]+s" evidence/pytest-full.log | tail -n 1)
+          echo "::notice title=pytest ${{ runner.os }} $(git rev-parse --short HEAD)::${line:-no summary line}"
+          grep -E "^(FAILED|ERROR) " evidence/pytest-full.log | head -n 8 | while read -r f; do echo "::warning title=failure ${{ runner.os }}::$f"; done || true
+
+      - name: SHA-256 manifest
+        if: always()
+        run: |
+          cd evidence && (sha256sum * 2>/dev/null || shasum -a 256 *) > SHA256SUMS.txt; cat SHA256SUMS.txt
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: css118-full-suite-${{ runner.os }}
+          path: evidence/
+          if-no-files-found: error
+
+  onboarding-ux:
+    name: onboarding-ux (playwright, ubuntu)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CSS_TEST_MODE: "1"
+      PYTHONPATH: .
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt playwright==1.56.0
+          python -m playwright install --with-deps chromium
+      - name: CSS-118 targeted suite including UX
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          git rev-parse HEAD > evidence/head_sha.txt
+          python -m pytest -q -p no:cacheprovider -rfEs --junitxml=evidence/junit-css118.xml \
+            tests/test_css118_*.py tests/test_css_rc1_*.py tests/test_css129_*.py tests/test_css_closeout_*.py tests/test_css_cad146_*.py tests/test_css_sim_*.py tests/test_css_simulation_*.py tests/test_r14f_gate_parity.py \
+            tests/engine/test_execution_gate_volatility_sizing.py tests/test_mobile_audit_replay_limit.py 2>&1 | tee evidence/pytest-css118.log
+      - name: Summary annotation (counts readable via the checks API)
+        if: always()
+        run: |
+          line=$(grep -E "(passed|failed|error).* in [0-9.]+s" evidence/pytest-css118.log | tail -n 1)
+          echo "::notice title=pytest targeted+UX $(git rev-parse --short HEAD)::${line:-no summary line}"
+      - name: SHA-256 manifest
+        if: always()
+        run: cd evidence && sha256sum * > SHA256SUMS.txt && cat SHA256SUMS.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: css118-targeted-ux
+          path: evidence/
+          if-no-files-found: error

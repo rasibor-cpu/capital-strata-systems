@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import json
 import os
@@ -8,7 +9,7 @@ import time
 import urllib.parse
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from backend.governance.css_unified_trade_gate import ENGINE_MODE_PROBABILITY_THRESHOLD
 from backend.runtime.environment_bootstrap import bootstrap_broker_environment
@@ -691,6 +692,10 @@ async def api_live_micro_pilot_configure(request: Request):
     session = _get_session(request)
     if not session:
         return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    acceptance = _trading_acceptance(session["user_ctx"])
+    if not acceptance.allowed:  # configuring/arming adds risk; disarm stays exempt
+        return JSONResponse({"ok": False, "status": "MANUAL_ACCEPTANCE_REQUIRED", "reason": acceptance.reason,
+                             "onboarding_path": acceptance.onboarding_path}, status_code=403)
     form = await _read_form(request)
     try:
         status = LiveMicroPilotGovernor().write_config(
@@ -710,6 +715,10 @@ async def api_live_micro_pilot_arm(request: Request):
     session = _get_session(request)
     if not session:
         return JSONResponse({"ok": False, "status": "AUTH_REQUIRED"}, status_code=401)
+    acceptance = _trading_acceptance(session["user_ctx"])
+    if not acceptance.allowed:  # configuring/arming adds risk; disarm stays exempt
+        return JSONResponse({"ok": False, "status": "MANUAL_ACCEPTANCE_REQUIRED", "reason": acceptance.reason,
+                             "onboarding_path": acceptance.onboarding_path}, status_code=403)
     form = await _read_form(request)
     try:
         status = LiveMicroPilotGovernor().arm(
@@ -802,6 +811,18 @@ async def controls_submit(request: Request):
         )
 
     form = await _read_form(request)
+    requested_controls = {
+        "mobile_trading_mode": form.get("mobile_trading_mode", "MOBILE_READ_ONLY"),
+        "engine_mode": form.get("engine_mode", "SAFE"),
+        "live_order_kill_switch": form.get("live_order_kill_switch", "off") == "on",
+    }
+    if controls_change_increases_risk(load_mobile_controls(), requested_controls):
+        acceptance = _trading_acceptance(user_ctx)
+        if not acceptance.allowed:
+            return HTMLResponse(
+                _controls_page(user_ctx, message=_acceptance_required_message(acceptance), status="error"),
+                status_code=403,
+            )
     if form.get("mobile_trading_mode") == "MOBILE_LIVE_TRADING_ARMED" and form.get("legal_acceptance") != "on":
         return HTMLResponse(
             _controls_page(
@@ -879,10 +900,53 @@ async def trade_ticket_submit(request: Request):
     if not session:
         return RedirectResponse("/login", status_code=303)
 
+    acceptance = _trading_acceptance(session["user_ctx"])
+    if not acceptance.allowed:
+        result = {"ok": False, "status": "MANUAL_ACCEPTANCE_REQUIRED", "error": _acceptance_required_message(acceptance)}
+        return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status="error"), status_code=403)
+
     form = await _read_form(request)
-    result = execute_mobile_trade_ticket(session["user_ctx"], form)
+    result, http_status = _governed_mobile_ticket(request, session, form)
     status = "success" if result.get("ok") else "error"
-    return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status))
+    return HTMLResponse(_trade_ticket_page(session["user_ctx"], result=result, status=status), status_code=http_status)
+
+
+def _governed_mobile_ticket(request: Request, session: Dict[str, Any], form: Dict[str, str]) -> tuple[Dict[str, Any], int]:
+    """CSS-118: the mobile ticket is a manual paper order through the governed router.
+
+    The user decides symbol, side, size and stop; CSS supplies its own market assessment and
+    enforces consent, personality, capital governors, R14F/R7, ExecutionGate and AntiBleed.
+    Live-armed tickets are refused (live trading is not authorized); the legacy executor
+    `execute_mobile_trade_ticket` is no longer reachable from any route.
+    """
+    user_ctx = session["user_ctx"]
+    controls = load_mobile_controls()
+    mode = str(controls.get("mobile_trading_mode") or "MOBILE_READ_ONLY")
+    broker = str(form.get("broker") or "CSS_PAPER").strip().upper()
+    base = {"live_order_sent": False, "broker": broker, "mobile_trading_mode": mode}
+    if not _can_submit_trade(user_ctx):
+        result, code = {"ok": False, "status": "MOBILE_AUTHORITY_DENIED", **base}, 403
+    elif mode == "MOBILE_READ_ONLY":
+        result, code = {"ok": False, "status": "MOBILE_ORDERS_DISABLED", **base}, 403
+    elif broker != "CSS_PAPER":  # any broker ticket (live or practice) bypasses the governed paper path
+        result, code = {"ok": False, "status": "LIVE_TICKET_DISABLED_CSS118",
+                        "error": "Broker tickets are disabled: only governed CSS paper orders are available.", **base}, 403
+    else:
+        token = request.cookies.get(SESSION_COOKIE) or ""
+        order = {"symbol": form.get("symbol", ""), "asset_class": form.get("asset_class", ""),
+                 "side": form.get("side", ""), "notional": form.get("amount"),
+                 "stop_distance_pct": form.get("stop_distance_pct") or "1.0",
+                 "client_order_id": form.get("client_order_id", "")}
+        decision = _trading_router().submit_manual_order(
+            str(user_ctx.get("user_id")), (_session_hash(token), float(session.get("created") or 0.0)), order)
+        ok = decision.outcome in {"COPIED", "SIMULATED", "PROPOSED"}
+        result = {"ok": ok, "status": f"CSS_GOVERNED_{decision.outcome}", **base,
+                  "decision": {"outcome": decision.outcome, "stage": decision.stage, "reason": decision.reason,
+                               "notional": decision.notional, "proposal_id": decision.proposal_id,
+                               "pipeline_status": decision.pipeline_status}}
+        code = 200
+    _record_mobile_event({"event_type": "mobile_governed_ticket", "user_id": str(user_ctx.get("user_id")), **result})
+    return result, code
 
 
 @app.get("/users", response_class=HTMLResponse)
@@ -1115,7 +1179,9 @@ def _login_success_response(request: Request, user_ctx: Dict[str, Any]) -> Redir
     from backend.security.mutation_guard import secure_cookie_kwargs
 
     token = _create_session(user_ctx)
-    response = RedirectResponse("/dashboard", status_code=303)
+    # Issue #118: no new risk-taking workflow without valid manual acceptance.
+    status = _trading_acceptance(user_ctx)
+    response = RedirectResponse("/dashboard" if status.allowed else status.onboarding_path, status_code=303)
     kwargs = secure_cookie_kwargs(str(request.url.scheme))
     response.set_cookie(
         SESSION_COOKIE,
@@ -1159,6 +1225,105 @@ def _get_session(request: Request) -> Optional[Dict[str, Any]]:
 
     session["last_activity"] = now
     return session
+
+
+# Issue #118: user trading profiles (startup mode, risk personality, copy mandates).
+# Identity comes only from the server-side session; the session id given to mandates is
+# a hash of the cookie token, never the token itself. Paper/simulation only.
+def _trading_profiles_identity(request: Request) -> Optional[Dict[str, Any]]:
+    token = request.cookies.get(SESSION_COOKIE)
+    session = _get_session(request)
+    if not token or not session:
+        return None
+    user_ctx = session.get("user_ctx") or {}
+    return {
+        "user_id": user_ctx.get("user_id"),
+        "session_id": _session_hash(token),
+        "session_created": float(session.get("created") or 0.0),
+        "role": _normalize_role(user_ctx.get("role", "")),
+    }
+
+
+def _session_hash(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()[:32]
+
+
+from backend.trading_profiles.api import create_trading_profiles_router
+from backend.trading_profiles.gatekeeper import controls_change_increases_risk, risk_taking_status
+from backend.trading_profiles.service import TradingProfileService, env_key_provider
+
+
+def _trading_profiles_service() -> TradingProfileService:
+    return TradingProfileService(PROJECT_ROOT / "artifacts" / "trading_profiles", key_provider=env_key_provider())
+
+
+def _trading_acceptance(user_ctx: Optional[Dict[str, Any]]):
+    return risk_taking_status(_trading_profiles_service(), (user_ctx or {}).get("user_id"))
+
+
+def _trading_router():
+    """Canonical paper router (Assisted / Copy / Autonomous). Every context source fails closed."""
+    from backend.trading_profiles.copy_engine import CopyTradeEngine, SystemContext
+    from backend.trading_profiles.router import PaperBook, TradingRouter
+
+    root = PROJECT_ROOT / "artifacts" / "trading_profiles"
+    service = _trading_profiles_service()
+    engine = CopyTradeEngine(root, key_provider=service.key_provider, trader_registry=service.trader_registry)
+
+    def role_resolver(user_id: str) -> Optional[str]:
+        record = load_users().get(user_id)
+        if not isinstance(record, dict) or record.get("locked"):
+            return None
+        return _normalize_role(record.get("role", "")) or None
+
+    def session_resolver(user_id: str):
+        # The user's most recent unexpired sign-on; R7 additionally requires it to be recent.
+        _hydrate_sessions()
+        now = time.time()
+        live = [(float(s.get("created") or 0.0), token) for token, s in list(_SESSIONS.items())
+                if (s.get("user_ctx") or {}).get("user_id") == user_id
+                and now - float(s.get("created") or 0.0) <= SESSION_MAX_SECONDS]
+        if not live:
+            return None
+        created, token = max(live)
+        return _session_hash(token), created
+
+    def system_provider() -> SystemContext:
+        from backend.runtime.safety_flag_observation import authoritative_safety_flags_payload
+        from launcher.css_mobile_launcher import get_launcher_observed_safety_flags
+
+        flags = authoritative_safety_flags_payload(get_launcher_observed_safety_flags(),
+                                                   observed_at=datetime.now(timezone.utc).isoformat())
+        controls = load_mobile_controls()
+        env = {k: v for k, v in os.environ.items() if k in {"CSS_LIVE_ORDER_KILL_SWITCH", "REA_KILL_SWITCH"}}
+        return SystemContext(engine_mode=str(controls.get("engine_mode") or "SAFE"), safety_flags=flags,
+                             mobile_controls=controls, env=env)
+
+    def terms_resolver(user_id: str):
+        # The user's configured and ACCEPTED commercial terms; anything else accrues no fee.
+        from dashboard.enterprise_shell.operator_configuration import load_user_account_profiles
+        return load_user_account_profiles().get(user_id)
+
+    from backend.commercial.fee_ledger import FeeLedger
+
+    # Closeout: commercial accrual on every closed paper position (accounting only; no money moves).
+    return TradingRouter(engine, book=PaperBook(root), role_resolver=role_resolver,
+                         session_resolver=session_resolver, system_provider=system_provider,
+                         fee_ledger=FeeLedger(root / "commercial", terms_resolver=terms_resolver))
+
+
+def _acceptance_required_message(status) -> str:
+    return (f"New trading is blocked until you accept the CSS User Operating Manual and risk agreement "
+            f"({status.reason}). Open {status.onboarding_path} to review and accept.")
+
+
+app.include_router(
+    create_trading_profiles_router(
+        user_resolver=_trading_profiles_identity,
+        service_factory=_trading_profiles_service,
+        router_factory=lambda: _trading_router(),
+    )
+)
 
 
 def _create_password_change_token(user_id: str) -> str:
@@ -3404,6 +3569,11 @@ def _trade_status_headline(code: str) -> str:
         "OANDA_ORDER_FAILED": "OANDA order failed",
         "OANDA_NOT_CONFIGURED": "OANDA credentials not configured",
         "LIVE_BROKER_NOT_SUPPORTED": "Live broker not supported for this ticket",
+        "LIVE_TICKET_DISABLED_CSS118": "Broker tickets are disabled (paper only)",
+        "CSS_GOVERNED_PROPOSED": "Proposal created: approve it to open the paper position",
+        "CSS_GOVERNED_COPIED": "Paper order filled through CSS gates",
+        "CSS_GOVERNED_SIMULATED": "Simulated order filled",
+        "CSS_GOVERNED_REJECTED": "Order rejected by CSS safety gates",
     }
     return labels.get(code, code.replace("_", " ").title())
 
@@ -3445,7 +3615,7 @@ def _trade_ticket_page(
         trade_form_markup = f"""
           <section class="form-panel trade-form-panel" aria-label="Mobile trade ticket form">
             <h2>Submit Trade Ticket</h2>
-            <p class="muted">Tickets use the current mobile system mode. Live tickets require broker credentials, CSS live flags, and confirmation.</p>
+            <p class="muted">Tickets are governed CSS paper orders: you choose the instrument, side, size and stop; CSS applies its market assessment and every safety limit. Broker (live) tickets are disabled.</p>
             <form method="post" action="/trade" autocomplete="off">
               <label for="mode_display">Mobile Mode</label>
               <input id="mode_display" value="{html.escape(system_mode.upper())}" disabled>
@@ -3475,8 +3645,11 @@ def _trade_ticket_page(
                 <option value="SELL">Sell</option>
               </select>
 
-              <label for="amount">USD Amount / Notional</label>
+              <label for="amount">Notional (account currency)</label>
               <input id="amount" name="amount" inputmode="decimal" value="{DEFAULT_ORDER_LIMIT_CONFIG.live_order_default_notional_usd}" required>
+
+              <label for="stop_distance_pct">Stop distance (%)</label>
+              <input id="stop_distance_pct" name="stop_distance_pct" inputmode="decimal" value="1.0">
 
               <label for="qty">Quantity / Units</label>
               <input id="qty" name="qty" inputmode="decimal" value="1">
@@ -3981,6 +4154,16 @@ def _build_mobile_ticket(
 def _safe_float(value: Any, default: float = 0.0) -> float:
     try:
         return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value: Any, default: int = 0) -> int:
+    """Parse a whole number from a query/form value; anything else returns `default`."""
+    if isinstance(value, bool):
+        return default
+    try:
+        return int(str(value).strip())
     except (TypeError, ValueError):
         return default
 

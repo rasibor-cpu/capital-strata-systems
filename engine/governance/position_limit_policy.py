@@ -258,7 +258,12 @@ def _safe_int(value: Any, *, default: int) -> int:
 
 
 def _env_int(name: str, default: int) -> int:
-    return _safe_int(os.getenv(name), default=default)
+    """Environment overrides may only TIGHTEN the governed limit (closeout): a value above the
+    governed default, zero, negative or unparseable falls back to the default."""
+    value = _safe_int(os.getenv(name), default=default)
+    if value is None or value <= 0:
+        return default
+    return min(value, default)
 
 
 __all__ = [

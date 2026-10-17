@@ -1,0 +1,247 @@
+{
+  "fee_economics": [
+    {
+      "fixed_fee_bps": 0.0,
+      "fixed_fee_cad": 0.0,
+      "min_expected_move_bps_to_clear_floor": 29.0,
+      "notional_cad": 10.0
+    },
+    {
+      "fixed_fee_bps": 10.0,
+      "fixed_fee_cad": 0.01,
+      "min_expected_move_bps_to_clear_floor": 39.0,
+      "notional_cad": 10.0
+    },
+    {
+      "fixed_fee_bps": 20.0,
+      "fixed_fee_cad": 0.02,
+      "min_expected_move_bps_to_clear_floor": 49.0,
+      "notional_cad": 10.0
+    },
+    {
+      "fixed_fee_bps": 50.0,
+      "fixed_fee_cad": 0.05,
+      "min_expected_move_bps_to_clear_floor": 79.0,
+      "notional_cad": 10.0
+    },
+    {
+      "fixed_fee_bps": 100.0,
+      "fixed_fee_cad": 0.1,
+      "min_expected_move_bps_to_clear_floor": 129.0,
+      "notional_cad": 10.0
+    },
+    {
+      "fixed_fee_bps": 250.0,
+      "fixed_fee_cad": 0.25,
+      "min_expected_move_bps_to_clear_floor": 279.0,
+      "notional_cad": 10.0
+    },
+    {
+      "fixed_fee_bps": 0.0,
+      "fixed_fee_cad": 0.0,
+      "min_expected_move_bps_to_clear_floor": 29.0,
+      "notional_cad": 20.0
+    },
+    {
+      "fixed_fee_bps": 5.0,
+      "fixed_fee_cad": 0.01,
+      "min_expected_move_bps_to_clear_floor": 34.0,
+      "notional_cad": 20.0
+    },
+    {
+      "fixed_fee_bps": 10.0,
+      "fixed_fee_cad": 0.02,
+      "min_expected_move_bps_to_clear_floor": 39.0,
+      "notional_cad": 20.0
+    },
+    {
+      "fixed_fee_bps": 25.0,
+      "fixed_fee_cad": 0.05,
+      "min_expected_move_bps_to_clear_floor": 54.0,
+      "notional_cad": 20.0
+    },
+    {
+      "fixed_fee_bps": 50.0,
+      "fixed_fee_cad": 0.1,
+      "min_expected_move_bps_to_clear_floor": 79.0,
+      "notional_cad": 20.0
+    },
+    {
+      "fixed_fee_bps": 125.0,
+      "fixed_fee_cad": 0.25,
+      "min_expected_move_bps_to_clear_floor": 154.0,
+      "notional_cad": 20.0
+    },
+    {
+      "fixed_fee_bps": 0.0,
+      "fixed_fee_cad": 0.0,
+      "min_expected_move_bps_to_clear_floor": 29.0,
+      "notional_cad": 40.0
+    },
+    {
+      "fixed_fee_bps": 2.5,
+      "fixed_fee_cad": 0.01,
+      "min_expected_move_bps_to_clear_floor": 31.5,
+      "notional_cad": 40.0
+    },
+    {
+      "fixed_fee_bps": 5.0,
+      "fixed_fee_cad": 0.02,
+      "min_expected_move_bps_to_clear_floor": 34.0,
+      "notional_cad": 40.0
+    },
+    {
+      "fixed_fee_bps": 12.5,
+      "fixed_fee_cad": 0.05,
+      "min_expected_move_bps_to_clear_floor": 41.5,
+      "notional_cad": 40.0
+    },
+    {
+      "fixed_fee_bps": 25.0,
+      "fixed_fee_cad": 0.1,
+      "min_expected_move_bps_to_clear_floor": 54.0,
+      "notional_cad": 40.0
+    },
+    {
+      "fixed_fee_bps": 62.5,
+      "fixed_fee_cad": 0.25,
+      "min_expected_move_bps_to_clear_floor": 91.5,
+      "notional_cad": 40.0
+    },
+    {
+      "fixed_fee_bps": 0.0,
+      "fixed_fee_cad": 0.0,
+      "min_expected_move_bps_to_clear_floor": 29.0,
+      "notional_cad": 50.0
+    },
+    {
+      "fixed_fee_bps": 2.0,
+      "fixed_fee_cad": 0.01,
+      "min_expected_move_bps_to_clear_floor": 31.0,
+      "notional_cad": 50.0
+    },
+    {
+      "fixed_fee_bps": 4.0,
+      "fixed_fee_cad": 0.02,
+      "min_expected_move_bps_to_clear_floor": 33.0,
+      "notional_cad": 50.0
+    },
+    {
+      "fixed_fee_bps": 10.0,
+      "fixed_fee_cad": 0.05,
+      "min_expected_move_bps_to_clear_floor": 39.0,
+      "notional_cad": 50.0
+    },
+    {
+      "fixed_fee_bps": 20.0,
+      "fixed_fee_cad": 0.1,
+      "min_expected_move_bps_to_clear_floor": 49.0,
+      "notional_cad": 50.0
+    },
+    {
+      "fixed_fee_bps": 50.0,
+      "fixed_fee_cad": 0.25,
+      "min_expected_move_bps_to_clear_floor": 79.0,
+      "notional_cad": 50.0
+    },
+    {
+      "fixed_fee_bps": 0.0,
+      "fixed_fee_cad": 0.0,
+      "min_expected_move_bps_to_clear_floor": 29.0,
+      "notional_cad": 100.0
+    },
+    {
+      "fixed_fee_bps": 1.0,
+      "fixed_fee_cad": 0.01,
+      "min_expected_move_bps_to_clear_floor": 30.0,
+      "notional_cad": 100.0
+    },
+    {
+      "fixed_fee_bps": 2.0,
+      "fixed_fee_cad": 0.02,
+      "min_expected_move_bps_to_clear_floor": 31.0,
+      "notional_cad": 100.0
+    },
+    {
+      "fixed_fee_bps": 5.0,
+      "fixed_fee_cad": 0.05,
+      "min_expected_move_bps_to_clear_floor": 34.0,
+      "notional_cad": 100.0
+    },
+    {
+      "fixed_fee_bps": 10.0,
+      "fixed_fee_cad": 0.1,
+      "min_expected_move_bps_to_clear_floor": 39.0,
+      "notional_cad": 100.0
+    },
+    {
+      "fixed_fee_bps": 25.0,
+      "fixed_fee_cad": 0.25,
+      "min_expected_move_bps_to_clear_floor": 54.0,
+      "notional_cad": 100.0
+    }
+  ],
+  "findings": [
+    "Every pilot-envelope order is sized to at most CAD 20 incl. fees and is rejected by AntiBleedGuard with trade_size_too_small; no order is filled and nothing is relaxed.",
+    "AntiBleed's 25 bps net-edge rule is expressed in bps of notional and does not see fixed per-order fees; at CAD 20 a CAD 0.05 fixed fee alone costs 25 bps, doubling the required edge.",
+    "The minimum size (50) carries no currency in code (live_micro_pilot_governor labels it UNSPECIFIED); in the governed paper router notionals are in account currency (CAD)."
+  ],
+  "question": "Can CAD 20 pilot-envelope paper orders pass AntiBleedGuard (minimum size 50)?",
+  "router_replay": {
+    "orders": 6,
+    "outcomes": {
+      "execution_gate:anti_bleed_guard:trade_size_too_small": 6
+    },
+    "rows": [
+      {
+        "expected_move_bps": 30,
+        "notional": 19.99,
+        "outcome": "REJECTED",
+        "reason": "anti_bleed_guard:trade_size_too_small",
+        "stage": "execution_gate",
+        "symbol": "FX00/USD"
+      },
+      {
+        "expected_move_bps": 40,
+        "notional": 19.99,
+        "outcome": "REJECTED",
+        "reason": "anti_bleed_guard:trade_size_too_small",
+        "stage": "execution_gate",
+        "symbol": "FX01/USD"
+      },
+      {
+        "expected_move_bps": 60,
+        "notional": 19.99,
+        "outcome": "REJECTED",
+        "reason": "anti_bleed_guard:trade_size_too_small",
+        "stage": "execution_gate",
+        "symbol": "FX02/USD"
+      },
+      {
+        "expected_move_bps": 80,
+        "notional": 19.99,
+        "outcome": "REJECTED",
+        "reason": "anti_bleed_guard:trade_size_too_small",
+        "stage": "execution_gate",
+        "symbol": "FX03/USD"
+      },
+      {
+        "expected_move_bps": 120,
+        "notional": 19.99,
+        "outcome": "REJECTED",
+        "reason": "anti_bleed_guard:trade_size_too_small",
+        "stage": "execution_gate",
+        "symbol": "FX04/USD"
+      },
+      {
+        "expected_move_bps": 200,
+        "notional": 19.99,
+        "outcome": "REJECTED",
+        "reason": "anti_bleed_guard:trade_size_too_small",
+        "stage": "execution_gate",
+        "symbol": "FX05/USD"
+      }
+    ]
+  },
+  "schema": "css.antibleed_cad20_evidence.v1"
+}

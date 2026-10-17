@@ -20,9 +20,9 @@ class ExecutionGate:
     - Final risk approval via RiskGovernor.validate_trade
     - Return a stable decision dict: {"decision": {"final": "ALLOW/BLOCK"}, "reason": str, "debug": {...}}
 
-    Key fix:
-    - VolatilityPositionSizer.size() is called using ONLY kwargs it supports,
-      preventing runtime crashes like: unexpected keyword argument 'instrument'
+    Volatility sizing:
+    - VolatilityPositionSizer.size(notional, price, debug) with the caller's
+      `price`, one rolling stream per instrument, reduce-only.
     """
 
     def __init__(
@@ -43,7 +43,8 @@ class ExecutionGate:
         self.compounding = CompoundingEngine()
         self.drawdown_scaler = DrawdownScaler()
         self.risk_governor = RiskGovernor()
-        self.vol_sizer = VolatilityPositionSizer()
+        self.vol_sizer = VolatilityPositionSizer()  # policy template; per-instrument state below
+        self._vol_sizers: Dict[str, Any] = {}
 
     # -----------------------------
     # Safe-call helpers
@@ -67,56 +68,44 @@ class ExecutionGate:
                 return fn(*fallback_args)
             raise
 
-    def _vol_size(self, *, instrument: str, base_notional: float, volatility_state: Any, debug: Dict[str, Any]) -> float:
+    def _vol_size(self, *, instrument: str, base_notional: float, price: Optional[float], debug: Dict[str, Any]) -> float:
         """
-        VolatilityPositionSizer.size() signature differs across iterations.
-        We call it in a signature-safe way.
+        Volatility sizing via VolatilityPositionSizer.size(notional, price, debug).
 
-        We intentionally try a rich kwargs set, but only pass what the method accepts.
+        - One sizer (rolling price stream) per instrument, so instruments never mix.
+        - Reduce-only: the sizer may return a multiplier above 1.0 in low volatility;
+          the gate never applies it (recorded as vol_upsizing_suppressed).
+        - Without a usable price the size is left unchanged and the skip is recorded
+          explicitly (vol_size_status), never hidden behind a fallback.
         """
-        fn = self.vol_sizer.size
-
-        preferred = {
-            # common names across variants
-            "instrument": instrument,
-            "inst": instrument,
-            "symbol": instrument,
-
-            "base_notional": base_notional,
-            "notional": base_notional,
-
-            "volatility_state": volatility_state,
-            "vol_state": volatility_state,
-            "state": volatility_state,
-        }
-
-        # Positional fallback patterns (in decreasing likelihood)
-        fallbacks = [
-            [instrument, base_notional, volatility_state],
-            [instrument, base_notional],
-            [base_notional, volatility_state],
-            [base_notional],
-        ]
-
-        last_err: Optional[Exception] = None
-        for fb in fallbacks:
-            try:
-                sized = self._safe_kwargs_call(fn, preferred, fallback_args=fb)
-                return float(sized)
-            except Exception as e:
-                last_err = e
-
-        debug["vol_size_error"] = str(last_err) if last_err else "unknown"
-        LOGGER.warning(
-            "ExecutionGate volatility sizing fallback invoked; "
-            "instrument=%s base_notional=%s volatility_state=%s error=%s",
-            instrument,
-            base_notional,
-            volatility_state,
-            debug["vol_size_error"],
-        )
-        # If vol sizing fails, be conservative: return base_notional unchanged (don’t crash the engine)
-        return float(base_notional)
+        base = float(base_notional)
+        try:
+            p = float(price) if price is not None else None
+        except (TypeError, ValueError):
+            p = None
+        if p is None or not math.isfinite(p) or p <= 0:
+            debug["vol_size_status"] = "skipped:price_unavailable"
+            return base
+        key = str(instrument or "").strip().upper() or "_UNSPECIFIED"
+        sizer = self._vol_sizers.get(key)
+        if sizer is None:
+            from engine.risk.volatility_position_sizer import VolatilityPositionSizer
+            sizer = self._vol_sizers[key] = VolatilityPositionSizer(self.vol_sizer.policy)
+        try:
+            scaled = float(sizer.size(notional=base, price=p, debug=debug))
+        except Exception as exc:  # pragma: no cover - defensive: never enlarge on error
+            debug["vol_size_status"] = f"error:{type(exc).__name__}"
+            LOGGER.warning("ExecutionGate volatility sizing error; instrument=%s error=%s", instrument, exc)
+            return base
+        if not math.isfinite(scaled) or scaled < 0:
+            debug["vol_size_status"] = "error:non_finite"
+            return base
+        if scaled > base:
+            debug["vol_upsizing_suppressed"] = True
+            debug["vol_size_status"] = "applied:capped_at_base"
+            return base
+        debug["vol_size_status"] = "applied"
+        return scaled
 
     def _riskgov_validate(self, *, instrument: str, side: str, requested_notional: float,
                          stop_distance_pct: float, equity: float, risk_pct: float,
@@ -317,6 +306,7 @@ class ExecutionGate:
         slippage_bps: Optional[float] = None,
         margin_snapshot: Optional[Any] = None,
         broker_mode: str = "PAPER",
+        price: Optional[float] = None,
     ) -> Dict[str, Any]:
         debug: Dict[str, Any] = {}
         try:
@@ -365,7 +355,7 @@ class ExecutionGate:
             vol_scaled_notional = self._vol_size(
                 instrument=instrument,
                 base_notional=float(notional),
-                volatility_state=volatility_state,
+                price=price,
                 debug=debug,
             )
             debug["vol_scaled_notional"] = vol_scaled_notional
