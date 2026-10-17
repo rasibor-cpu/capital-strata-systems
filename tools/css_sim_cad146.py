@@ -171,7 +171,8 @@ EXIT_ERROR = 1                # unexpected error (journalled as RUN_STOPPED reas
 EXIT_PREFLIGHT_FAILED = 2     # nothing started
 EXIT_SESSION_EXPIRED = 3      # --on-session-expiry exit and the R7 sign-on expired
 EXIT_ALREADY_RUNNING = 4      # another `run` holds <root>/run.lock
-EXIT_REFUSED = 5              # consent / agreement / capital / live-arming refusal
+EXIT_REFUSED = 5              # consent / agreement / live-arming refusal (a capital mismatch on an existing
+                              # root keeps its explicit SystemExit message, exit 1)
 
 
 class _Stop(Exception):
