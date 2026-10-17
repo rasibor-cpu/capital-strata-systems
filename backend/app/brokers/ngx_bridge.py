@@ -12,9 +12,10 @@ from typing import Iterable, Mapping
 
 BROKERS = frozenset({"investment_one", "meristem", "cardinalstone", "coronation_securities"})
 REGISTRARS = frozenset({"gt_registrars"})
+CANADIAN_BROKERS = frozenset({"questrade"})
 CANADIAN_BANKS = frozenset({"rbc", "td", "scotiabank", "bmo", "cibc", "national_bank"})
 PENSION_PROVIDERS = frozenset({"stanbic_ibtc_pension_managers"})
-SOURCES = BROKERS | REGISTRARS | PENSION_PROVIDERS | CANADIAN_BANKS
+SOURCES = BROKERS | CANADIAN_BROKERS | REGISTRARS | PENSION_PROVIDERS | CANADIAN_BANKS
 
 
 @dataclass(frozen=True)
@@ -36,7 +37,7 @@ class NGXSource:
 
 
 SOURCE_CATALOG = tuple(
-    NGXSource(name, "broker" if name in BROKERS else
+    NGXSource(name, "broker" if name in BROKERS | CANADIAN_BROKERS else
               "registrar" if name in REGISTRARS else
               "bank" if name in CANADIAN_BANKS else "pension")
     for name in sorted(SOURCES)
@@ -161,3 +162,21 @@ def summarize_bank_snapshot(snapshot: Mapping[str, object]) -> dict[str, object]
 
 
 CANADIAN_SIMULATION_CAPITAL_CAD = Decimal("14600")
+
+
+def summarize_broker_account(snapshot: Mapping[str, object]) -> dict[str, object]:
+    """Generic read-only account metadata for Canadian or other brokerages.
+
+    This does not make Questrade API authorization or market-data access available.
+    """
+    provider = str(snapshot.get("provider", "")).strip().lower()
+    account_key = str(snapshot.get("account_key", "")).strip()
+    currency = str(snapshot.get("currency", "CAD")).strip().upper()
+    if not provider or not provider.replace("_", "").isalnum() or not account_key:
+        raise ValueError("Broker and opaque account alias required")
+    if currency not in {"CAD", "USD"}:
+        raise ValueError("Unsupported brokerage account currency")
+    return {"provider": provider, "account_key": account_key,
+            "currency": currency, "kind": "broker",
+            "connection_status": "NOT_AUTHORIZED", "execution_allowed": False,
+            "transfer_authority": False}
