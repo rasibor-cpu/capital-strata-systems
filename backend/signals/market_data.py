@@ -270,6 +270,16 @@ def binance_eligibility(operating_country: str | None) -> tuple[bool, str]:
     return True, f"attested:{country}"
 
 
+def _binance_guard(guard: Any = None) -> Any:
+    """The given request-weight guard, or the per-process one shared with every other Binance call
+    (Binance meters weight and bans per IP). Imported lazily: binance_market_data imports this module."""
+    if guard is not None:
+        return guard
+    from backend.signals import binance_market_data
+
+    return binance_market_data._DEFAULT_GUARD
+
+
 class BinanceSpotPublicCandles:
     """Binance Spot klines from the public market-data host only (no key, no account access)."""
 
@@ -277,12 +287,13 @@ class BinanceSpotPublicCandles:
     classification = LIVE
 
     def __init__(self, http: _Http | None = None, *, operating_country: str | None = None, clock=None,
-                 base_url: str = BINANCE_PUBLIC_BASE) -> None:
+                 base_url: str = BINANCE_PUBLIC_BASE, guard: Any = None) -> None:
         if base_url.rstrip("/") != BINANCE_PUBLIC_BASE:
             raise CandleError("binance_non_public_host_refused")
         self.eligible, self.eligibility_reason = binance_eligibility(operating_country)
         self.http = http or _requests_session()
         self.clock = clock or _now_utc
+        self.guard = guard
 
     def fetch(self, instrument: str, *, granularity_s: int, end: datetime | None = None) -> CandleSeries:
         if not self.eligible:
@@ -294,8 +305,7 @@ class BinanceSpotPublicCandles:
         params: dict = {"symbol": symbol, "interval": interval, "limit": 1000}
         if end is not None:
             params["endTime"] = int(end.timestamp() * 1000)
-        resp = self.http.get(f"{BINANCE_PUBLIC_BASE}/api/v3/klines", params=params, timeout=10.0)
-        check_http(resp)
+        resp = _binance_guard(self.guard).get(self.http, f"{BINANCE_PUBLIC_BASE}/api/v3/klines", params)
         rows = resp.json()
         if not isinstance(rows, list):
             raise CandleError("response_invalid")
@@ -530,18 +540,18 @@ class BinanceQuotes:
     source = "binance_spot_public"
 
     def __init__(self, http: _Http | None = None, *, operating_country: str | None = None, clock=None,
-                 max_age_s: float = 30.0) -> None:
+                 max_age_s: float = 30.0, guard: Any = None) -> None:
         self.eligible, self.eligibility_reason = binance_eligibility(operating_country)
         self.http, self.clock, self.max_age_s = http or _requests_session(), clock or _now_utc, max_age_s
+        self.guard = guard
 
     def quote(self, instrument: str, *, depth_bps: float = 25.0) -> QuoteSnapshot:
         if not self.eligible:
             raise CandleError(self.eligibility_reason)
         sym = normalize_symbol("binance", instrument)
-        server = self.http.get(f"{BINANCE_PUBLIC_BASE}/api/v3/time", timeout=10.0)
-        check_http(server)
-        resp = self.http.get(f"{BINANCE_PUBLIC_BASE}/api/v3/depth", params={"symbol": sym, "limit": 100}, timeout=10.0)
-        check_http(resp)
+        guard = _binance_guard(self.guard)
+        server = guard.get(self.http, f"{BINANCE_PUBLIC_BASE}/api/v3/time", {})
+        resp = guard.get(self.http, f"{BINANCE_PUBLIC_BASE}/api/v3/depth", {"symbol": sym, "limit": 100})
         try:
             book = resp.json()
             bid, ask = float(book["bids"][0][0]), float(book["asks"][0][0])

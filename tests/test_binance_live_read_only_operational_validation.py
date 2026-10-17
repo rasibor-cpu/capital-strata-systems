@@ -15,6 +15,7 @@ from backend.runtime.binance_live_read_only_operational_validation import (
 )
 from tests.test_binance_live_read_only_adapter import (
     API_SECRET,
+    SYNTHETIC_COUNTRY,
     FakeResponse,
     RecordingTransport,
     _adapter,
@@ -70,7 +71,7 @@ def _validate(transport, *, now=NOW, policy=None, artifacts_dir=None, adapter=No
 def test_missing_credentials_fail_closed_before_network(tmp_path) -> None:
     transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1}))
     result = validate_binance_live_read_only_operational(
-        adapter_factory=lambda: BinanceLiveReadOnlyAdapter(env={}, transport=transport, now=lambda: NOW),
+        adapter_factory=lambda: BinanceLiveReadOnlyAdapter(env={"CSS_OPERATING_COUNTRY": SYNTHETIC_COUNTRY}, transport=transport, now=lambda: NOW),
         artifacts_dir=tmp_path,
         now=lambda: NOW,
     )
@@ -247,5 +248,15 @@ def test_security_error_skips_broker_reads(tmp_path) -> None:
     assert result["failure_reasons"][0]["reason"] == "SECURITY_ERROR"
     assert result["read_checks"]["server_time"] == "NOT_ATTEMPTED"
     assert result["read_checks"]["account_retrieval"] == "NOT_ATTEMPTED"
+    assert transport.calls == []
+    assert result["execution_allowed"] is False
+
+
+def test_restricted_country_fails_closed_before_any_request(tmp_path) -> None:
+    transport = RecordingTransport(_success_handler())
+    adapter = _adapter(transport, CSS_OPERATING_COUNTRY="CA")
+    result = _validate(transport, adapter=adapter, artifacts_dir=tmp_path)
+    assert result["validation_status"] == "FAIL_CLOSED"
+    assert result["failure_reasons"][0]["reason"] == "JURISDICTION_RESTRICTED"
     assert transport.calls == []
     assert result["execution_allowed"] is False

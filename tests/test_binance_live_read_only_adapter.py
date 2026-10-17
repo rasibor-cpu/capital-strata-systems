@@ -11,6 +11,7 @@ import requests
 from backend.app.brokers.binance_live_read_only_adapter import (
     SOURCE_BINANCE_LIVE_READ_ONLY,
     BinanceConfigurationError,
+    BinanceJurisdictionError,
     BinanceLiveReadOnlyAdapter,
     BinanceReadOnlyError,
     BinanceReadOnlyMethodError,
@@ -20,6 +21,9 @@ from backend.app.brokers.binance_live_read_only_adapter import (
 NOW = datetime(2026, 9, 4, 22, 0, tzinfo=timezone.utc)
 API_KEY = "test-binance-api-key"
 API_SECRET = "test-binance-api-secret-material"
+# SYNTHETIC attestation of an operating country Binance serves; the adapter refuses every request
+# when the country is unattested or restricted (CA, US, ...).
+SYNTHETIC_COUNTRY = "DE"
 
 
 class FakeResponse:
@@ -54,6 +58,7 @@ def _env(**overrides):
         "BINANCE_API_KEY": API_KEY,
         "BINANCE_API_SECRET": API_SECRET,
         "BINANCE_BASE_URL": "https://api.binance.com",
+        "CSS_OPERATING_COUNTRY": SYNTHETIC_COUNTRY,
     }
     payload.update(overrides)
     return payload
@@ -105,7 +110,7 @@ def test_adapter_exposes_no_write_or_execution_methods() -> None:
 
 def test_missing_credentials_fail_before_authenticated_network() -> None:
     transport = RecordingTransport(lambda _call: FakeResponse({"balances": []}))
-    adapter = BinanceLiveReadOnlyAdapter(env={}, transport=transport, now=lambda: NOW)
+    adapter = BinanceLiveReadOnlyAdapter(env={"CSS_OPERATING_COUNTRY": SYNTHETIC_COUNTRY}, transport=transport, now=lambda: NOW)
     with pytest.raises(BinanceConfigurationError):
         adapter.get_account()
     assert transport.calls == []
@@ -242,3 +247,55 @@ def test_safety_flags_remain_fail_closed() -> None:
     assert BinanceLiveReadOnlyAdapter.live_trading_blocked is True
     assert BinanceLiveReadOnlyAdapter.broker_execution_armed is False
     assert BinanceLiveReadOnlyAdapter.advisory_only is True
+
+
+# --------------------------------------------------------------- jurisdiction gate and host allowlist
+@pytest.mark.parametrize("country", ["CA", "ca", "US", "", "XX1", None])
+def test_restricted_or_unattested_country_sends_no_request_signed_or_not(country) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1, "balances": []}))
+    env = _env()
+    if country is None:
+        env.pop("CSS_OPERATING_COUNTRY")
+    else:
+        env["CSS_OPERATING_COUNTRY"] = country
+    adapter = BinanceLiveReadOnlyAdapter(env=env, transport=transport, now=lambda: NOW)
+    assert adapter.eligible is False
+    for call in (adapter.get_account, adapter.server_time, adapter.get_exchange_info, adapter.get_ticker):
+        with pytest.raises(BinanceJurisdictionError):
+            call()
+    assert transport.calls == []  # neither the API key nor a signature ever left the process
+    assert adapter.credential_diagnostics()["binance_eligible"] is False
+
+
+@pytest.mark.parametrize("url", [
+    "http://api.binance.com",
+    "https://evil.example.com",
+    "https://api.binance.com.evil.example.com",
+    "https://user:pw@api.binance.com",
+    "https://api.binance.com:8443",
+    "https://api.binance.com/proxy",
+    "https://testnet.binance.vision",
+    "ftp://api.binance.com",
+    "https://api.binance.com:notaport",
+    "https://[::1",
+])
+def test_non_allowlisted_base_url_is_refused_before_any_request(url) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1, "balances": []}))
+    for var in ("BINANCE_BASE_URL", "BINANCE_API_URL", "BINANCE_REST_URL"):
+        env = _env()
+        env.pop("BINANCE_BASE_URL")
+        env[var] = url
+        adapter = BinanceLiveReadOnlyAdapter(env=env, transport=transport, now=lambda: NOW)
+        assert adapter.base_url == "" and adapter.is_configured() is False
+        assert adapter.credential_diagnostics()["binance_base_url_rejected"] is True
+        with pytest.raises(BinanceConfigurationError, match="binance_base_url_not_allowlisted"):
+            adapter._request("GET", "/api/v3/time")
+    assert transport.calls == []
+
+
+@pytest.mark.parametrize("url", ["https://api.binance.com", "https://api1.binance.com/", "https://API-GCP.binance.com"])
+def test_allowlisted_binance_hosts_are_accepted(url) -> None:
+    transport = RecordingTransport(lambda _call: FakeResponse({"serverTime": 1}))
+    adapter = _adapter(transport, BINANCE_BASE_URL=url)
+    adapter.server_time()
+    assert transport.calls[0]["url"].startswith(f"https://{url.split('//')[1].strip('/').lower()}/api/v3/time")

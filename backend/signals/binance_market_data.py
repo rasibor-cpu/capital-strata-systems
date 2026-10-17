@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import math
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -48,30 +49,35 @@ class WeightGuard:
     blocked_until: float = 0.0
     window_s: float = 60.0
     observed_at: float = 0.0  # when the server last reported the used weight
+    # One guard is shared by threads (e.g. asyncio.to_thread workers): state changes are serialised.
+    _lock: Any = field(default_factory=threading.Lock, repr=False, compare=False)
 
     def before_request(self) -> None:
-        now = self.clock()
-        if now < self.blocked_until:
-            raise CandleError("binance_backoff_in_effect")
-        if now - self.observed_at >= self.window_s:
-            self.used = 0  # the 1-minute window has rolled over since the last server report
-        if self.used >= self.limit * self.budget_fraction:
-            raise CandleError("binance_request_weight_budget_exhausted")
+        with self._lock:
+            now = self.clock()
+            if now < self.blocked_until:
+                raise CandleError("binance_backoff_in_effect")
+            if now - self.observed_at >= self.window_s:
+                self.used = 0  # the 1-minute window has rolled over since the last server report
+            if self.used >= self.limit * self.budget_fraction:
+                raise CandleError("binance_request_weight_budget_exhausted")
 
     def after_response(self, resp: Any) -> None:
         headers = getattr(resp, "headers", None) or {}
-        if "X-MBX-USED-WEIGHT-1M" in headers:
-            try:
-                self.used, self.observed_at = int(headers["X-MBX-USED-WEIGHT-1M"]), self.clock()
-            except (TypeError, ValueError):
-                pass
         status = int(getattr(resp, "status_code", 200) or 200)
+        with self._lock:
+            if "X-MBX-USED-WEIGHT-1M" in headers:
+                try:
+                    self.used, self.observed_at = int(headers["X-MBX-USED-WEIGHT-1M"]), self.clock()
+                except (TypeError, ValueError):
+                    pass
+            if status in (418, 429):
+                try:
+                    wait = float(headers.get("Retry-After", 60))
+                except (TypeError, ValueError):
+                    wait = 60.0
+                self.blocked_until = max(self.blocked_until, self.clock() + max(wait, 1.0))
         if status in (418, 429):
-            try:
-                wait = float(headers.get("Retry-After", 60))
-            except (TypeError, ValueError):
-                wait = 60.0
-            self.blocked_until = self.clock() + max(wait, 1.0)
             raise CandleError("binance_ip_banned" if status == 418 else "binance_rate_limited")
 
     def get(self, http: Any, url: str, params: Mapping[str, Any]) -> Any:
