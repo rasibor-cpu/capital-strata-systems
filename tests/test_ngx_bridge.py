@@ -7,6 +7,7 @@ from backend.app.brokers.ngx_bridge import (
     CANADIAN_BROKERS, summarize_broker_account,
     US_BANKS, US_BROKERS, summarize_us_institution_account,
     UK_BANKS, UK_BROKERS, summarize_uk_institution_account,
+    add_unlisted_institution,
 )
 
 
@@ -171,3 +172,24 @@ class UKInstitutionBridgeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             summarize_uk_institution_account({
                 "provider": "barclays", "kind": "bank", "account_key": "alias", "currency": "CAD"})
+
+
+class UnlistedInstitutionTests(unittest.TestCase):
+    def test_user_can_add_institution_outside_directory(self):
+        item = add_unlisted_institution(institution_id="community_savings",
+            display_name="Community Savings", country="GH", kind="credit_union", currency="GHS")
+        self.assertEqual(item["directory_source"], "USER_ADDED")
+        self.assertTrue(item["manual_entry_allowed"])
+        self.assertFalse(item["api_authorized"])
+        self.assertFalse(item["transfer_authority"])
+        self.assertFalse(item["execution_allowed"])
+
+    def test_invalid_metadata_rejected(self):
+        cases = [dict(institution_id="bad/id"), dict(country="Canada"),
+                 dict(currency="Canadian Dollar"), dict(kind="exchange")]
+        for change in cases:
+            kwargs = dict(institution_id="valid", display_name="Institution",
+                          country="CA", kind="bank", currency="CAD")
+            kwargs.update(change)
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                add_unlisted_institution(**kwargs)
