@@ -215,6 +215,9 @@ class ConsentService:
         self.root = Path(root)
         self.preferences = preferences
         self.mandates = mandates
+        # When set (e.g. by a simulation run), verify_active also requires the active acceptance to
+        # carry exactly this run binding, so every trade decision refuses consent from another run.
+        self.required_run_binding: str | None = None
         # Copy mandates are only possible for traders approved (dual control) in this registry.
         self.trader_registry = trader_registry or TraderRegistry(self.root)
         self.manual_provider = manual_provider
@@ -552,6 +555,8 @@ class ConsentService:
                 return False, "consent_acknowledgement_outdated"
             if self._manual().renewal_required(record["manual_version"]):
                 return False, "consent_renewal_required"
+            if self.required_run_binding is not None and record.get("run_binding") != self.required_run_binding:
+                return False, "consent_run_binding_mismatch"
         except (ConsentError, MandateError, ValueError, KeyError) as exc:
             return False, f"consent_unverifiable:{exc}"
         return True, "consent_valid"

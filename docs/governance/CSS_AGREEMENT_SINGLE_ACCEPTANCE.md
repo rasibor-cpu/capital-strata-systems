@@ -39,7 +39,7 @@ Unrecognised input, including `y` and `yes`, is explained and re-prompted; it ne
 - the operating mode, risk personality, limits and policy hash;
 - the acknowledgement hash;
 - `agreement_session_id`;
-- `run_binding`: a SHA-256 of the track's resolved, case-normalised root location. It is the run the acceptance is valid for.
+- `run_binding`: a SHA-256 of the track's resolved, case-normalised root location **and** the run's random `run_id`. The `run_id` is generated before the review and written to `run.json` only after acceptance. It is the run the acceptance is valid for.
 
 The simulation journal adds an `AGREEMENT_ACCEPTED` event. A decline produces a `DECLINED` ledger record.
 
@@ -68,7 +68,12 @@ Also unchanged:
 **Not shown on restart or resume** while the acceptance in both track ledgers is still valid, that is, when `verify_active` passes and the accepted policy matches the simulation's settings.
 
 **Shown again when:**
-- the run directory was copied or moved (`acceptance_from_another_run`), or the acceptance carries no run binding (`acceptance_not_bound_to_run`). This closes Grok audit finding A-M3: a copied root used to carry a valid acceptance;
+- the run directory was copied or moved, or a new run was created at the same path with old track state restored (`acceptance_from_another_run`; Grok audit A-M3 and F-1);
+- the acceptance carries no run binding (`acceptance_not_bound_to_run`).
+
+Runs started before `run_id` existed are bound by location only.
+
+**Every decision re-checks the binding.** The router's `verify_active` refuses an acceptance from another run (`consent_run_binding_mismatch`). A read-only simulation (`report`) can never run `cycle()` (Grok F-2).
 - the agreement version changes materially (`renewal_required`);
 - the content or acknowledgement changes;
 - the ledger is tampered with;

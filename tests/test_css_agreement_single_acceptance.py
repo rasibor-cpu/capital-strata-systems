@@ -50,6 +50,11 @@ def _engine(path):
     return CopyTradeEngine(path, key_provider=lambda: KEY)
 
 
+def _status(track_root):
+    """consent_status for a track of an existing simulation run (run_id read from its run.json)."""
+    return cad146.consent_status(_engine(track_root), run_id=cad146.read_run_id(Path(track_root).parent))
+
+
 def _review(tmp_path, n=1, clock=None, **kw):
     engines = [_engine(tmp_path / f"e{i}") for i in range(n)]
     review = AgreementReview([e.consent for e in engines], user_id=SIM_USER, auth_session_hash=SIM_SESSION,
@@ -290,7 +295,7 @@ def test_changed_accepted_settings_require_reacceptance(tmp_path, monkeypatch):
     root = tmp_path / "run"
     _sim(root, accept_agreement)
     monkeypatch.setattr(cad146, "_desired_policy_hash", lambda: "0" * 64)
-    ok, why = cad146.consent_status(_engine(root / "track_a"))
+    ok, why = _status(root / "track_a")
     assert (ok, why) == (False, "accepted_settings_differ")
 
 
@@ -349,7 +354,7 @@ def test_copied_run_directory_needs_its_own_acceptance(tmp_path):
     _sim(run_a, accept_agreement)
     run_c = tmp_path / "runC"
     shutil.copytree(run_a, run_c)  # the copy carries run A's ledgers, preferences and signing key
-    ok, why = cad146.consent_status(_engine(run_c / "track_a"))
+    ok, why = _status(run_c / "track_a")
     assert ok is False and why == "acceptance_from_another_run"
     with pytest.raises(SimulationError, match="consent_activation_required"):
         Cad146Simulation(run_c, artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path / "ops",
@@ -357,8 +362,8 @@ def test_copied_run_directory_needs_its_own_acceptance(tmp_path):
     calls = []
     _sim(run_c, lambda r: calls.append(1) or accept_agreement(r), now=T0 + timedelta(minutes=1))
     assert calls == [1]  # one fresh acceptance, recorded for run C's own root
-    assert cad146.consent_status(_engine(run_c / "track_a")) == (True, "consent_valid")
-    assert cad146.consent_status(_engine(run_a / "track_a")) == (True, "consent_valid")  # run A unaffected
+    assert _status(run_c / "track_a") == (True, "consent_valid")
+    assert _status(run_a / "track_a") == (True, "consent_valid")  # run A unaffected
 
 
 def test_moved_run_directory_needs_a_fresh_acceptance(tmp_path):
@@ -366,19 +371,67 @@ def test_moved_run_directory_needs_a_fresh_acceptance(tmp_path):
     _sim(run_a, accept_agreement)
     moved = tmp_path / "moved"
     run_a.rename(moved)
-    assert cad146.consent_status(_engine(moved / "track_b")) == (False, "acceptance_from_another_run")
+    assert _status(moved / "track_b") == (False, "acceptance_from_another_run")
 
 
 def test_acceptance_without_a_run_binding_is_not_current(tmp_path):
     review, engines = _review(tmp_path)  # a review given outside a simulation run records no binding
     accept_agreement(review)
     assert engines[0].consent.active_record(SIM_USER).get("run_binding") is None
-    assert cad146.consent_status(engines[0]) == (False, "acceptance_not_bound_to_run")
+    assert cad146.consent_status(engines[0], run_id=None) == (False, "acceptance_not_bound_to_run")
 
 
 def test_run_binding_is_recorded_in_every_acceptance_record(tmp_path):
     root = tmp_path / "run"
     sim = _sim(root, accept_agreement)
     for track, receipt in zip(("track_a", "track_b"), sim.agreement.receipts):
-        assert receipt["run_binding"] == cad146.run_binding(root / track)
-    assert cad146.run_binding(root / "track_a") != cad146.run_binding(root / "track_b")
+        assert receipt["run_binding"] == cad146.run_binding(root / track, cad146.read_run_id(root))
+    run_id = cad146.read_run_id(root)
+    assert run_id and run_id.startswith("run-")
+    assert cad146.run_binding(root / "track_a", run_id) != cad146.run_binding(root / "track_b", run_id)
+
+
+# ------------------------------------------------------------------ Grok final audit F-1, F-2
+def test_new_run_at_the_same_path_with_restored_tracks_needs_a_fresh_acceptance(tmp_path):
+    """F-1: the binding includes the run's random run_id, not only its location."""
+    import shutil
+    root = tmp_path / "run"
+    _sim(root, accept_agreement)
+    saved = tmp_path / "saved"
+    shutil.copytree(root, saved)
+    shutil.rmtree(root)
+    root.mkdir()
+    for track in ("track_a", "track_b"):  # old track state restored into a brand-new run at the same path
+        shutil.copytree(saved / track, root / track)
+    calls = []
+    sim = _sim(root, lambda r: calls.append(1) or accept_agreement(r), now=T0 + timedelta(hours=1))
+    assert calls == [1]
+    assert cad146.read_run_id(root) != cad146.read_run_id(saved)
+    assert sim.track_a.router is not None and _status(root / "track_a") == (True, "consent_valid")
+
+
+def test_read_only_simulation_never_cycles(tmp_path):
+    """F-2: read-only use (reports) cannot produce decisions."""
+    root = tmp_path / "run"
+    _sim(root, accept_agreement)
+    report_only = Cad146Simulation(root, artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path / "ops",
+                                   operator="robert", now=T0, require_current_agreement=False)
+    with pytest.raises(SimulationError, match="read_only_simulation_cannot_cycle"):
+        report_only.cycle(lambda instrument, gran: None, [("BTC-USD", 3600)], now=T0)
+
+
+def test_router_consent_check_refuses_an_acceptance_from_another_run(tmp_path):
+    """F-2: every decision's verify_active also checks the run binding, not only start-up."""
+    import shutil
+    run_a = tmp_path / "runA"
+    _sim(run_a, accept_agreement)
+    run_c = tmp_path / "runC"
+    shutil.copytree(run_a, run_c)
+    copied = Cad146Simulation(run_c, artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path / "ops",
+                              operator="robert", now=T0, require_current_agreement=False)
+    for track in (copied.track_a, copied.track_b):
+        ok, why = track.router.engine.consent.verify_active(SIM_USER)
+        assert ok is False and why == "consent_run_binding_mismatch"
+    original = Cad146Simulation(run_a, artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path / "ops",
+                                operator="robert", now=T0, require_current_agreement=False)
+    assert original.track_a.router.engine.consent.verify_active(SIM_USER) == (True, "consent_valid")
