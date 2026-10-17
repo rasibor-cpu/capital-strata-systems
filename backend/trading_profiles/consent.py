@@ -37,6 +37,7 @@ from backend.certification.ov002_persistence import (
     read_json_object,
 )
 from backend.runtime.interprocess_lock import exclusive_file_lock
+from backend.trading_profiles.consent_signing import ConsentSigningError
 from backend.trading_profiles.limits import LimitsError, UserRiskLimits, effective_policy
 from backend.trading_profiles.mandates import CopyMandate, MandateError, MandateRegistry, ReauthorizationPolicy
 from backend.trading_profiles.manual import ACKNOWLEDGEMENT_SHA256, ControlledManual, ManualIntegrityError, current_manual
@@ -177,6 +178,9 @@ class ConsentLedger:
     def __init__(self, root: Path) -> None:
         self.root = root
         self.path = root / "consent_ledger.jsonl"
+        # Optional ConsentIntegrity (consent_signing.py): when set, every appended entry is signed
+        # with a key held outside this root and the ledger is re-anchored after each append.
+        self.integrity: Any = None
 
     def records(self) -> list[dict[str, Any]]:
         if not self.path.exists():
@@ -187,9 +191,12 @@ class ConsentLedger:
                 continue
             record = json.loads(line)
             claimed = record.pop("entry_hash", None)
+            signature = record.pop("signature", None)  # signs entry_hash; not part of the hashed body
             if record.get("prev_hash") != prev or _sha(record) != claimed:
                 raise ConsentError("consent_ledger_chain_broken")
             record["entry_hash"] = claimed
+            if signature is not None:
+                record["signature"] = signature
             prev = claimed
             out.append(record)
         return out
@@ -198,7 +205,17 @@ class ConsentLedger:
         existing = self.records()
         record = {"record_type": record_type, **dict(body), "prev_hash": existing[-1]["entry_hash"] if existing else GENESIS}
         record["entry_hash"] = _sha(record)
+        if self.integrity is not None:
+            try:
+                record["signature"] = self.integrity.sign_entry(record["entry_hash"])
+            except Exception as exc:  # no signature -> no record (fail closed)
+                raise ConsentError(f"consent_signing_unavailable:{exc}") from None
         atomic_append_jsonl(self.path, record, expected_root=self.root)
+        if self.integrity is not None:
+            try:
+                self.integrity.anchor()
+            except Exception as exc:  # the record exists but is unanchored: verify_active refuses it
+                raise ConsentError(f"consent_anchor_failed:{exc}") from None
         return record
 
 
@@ -215,6 +232,12 @@ class ConsentService:
         self.root = Path(root)
         self.preferences = preferences
         self.mandates = mandates
+        # When set (e.g. by a simulation run), verify_active also requires the active acceptance to
+        # carry exactly this run binding, so every trade decision refuses consent from another run.
+        self.required_run_binding: str | None = None
+        # When enabled, acceptance records, the active pointer and the ledger anchor must all
+        # verify with keys held outside this root (A-M2); verify_active fails closed otherwise.
+        self.integrity: Any = None
         # Copy mandates are only possible for traders approved (dual control) in this registry.
         self.trader_registry = trader_registry or TraderRegistry(self.root)
         self.manual_provider = manual_provider
@@ -390,7 +413,8 @@ class ConsentService:
     # -- 4. accept ---------------------------------------------------------------
     def accept(self, user_id: str, *, auth_session_hash: str, review_id: str, acknowledgement_checked: Any,
                acknowledgement_sha256: str, manual_version: str, manual_sha256: str, policy_hash_shown: str,
-               now: datetime) -> dict[str, Any]:
+               now: datetime, operator_id: str | None = None,
+               agreement_session_id: str | None = None, run_binding: str | None = None) -> dict[str, Any]:
         if acknowledgement_checked is not True:
             raise ConsentError("acknowledgement_not_checked")
         if acknowledgement_sha256 != ACKNOWLEDGEMENT_SHA256:
@@ -443,6 +467,14 @@ class ConsentService:
                                    for pid in manual.page_ids],
                 "accepted_at_utc": _iso(now), "effective_from_utc": _iso(now),
             }
+            # Who accepted (an operator acting for a simulation user) and which single review
+            # produced it; added only when given so earlier records keep their exact shape.
+            if operator_id:
+                body["operator_id"] = str(operator_id)
+            if agreement_session_id:
+                body["agreement_session_id"] = str(agreement_session_id)
+            if run_binding:
+                body["run_binding"] = str(run_binding)  # the run (root) this acceptance is valid for
             # (a) evidence first: an acceptance record without activation is harmless
             record = self.ledger.append("ACCEPTED", body)
             change["status"] = "ACCEPTED"
@@ -468,6 +500,13 @@ class ConsentService:
                     operating_mode=mode, risk_personality=personality, limits=limits, mandate_id=mandate_id,
                     policy_hash=change["policy_hash"], consent_record_hash=record["entry_hash"],
                     activated_at_utc=_iso(now)))
+                if self.integrity is not None:
+                    try:
+                        self.integrity.write_pointer(user_id, record_hash=record["entry_hash"],
+                                                     policy_hash=change["policy_hash"],
+                                                     run_binding=record.get("run_binding"), activated_at_utc=_iso(now))
+                    except Exception as exc:
+                        raise ConsentError(f"consent_pointer_signing_failed:{exc}") from None
             except (MandateError, ConsentError) as exc:
                 change["status"] = "ACTIVATION_FAILED"
                 self._write_state(state)
@@ -487,8 +526,34 @@ class ConsentService:
             "operating_mode": record["operating_mode"], "risk_personality": record["risk_personality"],
             "limits": record["limits"], "mandate_terms": record["mandate_terms"], "mandate_id": mandate_id,
             "pages_reviewed": len(record["pages_reviewed"]),
+            "operator_id": record.get("operator_id"), "agreement_session_id": record.get("agreement_session_id"),
+            "run_binding": record.get("run_binding"),
             "live_trading_authorized": False,
         }
+
+    def decline(self, user_id: str, *, auth_session_hash: str, review_id: str, reason: str, now: datetime,
+                operator_id: str | None = None, agreement_session_id: str | None = None) -> dict[str, Any]:
+        """Record an explicit decline (or an abandoned review). Nothing is activated; the pending
+        change and the review are closed so they can never be accepted later."""
+        manual = self._manual()
+        with self._locked():
+            state = self._read_state()
+            review = self._get_review(state, review_id, user_id, auth_session_hash, now)
+            change = state["changes"].get(review["change_id"])
+            if change is None or change["user_id"] != user_id:
+                raise ConsentError("change_not_found")
+            body = {"user_id": user_id, "change_id": change["change_id"], "review_id": review_id,
+                    "reason": str(reason)[:200], "operator_id": operator_id,
+                    "agreement_session_id": agreement_session_id, "policy_hash": change["policy_hash"],
+                    "manual_version": manual.version, "manual_sha256": manual.sha256,
+                    "pages_reviewed": sum(1 for e in review["pages"].values() if e.get("reviewed_at_utc")),
+                    "declined_at_utc": _iso(now)}
+            record = self.ledger.append("DECLINED", body)
+            if change["status"] == "PENDING":
+                change["status"] = "DECLINED"
+            review["status"] = "DECLINED"
+            self._write_state(state)
+        return record
 
     # -- 5. verification -----------------------------------------------------------
     def verify_active(self, user_id: str, state: UserTradingState | None = None) -> tuple[bool, str]:
@@ -517,9 +582,34 @@ class ConsentService:
                 return False, "consent_acknowledgement_outdated"
             if self._manual().renewal_required(record["manual_version"]):
                 return False, "consent_renewal_required"
-        except (ConsentError, MandateError, ValueError, KeyError) as exc:
+            if self.required_run_binding is not None and record.get("run_binding") != self.required_run_binding:
+                return False, "consent_run_binding_mismatch"
+            if self.integrity is not None:
+                # The active record must carry a valid signature by a known, unrevoked key. Older
+                # entries are covered by the signed anchor checkpoint over the whole ledger prefix.
+                if not self.integrity.verify_entry(record):
+                    return False, "consent_ledger_signature_invalid"
+                why = self.integrity.verify_pointer(user_id, record=record, policy_hash=active.policy_hash)
+                if why:
+                    return False, why
+                why = self.integrity.verify_anchor(record_hash=record["entry_hash"])
+                if why:
+                    return False, why
+        except (ConsentError, ConsentSigningError, MandateError, ValueError, KeyError) as exc:
             return False, f"consent_unverifiable:{exc}"
         return True, "consent_valid"
+
+    def enable_integrity(self, integrity: Any) -> None:
+        self.integrity = integrity
+        self.ledger.integrity = integrity
+
+    def active_record(self, user_id: str) -> dict[str, Any] | None:
+        """The ACCEPTED ledger record the user's active settings reference, if any."""
+        active = self.preferences.get(user_id).active
+        if active is None:
+            return None
+        return next((r for r in self.ledger.records()
+                     if r["entry_hash"] == active.consent_record_hash and r.get("record_type") == "ACCEPTED"), None)
 
     def receipts(self, user_id: str) -> list[dict[str, Any]]:
         return [self.receipt_from_record(r) for r in self.ledger.records()

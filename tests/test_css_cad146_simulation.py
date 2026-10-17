@@ -12,6 +12,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from agreement_support import accept_agreement
+
 from test_css_rc1_signals import ADMIN_A, ADMIN_B, H, _artifact, _now_for, synthetic
 from backend.signals.candles import CandleError
 from backend.signals.producer import CalibrationApprovals
@@ -38,7 +40,7 @@ def make(tmp_path, *, approved=False, equity=146.0, art=None):
         appr.approve(art, actor_ctx=ADMIN_A)
         appr.approve(art, actor_ctx=ADMIN_B)
     sim = Cad146Simulation(tmp_path / "sim", artifacts=[art], costs=DEFAULT_COSTS, operational_approvals_root=ops,
-                           operator="operator-1", starting_equity=equity, presenter=lambda page: True)
+                           operator="operator-1", starting_equity=equity, presenter=accept_agreement)
     return sim, art
 
 
@@ -123,15 +125,23 @@ def test_r7_expired_operator_sign_on_blocks_entries(tmp_path):
         assert t["fills"] == 0 and any("session" in k for k in t["reasons"]), t["reasons"]
 
 
-def test_activation_requires_every_manual_page_confirmed(tmp_path):
+def test_activation_requires_the_agreement_to_be_accepted(tmp_path):
     with pytest.raises(SimulationError, match="consent_activation_required"):
         Cad146Simulation(tmp_path / "s1", artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path,
                          operator="op")
     seen = []
-    with pytest.raises(SimulationError, match="consent_page_not_confirmed"):
+
+    def quit_on_page_two(review):
+        while True:
+            seen.append(review.page()["page_id"])
+            if len(seen) == 2:
+                return  # walks away: no acceptance
+            review.next()
+
+    with pytest.raises(SimulationError, match="agreement_not_accepted:review_ended_without_acceptance"):
         Cad146Simulation(tmp_path / "s2", artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path,
-                         operator="op", presenter=lambda page: seen.append(page["page_id"]) or len(seen) < 2)
-    assert len(seen) == 2
+                         operator="op", presenter=quit_on_page_two)
+    assert len(seen) == 2 and not (tmp_path / "s2" / "run.json").exists()  # the 48-hour clock never started
 
 
 def test_refuses_operational_book_and_live_arming(tmp_path, monkeypatch):
