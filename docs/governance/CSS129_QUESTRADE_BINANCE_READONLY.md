@@ -44,9 +44,14 @@
   - It resyncs with a fresh snapshot after a gap.
   - It reconnects with capped exponential backoff, applies a staleness timeout and a bounded reconnect budget (reset after a healthy session), and fails closed.
 - **Eligibility first:** every entry point applies `binance_eligibility` before any connection is attempted. That means an unattested country or a restricted jurisdiction (**CA**, US, NL, ...) is refused.
+- **Shared guard everywhere:** `market_data`'s Binance klines, server time and depth calls also go through the per-process `WeightGuard` (Grok audit A-M5). The guard's state is lock-protected, because `to_thread` workers share it (A-L3).
+
+**Signed read-only account adapter (`backend/app/brokers/binance_live_read_only_adapter.py`; Grok audit A-H1 and A-M1).** This existing adapter had no jurisdiction gate. With `CSS_OPERATING_COUNTRY=CA` it still sent a signed request to `api.binance.com`, and its base URL could be redirected anywhere through the environment. It now:
+- refuses **every** request, signed or not, when `binance_eligibility` refuses the country, with `BinanceJurisdictionError` and nothing sent. The operational validation reports this as `JURISDICTION_RESTRICTED`;
+- accepts only `https://` on Binance's REST hosts (`api.binance.com`, `api1`–`api4`, `api-gcp`) with no credentials, path or non-443 port. Any other `BINANCE_BASE_URL` / `BINANCE_API_URL` / `BINANCE_REST_URL` is refused, so the API key and signatures cannot be sent elsewhere.
 
 ## Tests
-`tests/test_css129_questrade_binance_readonly.py` (29 tests) are contract tests with fakes; no network is used.
+`tests/test_css129_questrade_binance_readonly.py` (31 tests), plus the signed-adapter tests in `tests/test_binance_live_read_only_adapter.py` and `tests/test_binance_live_read_only_operational_validation.py`. All are contract tests with fakes; no network is used.
 
 **Questrade**
 - candles, provenance and entitlement;
@@ -68,6 +73,12 @@
 - crossed book;
 - stream resync after a gap;
 - stale feed and reconnect exhaustion.
+
+**Signed adapter**
+- CA, US, empty or invalid country: no request is sent, signed or unsigned;
+- a non-allowlisted base URL (http, another host, a look-alike suffix, user info, a port, a path, testnet, a malformed URL) is refused;
+- allowlisted hosts are accepted;
+- the operational validation fails closed with `JURISDICTION_RESTRICTED`.
 
 **Static check:** the new modules contain no order endpoint, signing or write call.
 

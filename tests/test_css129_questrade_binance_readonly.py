@@ -279,6 +279,52 @@ def test_default_weight_guard_is_shared_across_calls(monkeypatch):
         asyncio.run(fetch("BTCUSDT"))  # refused with zero HTTP calls (review M1)
 
 
+def test_klines_and_quotes_share_the_default_weight_guard(monkeypatch):
+    """Review A-M5: market_data's Binance klines, time and depth calls go through the per-process guard."""
+    from backend.signals import binance_market_data as bmd
+    t = {"now": 0.0}
+    monkeypatch.setattr(bmd, "_DEFAULT_GUARD", WeightGuard(clock=lambda: t["now"]))
+    with pytest.raises(CandleError, match="binance_ip_banned"):
+        md.BinanceSpotPublicCandles(FakeHttp(Resp({}, status=418, headers={"Retry-After": "120"})),
+                                    operating_country="GB").fetch("BTC-USDT", granularity_s=3600)
+    with pytest.raises(CandleError, match="backoff_in_effect"):
+        md.BinanceQuotes(NeverCalledHttp(), operating_country="GB").quote("BTC-USDT")  # zero HTTP calls
+    with pytest.raises(CandleError, match="backoff_in_effect"):
+        md.BinanceSpotPublicCandles(NeverCalledHttp(), operating_country="GB").fetch("BTC-USDT", granularity_s=3600)
+    t["now"] = 121.0
+    with pytest.raises(CandleError, match="binance_rate_limited"):
+        md.BinanceQuotes(FakeHttp(Resp({}, status=429, headers={"Retry-After": "30"})),
+                         operating_country="GB").quote("BTC-USDT")
+    with pytest.raises(CandleError, match="backoff_in_effect"):
+        exchange_filters("BTC-USDT", operating_country="GB", http=NeverCalledHttp())
+
+
+def test_weight_guard_is_consistent_across_threads():
+    """Review A-L3: one guard shared by to_thread workers keeps a consistent budget and back-off."""
+    import threading
+    guard = WeightGuard(clock=lambda: 0.0)
+    errors, barrier = [], threading.Barrier(16)
+
+    def worker(i):
+        barrier.wait()
+        try:
+            guard.after_response(Resp({}, headers={"X-MBX-USED-WEIGHT-1M": str(i)}))
+            if i == 7:
+                guard.after_response(Resp({}, status=418, headers={"Retry-After": "300"}))
+        except CandleError as exc:
+            errors.append(str(exc))
+
+    threads = [threading.Thread(target=worker, args=(i,)) for i in range(16)]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    assert errors == ["binance_ip_banned"] and guard.blocked_until == 300.0
+    assert 0 <= guard.used <= 15
+    with pytest.raises(CandleError, match="backoff_in_effect"):
+        guard.before_request()
+
+
 def _snapshot(last=100):
     return {"lastUpdateId": last, "bids": [["99.0", "1.0"], ["98.0", "2.0"]], "asks": [["101.0", "1.0"], ["102.0", "1.0"]]}
 
