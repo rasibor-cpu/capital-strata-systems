@@ -149,6 +149,8 @@ def check_http(resp) -> None:
     status = int(resp.status_code or 0)
     if 200 <= status < 300:
         return
+    if 300 <= status < 400:
+        raise CandleError(f"redirect_refused:{status}")  # never followed, never parsed
     if status == 451:
         raise CandleError("restricted_location")
     if status in (401, 403):
@@ -159,9 +161,22 @@ def check_http(resp) -> None:
 
 
 def _requests_session() -> _Http:
+    """The HTTP session every market-data client uses: redirects are never followed.
+
+    requests strips only Authorization on a cross-host redirect, so a followed redirect would forward
+    APCA-API-SECRET-KEY (Alpaca, Grok re-audit F-5) and would let public data come from a host
+    outside the allowlist (Binance public paths, R-2). A 3xx is returned as-is, and check_http turns
+    it into an error."""
     import requests
 
-    return requests.Session()
+    class NoRedirectSession(requests.Session):
+        follows_redirects = False
+
+        def request(self, method, url, **kwargs):  # type: ignore[override]
+            kwargs["allow_redirects"] = False
+            return super().request(method, url, **kwargs)
+
+    return NoRedirectSession()
 
 
 def _now_utc() -> datetime:

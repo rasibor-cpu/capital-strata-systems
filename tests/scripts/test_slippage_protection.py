@@ -26,6 +26,45 @@ def dashboard():
     import scripts.css_live_dashboard as db
     yield db
 
+_OANDA_NETWORK_ATTEMPTS = []
+
+
+@pytest.fixture(autouse=True)
+def no_external_network(monkeypatch):
+    """Test isolation (Grok re-audit R-5): these tests must never reach the OANDA REST host (or any
+    other non-loopback host). The adapter's HTTP call fails exactly as an unreachable network does
+    (requests.ConnectionError), so its own error handling still runs, without real DNS, sockets
+    or backoff sleeps. Any other outbound attempt fails the test loudly."""
+    import socket
+
+    import requests
+
+    import backend.app.brokers.oanda_adapter as oanda_adapter
+
+    def offline_request(method, url, **kwargs):
+        _OANDA_NETWORK_ATTEMPTS.append((method, url))
+        raise requests.ConnectionError("network disabled in unit tests")
+
+    monkeypatch.setattr(oanda_adapter.requests, "request", offline_request)
+    monkeypatch.setattr(oanda_adapter.time, "sleep", lambda _s: None)
+
+    loopback = {"127.0.0.1", "::1", "localhost", None}
+    real_getaddrinfo, real_connect = socket.getaddrinfo, socket.socket.connect
+
+    def guarded_getaddrinfo(host, *a, **k):
+        if host not in loopback:
+            raise AssertionError(f"unexpected external DNS lookup in unit test: {host}")
+        return real_getaddrinfo(host, *a, **k)
+
+    def guarded_connect(sock, addr, *a, **k):
+        if isinstance(addr, tuple) and addr[0] not in loopback:
+            raise AssertionError(f"unexpected external connection in unit test: {addr}")
+        return real_connect(sock, addr, *a, **k)
+
+    monkeypatch.setattr(socket, "getaddrinfo", guarded_getaddrinfo)
+    monkeypatch.setattr(socket.socket, "connect", guarded_connect)
+
+
 @pytest.fixture(autouse=True)
 def reset_dashboard_state(dashboard):
     dashboard._CSS_SESSION_LOCK.clear()
@@ -141,3 +180,12 @@ def test_resolve_expected_fx_price_invalid(dashboard):
         
         mock_get_price.side_effect = Exception("Network Error")
         assert dashboard.resolve_expected_fx_price("EUR_USD") is None
+
+
+
+def test_oanda_calls_are_intercepted_not_sent(dashboard):
+    """The open-trade check reaches the adapter, which is answered offline (never the network)."""
+    before = len(_OANDA_NETWORK_ATTEMPTS)
+    dashboard.get_oanda_open_trade_count()
+    assert len(_OANDA_NETWORK_ATTEMPTS) > before
+    assert all("mock.com" in url for _m, url in _OANDA_NETWORK_ATTEMPTS)

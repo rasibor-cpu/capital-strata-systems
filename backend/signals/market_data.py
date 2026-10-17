@@ -221,6 +221,18 @@ class AlpacaCryptoPublicCandles:
         return validate(drop_incomplete(series, now=self.clock()), allow_gaps=1000)
 
 
+def _refuse_redirecting_transport(http: Any) -> None:
+    """Refuse a plain requests.Session (directly or inside RetryingHttp): it follows redirects and
+    would forward credential headers to the redirect target. Use _requests_session()."""
+    try:
+        import requests
+    except ImportError:  # pragma: no cover
+        return
+    for candidate in (http, getattr(http, "inner", None)):
+        if isinstance(candidate, requests.Session) and getattr(candidate, "follows_redirects", True):
+            raise CandleError("credentialed_transport_must_not_follow_redirects")
+
+
 class AlpacaStockCandles:
     """US equity bars from the free IEX feed. Requires APCA_API_KEY_ID / APCA_API_SECRET_KEY."""
 
@@ -230,6 +242,7 @@ class AlpacaStockCandles:
     def __init__(self, http: _Http | None = None, *, key_id: str | None = None, secret: str | None = None,
                  clock=None) -> None:
         self.http = http or _requests_session()
+        _refuse_redirecting_transport(self.http)  # credentials must never follow a redirect (F-5)
         self.key_id = key_id if key_id is not None else os.environ.get("APCA_API_KEY_ID", "")
         self.secret = secret if secret is not None else os.environ.get("APCA_API_SECRET_KEY", "")
         self.clock = clock or _now_utc
