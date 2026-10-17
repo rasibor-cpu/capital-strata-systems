@@ -2,7 +2,7 @@ import unittest
 
 from backend.app.brokers.ngx_bridge import (
     BROKERS, SOURCE_CATALOG, NGXSource, reconcile_ngx_positions,
-    summarize_pension_snapshot,
+    summarize_pension_snapshot, register_institution,
 )
 
 
@@ -40,8 +40,7 @@ class NGXBridgeTests(unittest.TestCase):
                 }])
 
     def test_unapproved_source_or_execution_rejected(self):
-        with self.assertRaises(ValueError):
-            NGXSource("unknown", "broker")
+        self.assertEqual(register_institution("my_broker", "broker", display_name="My Broker").api_status, "not_authorized")
         with self.assertRaises(ValueError):
             NGXSource("investment_one", "broker", execution_allowed=True)
         with self.assertRaises(ValueError):
@@ -65,3 +64,20 @@ class PensionBridgeTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 summarize_pension_snapshot({"provider": "stanbic_ibtc_pension_managers",
                                             "account_key": "alias", "balance": value})
+
+
+class ConfigurableInstitutionTests(unittest.TestCase):
+    def test_custom_broker_and_registrar(self):
+        broker = register_institution("new_broker", "broker", display_name="New Broker")
+        self.assertFalse(broker.execution_allowed)
+        result = reconcile_ngx_positions([{"broker": "new_broker", "account_key": "alias",
+                                           "symbol": "UBA", "quantity": "12"}],
+                                         [{"registrar": "another_registrar", "symbol": "UBA",
+                                           "quantity": "12"}])
+        self.assertEqual(result["consolidated_quantities"]["UBA"], "12")
+
+    def test_invalid_custom_institution_rejected(self):
+        with self.assertRaises(ValueError):
+            register_institution("bad/id", "broker", display_name="Invalid")
+        with self.assertRaises(ValueError):
+            register_institution("valid", "exchange", display_name="Invalid kind")
