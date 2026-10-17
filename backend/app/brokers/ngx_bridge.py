@@ -24,11 +24,11 @@ class NGXSource:
     execution_allowed: bool = False
 
     def __post_init__(self) -> None:
-        if self.source_id not in SOURCES:
-            raise ValueError("Unrecognized NGX source")
-        expected = ("broker" if self.source_id in BROKERS else
-                    "registrar" if self.source_id in REGISTRARS else "pension")
-        if self.kind != expected or self.execution_allowed:
+        if self.kind not in {"broker", "registrar", "pension"}:
+            raise ValueError("Invalid institution type")
+        if not self.source_id or not self.source_id.replace("_", "").isalnum():
+            raise ValueError("Invalid institution identifier")
+        if self.execution_allowed:
             raise ValueError("NGX source kind mismatch or execution requested")
         if self.api_status != "not_authorized":
             raise ValueError("API authorization must be verified by a separate connector")
@@ -72,7 +72,7 @@ def reconcile_ngx_positions(
         account = str(item.get("account_key", "")).strip()
         symbol = str(item.get("symbol", "")).strip().upper()
         currency = str(item.get("currency", "NGN")).strip().upper()
-        if broker not in BROKERS or not account or not symbol or currency != "NGN":
+        if not broker or not broker.replace("_", "").isalnum() or not account or not symbol or currency != "NGN":
             raise ValueError("Invalid NGX broker position")
         key = (broker, account, symbol)
         if key in seen:
@@ -88,7 +88,7 @@ def reconcile_ngx_positions(
     for item in registrar_records:
         registrar = str(item.get("registrar", "")).strip().lower()
         symbol = str(item.get("symbol", "")).strip().upper()
-        if registrar not in REGISTRARS or not symbol:
+        if not registrar or not registrar.replace("_", "").isalnum() or not symbol:
             raise ValueError("Invalid registrar record")
         quantity = _decimal(item.get("quantity"))
         corroboration.append({
@@ -114,8 +114,9 @@ def reconcile_ngx_positions(
 
 def summarize_pension_snapshot(snapshot: Mapping[str, object]) -> dict[str, object]:
     """Read-only pension snapshot, separate from NGX holdings and trading capital."""
-    if str(snapshot.get("provider", "")).strip().lower() not in PENSION_PROVIDERS:
-        raise ValueError("Unsupported pension provider")
+    provider = str(snapshot.get("provider", "")).strip().lower()
+    if not provider or not provider.replace("_", "").isalnum():
+        raise ValueError("Invalid pension provider")
     account_key = str(snapshot.get("account_key", "")).strip()
     if not account_key:
         raise ValueError("Opaque pension account alias required")
@@ -123,7 +124,14 @@ def summarize_pension_snapshot(snapshot: Mapping[str, object]) -> dict[str, obje
     if currency != "NGN":
         raise ValueError("Unsupported pension snapshot currency")
     balance = _decimal(snapshot.get("balance"))
-    return {"provider": "stanbic_ibtc_pension_managers", "account_key": account_key,
+    return {"provider": provider, "account_key": account_key,
             "currency": currency, "balance": str(balance), "asset_class": "PENSION",
             "included_in_trading_capital": False, "execution_allowed": False,
             "source_status": "USER_SUPPLIED_UNVERIFIED"}
+
+
+def register_institution(source_id: str, kind: str, *, display_name: str) -> NGXSource:
+    """User-defined institution metadata; never implies an authenticated connector."""
+    if not isinstance(display_name, str) or not display_name.strip():
+        raise ValueError("Institution display name required")
+    return NGXSource(source_id.strip().lower(), kind.strip().lower())
