@@ -41,4 +41,11 @@ See `tools/css_sim_cad146.py` (run / attest / report).
   `--on-session-expiry exit` stops the run with exit code 3 instead of observing with entries blocked.
 - One `run` per root (`<root>/run.lock`). Exit codes: 0 completed, 1 error, 2 preflight failed,
   3 sign-on expired (exit policy), 4 root already running, 5 refused (consent/agreement),
-  128+N signal (Ctrl+C 130, Ctrl+Break 149 on Windows). Re-running `run` on the same root resumes.
+  128+N signal (Ctrl+C 130; POSIX SIGTERM 143, SIGHUP 129; Windows Ctrl+Break 149). Re-running `run`
+  on the same root resumes.
+- Windows: only Ctrl+C and Ctrl+Break reach Python, and both are journalled (RUN_STOPPED) within about
+  1 s, because the poll sleep is sliced. `taskkill /F`, `os.kill(pid, SIGTERM)` (TerminateProcess),
+  Task Manager, closing the console window, logoff and reboot end the process without running Python
+  code. Nothing can be journalled, and the exit code is the OS's (e.g. 1 for `taskkill /F`, 0xC000013A
+  for console close). The next `run` journals RUN_INTERRUPTION_DETECTED. A supervisor should treat
+  exit codes 0, 2, 4 and 5 as "do not restart" and anything else as "resume the same root".
