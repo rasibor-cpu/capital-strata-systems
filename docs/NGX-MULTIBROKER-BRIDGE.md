@@ -36,3 +36,6 @@ Example banks: JPMorgan Chase, Bank of America, Wells Fargo, Citi, Capital One, 
 
 ## Alpaca and OANDA
 Alpaca and OANDA are included as US-directory brokerage/trading-provider candidates (OANDA primarily forex). Their presence here is **metadata only**; actual availability, entity, country-specific eligibility, account authorization and product permissions must be verified for each user. Existing CSS broker adapters are independent of this institution directory. Neither directory entry grants API credentials, funding authority or live-trading approval.
+
+## United Kingdom test institutions
+UK bank/building society/fintech examples: Barclays, HSBC UK, Lloyds, NatWest, Santander UK, Nationwide, Monzo, Revolut. Brokerage examples: Hargreaves Lansdown, AJ Bell, Interactive Brokers UK. These are configurable **directory entries**, not connected or verified APIs. `summarize_uk_institution_account` provides read-only GBP account metadata and denies payment initiation, trading, and automatic use of balances as trading capital. UK Open Banking account information and payment initiation require separately authorized provider integrations, explicit customer consent, and relevant regulatory controls. No production connection or payment functionality is implemented.
