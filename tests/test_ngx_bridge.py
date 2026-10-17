@@ -6,13 +6,14 @@ from backend.app.brokers.ngx_bridge import (
     summarize_bank_snapshot, CANADIAN_BANKS, CANADIAN_SIMULATION_CAPITAL_CAD,
     CANADIAN_BROKERS, summarize_broker_account,
     US_BANKS, US_BROKERS, summarize_us_institution_account,
+    UK_BANKS, UK_BROKERS, summarize_uk_institution_account,
 )
 
 
 class NGXBridgeTests(unittest.TestCase):
     def test_four_brokers_and_registrar_disabled(self):
         self.assertEqual(len(BROKERS), 4)
-        self.assertEqual(len(SOURCE_CATALOG), 26)
+        self.assertEqual(len(SOURCE_CATALOG), 37)
         self.assertTrue(all(not source.execution_allowed for source in SOURCE_CATALOG))
         self.assertTrue(all(source.api_status == "not_authorized" for source in SOURCE_CATALOG))
 
@@ -151,3 +152,22 @@ class USInstitutionBridgeTests(unittest.TestCase):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 summarize_us_institution_account({
                     "provider": "chase", "kind": "bank", "account_key": "alias", "currency": bad})
+
+
+class UKInstitutionBridgeTests(unittest.TestCase):
+    def test_uk_directory_and_custom_provider(self):
+        self.assertEqual(len(UK_BANKS), 8)
+        self.assertEqual(len(UK_BROKERS), 3)
+        self.assertEqual(register_institution("my_building_society", "bank",
+                         display_name="Building Society").api_status, "not_authorized")
+
+    def test_gbp_and_funding_controls(self):
+        for provider, kind in (("barclays", "bank"), ("aj_bell", "broker")):
+            result = summarize_uk_institution_account({
+                "provider": provider, "kind": kind, "account_key": "alias", "currency": "GBP"})
+            self.assertFalse(result["transfer_authority"])
+            self.assertFalse(result["open_banking_payment_authority"])
+            self.assertFalse(result["execution_allowed"])
+        with self.assertRaises(ValueError):
+            summarize_uk_institution_account({
+                "provider": "barclays", "kind": "bank", "account_key": "alias", "currency": "CAD"})
