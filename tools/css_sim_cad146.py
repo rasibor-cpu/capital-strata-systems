@@ -216,9 +216,38 @@ def cmd_report(args) -> int:
     return 0
 
 
+def cmd_keys(args) -> int:
+    """Consent signing-key custody (DPAPI per-user, outside every run root). Never prints key material."""
+    from backend.trading_profiles import consent_signing
+
+    store = consent_signing.default_consent_key_store()
+    if args.action == "status":
+        key_id, _ = store.signing_key()
+        print(json.dumps({"directory": str(store.directory), "account": store.account, "machine": store.machine,
+                          "active_key_id": key_id}, indent=2))
+    elif args.action == "rotate":
+        print(json.dumps({"active_key_id": store.rotate(reason=args.reason or "operator_rotation")}))
+    elif args.action == "revoke":
+        if not args.key_id or not args.reason:
+            raise SystemExit("revoke needs --key-id and --reason")
+        store.revoke(args.key_id, reason=args.reason)
+        print(json.dumps({"revoked": args.key_id}))
+    else:  # export-public: the verification registry backup (public keys and history only)
+        text = json.dumps(store.public_registry(), indent=2, sort_keys=True)
+        if args.out:
+            Path(args.out).write_text(text + "\n", encoding="utf-8")
+        print(text)
+    return 0
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
+    keys = sub.add_parser("keys", help="consent signing-key custody: status | rotate | revoke | export-public")
+    keys.add_argument("action", choices=("status", "rotate", "revoke", "export-public"))
+    keys.add_argument("--key-id")
+    keys.add_argument("--reason")
+    keys.add_argument("--out")
     for name in ("preflight", "run", "attest", "report"):
         p = sub.add_parser(name)
         p.add_argument("--root", required=True)
@@ -235,7 +264,8 @@ def main(argv=None) -> int:
         if name in ("report", "preflight"):
             p.add_argument("--out")
     args = ap.parse_args(argv)
-    return {"preflight": cmd_preflight, "run": cmd_run, "attest": cmd_attest, "report": cmd_report}[args.cmd](args)
+    return {"preflight": cmd_preflight, "run": cmd_run, "attest": cmd_attest, "report": cmd_report,
+            "keys": cmd_keys}[args.cmd](args)
 
 
 if __name__ == "__main__":

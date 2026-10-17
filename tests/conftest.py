@@ -324,3 +324,23 @@ def _css_runtime_db_isolation(monkeypatch, tmp_path_factory):
     monkeypatch.setattr(db, "DEFAULT_DB_PATH", tmp_path_factory.mktemp("css_runtime_db") / "css_runtime.db")
     yield
     db.close_connection()
+
+
+# --- Consent signing (A-M2): the production key store is Windows DPAPI per-user, outside every
+# run root. Tests use a SYNTHETIC, test-only protect backend in a session temp directory that is
+# never inside a simulation root. Production code never sees this backend.
+import pytest as _pytest_for_consent_keys
+
+
+@_pytest_for_consent_keys.fixture(autouse=True, scope="session")
+def _synthetic_consent_key_store(tmp_path_factory):
+    from backend.trading_profiles import consent_signing
+    from tests.agreement_support import test_key_store
+
+    store = test_key_store(tmp_path_factory.mktemp("consent-signing-keys"))
+    original = consent_signing.default_consent_key_store
+    consent_signing.default_consent_key_store = lambda: store
+    try:
+        yield store
+    finally:
+        consent_signing.default_consent_key_store = original

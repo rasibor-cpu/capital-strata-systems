@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 from backend.signals.candles import CandleError, CandleSeries
+from backend.trading_profiles import consent_signing
 from backend.signals.producer import CalibrationApprovals, ProducedSignal, SignalProducer
 from backend.signals.research import CostModel
 from backend.trading_profiles.copy_engine import (
@@ -242,13 +243,21 @@ def obtain_agreement(engines: Sequence[CopyTradeEngine], *, operator: str, prese
     return review
 
 
-def make_engine(root: Path) -> CopyTradeEngine:
+def make_engine(root: Path, key_store: Any = None) -> CopyTradeEngine:
+    """A track engine whose consent records, active pointer and ledger anchor are signed with the
+    operator's consent key store (DPAPI per-user, outside every run root; Grok audit A-M2)."""
     root = Path(root)
     if _is_operational(root):
         raise SimulationError("simulation_cannot_use_operational_paper_book")
     root.mkdir(parents=True, exist_ok=True)
     key = _key(root)
-    return CopyTradeEngine(root, key_provider=lambda: key)
+    engine = CopyTradeEngine(root, key_provider=lambda: key)
+    try:
+        store = key_store if key_store is not None else consent_signing.default_consent_key_store()
+        engine.consent.enable_integrity(consent_signing.ConsentIntegrity(store, root))
+    except consent_signing.ConsentSigningError as exc:
+        raise SimulationError(f"consent_signing_unavailable:{exc}") from None
+    return engine
 
 
 def build_track(name: str, engine: CopyTradeEngine, *, approvals: Any, now: datetime,
@@ -293,7 +302,7 @@ class Cad146Simulation:
                  operational_approvals_root: Path | str, operator: str, now: datetime | None = None,
                  starting_equity: float = STARTING_EQUITY_CAD, quote_provider: Any = None,
                  env: Mapping[str, str] | None = None, presenter: Presenter | None = None,
-                 require_current_agreement: bool = True) -> None:
+                 require_current_agreement: bool = True, key_store: Any = None) -> None:
         """require_current_agreement=False is for read-only use (reports): no agreement is presented
         and nothing is activated; the router still verifies consent at every decision."""
         refuse_if_live_armed(env)
@@ -310,7 +319,13 @@ class Cad146Simulation:
         self.meta_path = self.root / "run.json"
         self.session_path = self.root / "operator_session.json"
         self.read_only = not require_current_agreement
-        engine_a, engine_b = make_engine(self.root / "track_a"), make_engine(self.root / "track_b")
+        try:  # keys and statements may never live in, or contain, this run root
+            key_store = key_store if key_store is not None else consent_signing.default_consent_key_store()
+            key_store.ensure_outside(self.root)
+        except consent_signing.ConsentSigningError as exc:
+            raise SimulationError(f"consent_signing_unavailable:{exc}") from None
+        engine_a = make_engine(self.root / "track_a", key_store)
+        engine_b = make_engine(self.root / "track_b", key_store)
         never_activated = all(e.preferences.get(SIM_USER).active is None for e in (engine_a, engine_b))
         # A new run gets a fresh random run_id now; it is bound into the acceptance and written to
         # run.json only after acceptance. An existing run keeps its own (None for older runs).
