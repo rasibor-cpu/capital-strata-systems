@@ -18,3 +18,6 @@ Consolidated quantities are sourced **only from broker snapshots**. Registrar qu
 4. Add GT Registrars dividend entitlements, payments, withholding and claim-status reconciliation with provenance and deduplication.
 5. Add dated valuation, FX, liquidity and fee models; do not infer PnL from share quantities.
 6. CI tests, independent review, and explicit approval before any production integration. **No live execution.**
+
+## Stanbic IBTC Pension Managers
+Added as a **pension provider**, not as Stanbic IBTC Stockbrokers and not as a trading broker. The initial `summarize_pension_snapshot` accepts a normalized, user-supplied NGN balance and an opaque account alias; labels it unverified and keeps it **outside CSS deployable trading capital**. No pension API access, pension account credentials, or automated pension transactions are implemented. Future permitted read-only statements/API imports may add RSA balance, contribution history, fund type, unit values and pension performance, subject to provider permission and user verification.
