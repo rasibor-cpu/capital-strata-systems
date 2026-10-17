@@ -52,6 +52,13 @@
 - never follows HTTP redirects (`allow_redirects=False`), and treats every 3xx as an error (`redirect_refused`). `requests` strips only `Authorization` on a cross-host redirect, so following one would forward `X-MBX-APIKEY` (Grok F-4). A loopback test with two servers proves the key never reaches the redirect target;
 - accepts only `https://` on Binance's REST hosts (`api.binance.com`, `api1`–`api4`, `api-gcp`) with no credentials, path or non-443 port. Any other `BINANCE_BASE_URL` / `BINANCE_API_URL` / `BINANCE_REST_URL` is refused, so the API key and signatures cannot be sent elsewhere.
 
+**Market-data transport (Grok re-audit F-5 and R-2).** Every market-data client is built on `candles._requests_session()`, which **never follows redirects**: Coinbase, Alpaca crypto and stocks, the public Binance klines, time, depth and exchangeInfo, and `RetryingHttp`. A caller cannot re-enable redirects.
+- `check_http` turns any 3xx into `redirect_refused:<status>`.
+- So `APCA-API-SECRET-KEY` can never be forwarded to a redirect target. `requests` strips only `Authorization`.
+- Public data can never come from a host outside the allowlist.
+- `AlpacaStockCandles` refuses a supplied transport that follows redirects, whether it is a plain `requests.Session` or one wrapped in `RetryingHttp`.
+- Normal 2xx responses are unchanged.
+
 ## Tests
 `tests/test_css129_questrade_binance_readonly.py` (31 tests), plus the signed-adapter tests in `tests/test_binance_live_read_only_adapter.py` and `tests/test_binance_live_read_only_operational_validation.py`. All are contract tests with fakes; no network is used.
 
