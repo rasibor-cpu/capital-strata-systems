@@ -94,7 +94,7 @@ class BinanceLiveReadOnlyAdapter:
         # unattested countries are refused before any request, signed or not, is sent.
         from backend.signals.market_data import binance_eligibility
 
-        self.eligible, self.eligibility_reason = binance_eligibility(
+        self._eligible, self.eligibility_reason = binance_eligibility(
             str(self._env.get("CSS_OPERATING_COUNTRY") or ""))
         self._transport = transport
         self._now = now or (lambda: datetime.now(timezone.utc))
@@ -104,6 +104,11 @@ class BinanceLiveReadOnlyAdapter:
         self.health = "UNKNOWN"
         self.connection_error = ""
         self.last_successful_sync = ""
+
+    @property
+    def eligible(self) -> bool:
+        """Derived once from the attested country at construction; read-only."""
+        return self._eligible
 
     def __repr__(self) -> str:
         return (
@@ -354,10 +359,14 @@ class BinanceLiveReadOnlyAdapter:
     def _send(self, method: str, url: str, *, headers: Mapping[str, str], params: Mapping[str, Any]) -> Any:
         if self._transport is not None:
             return self._transport(method, url, headers=dict(headers), params=dict(params))
-        return requests.get(url, headers=dict(headers), params=dict(params), timeout=20)
+        # Never follow redirects: requests strips only Authorization on a cross-host redirect, so
+        # X-MBX-APIKEY would be forwarded to the redirect target. Any 3xx is an error (below).
+        return requests.get(url, headers=dict(headers), params=dict(params), timeout=20, allow_redirects=False)
 
     def _parse_response(self, response: Any) -> Any:
         status = getattr(response, "status_code", None)
+        if isinstance(status, int) and 300 <= status < 400:
+            raise BinanceReadOnlyError(f"redirect_refused:{status}")  # never followed, never parsed
         try:
             payload = response.json() if hasattr(response, "json") else response
         except Exception as exc:
