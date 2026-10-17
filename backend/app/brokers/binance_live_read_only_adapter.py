@@ -8,12 +8,18 @@ import os
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from typing import Any, Callable
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 
 import requests
 
 
 DEFAULT_BINANCE_REST_URL = "https://api.binance.com"
+# The API key and signed requests may only go to Binance's own HTTPS REST hosts. Any other value of
+# BINANCE_BASE_URL / BINANCE_API_URL / BINANCE_REST_URL is refused (no plain http, no other host).
+ALLOWED_BINANCE_REST_HOSTS = frozenset({
+    "api.binance.com", "api1.binance.com", "api2.binance.com", "api3.binance.com", "api4.binance.com",
+    "api-gcp.binance.com",
+})
 DEFAULT_QUOTE_SYMBOL = "BTCUSDT"
 SOURCE_BINANCE_LIVE_READ_ONLY = "BINANCE_LIVE_READ_ONLY"
 _AVAILABLE = "AVAILABLE"
@@ -31,6 +37,26 @@ class BinanceConfigurationError(BinanceReadOnlyError):
 
 class BinanceReadOnlyMethodError(BinanceReadOnlyError):
     """Non-GET HTTP method rejected by the read-only adapter."""
+
+
+class BinanceJurisdictionError(BinanceReadOnlyError):
+    """Operating country unattested or restricted: no request is sent (binance_eligibility)."""
+
+
+def _allowlisted_base_url(raw: str) -> str:
+    """The base URL if it is https on an allowlisted Binance REST host with no path, else ''."""
+    try:
+        parts = urlsplit(raw)
+        port = parts.port  # raises ValueError for a malformed port
+    except ValueError:
+        return ""
+    if parts.scheme != "https" or (parts.hostname or "") not in ALLOWED_BINANCE_REST_HOSTS:
+        return ""
+    if parts.username or parts.password or port not in (None, 443) or parts.path not in ("", "/"):
+        return ""
+    if parts.query or parts.fragment:
+        return ""
+    return f"https://{parts.hostname}"
 
 
 class BinanceLiveReadOnlyAdapter:
@@ -56,12 +82,20 @@ class BinanceLiveReadOnlyAdapter:
         self._env = env if isinstance(env, Mapping) else os.environ
         self._api_key = str(self._env.get("BINANCE_API_KEY") or "").strip()
         self._api_secret = str(self._env.get("BINANCE_API_SECRET") or "").strip()
-        self.base_url = str(
+        configured_url = str(
             self._env.get("BINANCE_BASE_URL")
             or self._env.get("BINANCE_API_URL")
             or self._env.get("BINANCE_REST_URL")
             or DEFAULT_BINANCE_REST_URL
         ).strip().rstrip("/")
+        self.base_url = _allowlisted_base_url(configured_url)
+        self.base_url_rejected = not self.base_url
+        # Jurisdiction gate (same rule as every public Binance path): CA, US and other restricted or
+        # unattested countries are refused before any request, signed or not, is sent.
+        from backend.signals.market_data import binance_eligibility
+
+        self._eligible, self.eligibility_reason = binance_eligibility(
+            str(self._env.get("CSS_OPERATING_COUNTRY") or ""))
         self._transport = transport
         self._now = now or (lambda: datetime.now(timezone.utc))
         self.default_symbol = default_symbol
@@ -70,6 +104,11 @@ class BinanceLiveReadOnlyAdapter:
         self.health = "UNKNOWN"
         self.connection_error = ""
         self.last_successful_sync = ""
+
+    @property
+    def eligible(self) -> bool:
+        """Derived once from the attested country at construction; read-only."""
+        return self._eligible
 
     def __repr__(self) -> str:
         return (
@@ -97,6 +136,9 @@ class BinanceLiveReadOnlyAdapter:
             "binance_api_key_present": bool(self._api_key),
             "binance_api_secret_present": bool(self._api_secret),
             "binance_base_url_present": bool(self.base_url),
+            "binance_base_url_rejected": self.base_url_rejected,
+            "binance_eligible": self.eligible,
+            "binance_eligibility_reason": self.eligibility_reason,
             "credential_status": "PRESENT" if self.is_configured() else "MISSING",
             "missing_credentials": missing,
             "redacted": True,
@@ -282,6 +324,10 @@ class BinanceLiveReadOnlyAdapter:
         verb = str(method or "").strip().upper()
         if verb != "GET":
             raise BinanceReadOnlyMethodError("Binance live read-only adapter permits GET only")
+        if not self.eligible:
+            raise BinanceJurisdictionError(self.eligibility_reason)
+        if not self.base_url:
+            raise BinanceConfigurationError("binance_base_url_not_allowlisted")
         if signed and not self.is_configured():
             raise BinanceConfigurationError("Binance credentials are missing")
 
@@ -313,10 +359,14 @@ class BinanceLiveReadOnlyAdapter:
     def _send(self, method: str, url: str, *, headers: Mapping[str, str], params: Mapping[str, Any]) -> Any:
         if self._transport is not None:
             return self._transport(method, url, headers=dict(headers), params=dict(params))
-        return requests.get(url, headers=dict(headers), params=dict(params), timeout=20)
+        # Never follow redirects: requests strips only Authorization on a cross-host redirect, so
+        # X-MBX-APIKEY would be forwarded to the redirect target. Any 3xx is an error (below).
+        return requests.get(url, headers=dict(headers), params=dict(params), timeout=20, allow_redirects=False)
 
     def _parse_response(self, response: Any) -> Any:
         status = getattr(response, "status_code", None)
+        if isinstance(status, int) and 300 <= status < 400:
+            raise BinanceReadOnlyError(f"redirect_refused:{status}")  # never followed, never parsed
         try:
             payload = response.json() if hasattr(response, "json") else response
         except Exception as exc:
@@ -363,6 +413,8 @@ def _is_number(value: Any) -> bool:
 
 
 __all__ = [
+    "ALLOWED_BINANCE_REST_HOSTS",
+    "BinanceJurisdictionError",
     "DEFAULT_BINANCE_REST_URL",
     "SOURCE_BINANCE_LIVE_READ_ONLY",
     "BinanceConfigurationError",

@@ -14,6 +14,7 @@ from backend.app.brokers.binance_live_read_only_adapter import (
     DEFAULT_BINANCE_REST_URL,
     SOURCE_BINANCE_LIVE_READ_ONLY,
     BinanceConfigurationError,
+    BinanceJurisdictionError,
     BinanceLiveReadOnlyAdapter,
 )
 from backend.executive_intelligence.freshness_policy import gate_config, load_freshness_policy
@@ -31,6 +32,7 @@ FAILURE_REASONS = (
     "STALE_TIMESTAMP",
     "FUTURE_TIMESTAMP",
     "MALFORMED_TIMESTAMP",
+    "JURISDICTION_RESTRICTED",
 )
 
 READ_CHECKS = (
@@ -108,8 +110,13 @@ class BinanceLiveReadOnlyOperationalValidator:
         failures: list[dict[str, str]] = []
 
         diagnostics = adapter.credential_diagnostics()
-        if diagnostics.get("credential_status") != "PRESENT":
+        # The adapter itself refuses every request for an unattested or restricted country; report
+        # that up front instead of attempting reads that cannot be sent.
+        if getattr(adapter, "eligible", True) is not True:
+            failures.append(_failure("JURISDICTION_RESTRICTED", str(getattr(adapter, "eligibility_reason", ""))[:160]))
+        elif diagnostics.get("credential_status") != "PRESENT":
             failures.append(_failure("MISSING_CREDENTIALS", "Binance credentials are missing"))
+        if failures:
             result = self._result(
                 adapter=adapter,
                 timestamp=timestamp,
@@ -463,6 +470,8 @@ def _parse_aware_utc(value: Any) -> datetime | None:
 def _read(reader: Callable[[], Any]) -> tuple[Any, str, dict[str, str] | None]:
     try:
         payload = reader()
+    except BinanceJurisdictionError as exc:
+        return None, "FAILED", _failure("JURISDICTION_RESTRICTED", str(exc)[:160])
     except BinanceConfigurationError as exc:
         return None, "FAILED", _failure("MISSING_CREDENTIALS", str(exc)[:160])
     except Exception as exc:

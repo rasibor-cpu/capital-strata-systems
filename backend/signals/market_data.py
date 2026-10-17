@@ -221,6 +221,18 @@ class AlpacaCryptoPublicCandles:
         return validate(drop_incomplete(series, now=self.clock()), allow_gaps=1000)
 
 
+def _refuse_redirecting_transport(http: Any) -> None:
+    """Refuse a plain requests.Session (directly or inside RetryingHttp): it follows redirects and
+    would forward credential headers to the redirect target. Use _requests_session()."""
+    try:
+        import requests
+    except ImportError:  # pragma: no cover
+        return
+    for candidate in (http, getattr(http, "inner", None)):
+        if isinstance(candidate, requests.Session) and getattr(candidate, "follows_redirects", True):
+            raise CandleError("credentialed_transport_must_not_follow_redirects")
+
+
 class AlpacaStockCandles:
     """US equity bars from the free IEX feed. Requires APCA_API_KEY_ID / APCA_API_SECRET_KEY."""
 
@@ -230,6 +242,7 @@ class AlpacaStockCandles:
     def __init__(self, http: _Http | None = None, *, key_id: str | None = None, secret: str | None = None,
                  clock=None) -> None:
         self.http = http or _requests_session()
+        _refuse_redirecting_transport(self.http)  # credentials must never follow a redirect (F-5)
         self.key_id = key_id if key_id is not None else os.environ.get("APCA_API_KEY_ID", "")
         self.secret = secret if secret is not None else os.environ.get("APCA_API_SECRET_KEY", "")
         self.clock = clock or _now_utc
@@ -260,14 +273,48 @@ class AlpacaStockCandles:
         return validate(drop_incomplete(series, now=self.clock()), allow_gaps=100_000)  # sessions/weekends
 
 
+# ISO 3166-1 alpha-2 officially assigned codes (249). Attestation must be one of these, in ASCII.
+ISO_3166_ALPHA2 = frozenset("""
+AD AE AF AG AI AL AM AO AQ AR AS AT AU AW AX AZ BA BB BD BE
+BF BG BH BI BJ BL BM BN BO BQ BR BS BT BV BW BY BZ CA CC CD
+CF CG CH CI CK CL CM CN CO CR CU CV CW CX CY CZ DE DJ DK DM
+DO DZ EC EE EG EH ER ES ET FI FJ FK FM FO FR GA GB GD GE GF
+GG GH GI GL GM GN GP GQ GR GS GT GU GW GY HK HM HN HR HT HU
+ID IE IL IM IN IO IQ IR IS IT JE JM JO JP KE KG KH KI KM KN
+KP KR KW KY KZ LA LB LC LI LK LR LS LT LU LV LY MA MC MD ME
+MF MG MH MK ML MM MN MO MP MQ MR MS MT MU MV MW MX MY MZ NA
+NC NE NF NG NI NL NO NP NR NU NZ OM PA PE PF PG PH PK PL PM
+PN PR PS PT PW PY QA RE RO RS RU RW SA SB SC SD SE SG SH SI
+SJ SK SL SM SN SO SR SS ST SV SX SY SZ TC TD TF TG TH TJ TK
+TL TM TN TO TR TT TV TW TZ UA UG UM US UY UZ VA VC VE VG VI
+VN VU WF WS YE YT ZA ZM ZW
+""".split())
+
+
 def binance_eligibility(operating_country: str | None) -> tuple[bool, str]:
-    country = (operating_country if operating_country is not None
-               else os.environ.get("CSS_OPERATING_COUNTRY", "")).strip().upper()
-    if len(country) != 2 or not country.isalpha():
+    raw = operating_country if operating_country is not None else os.environ.get("CSS_OPERATING_COUNTRY", "")
+    country = str(raw or "").strip(" \t\r\n")
+    # Strict ASCII first, before any case folding: Unicode look-alikes (Cyrillic "СА", fullwidth
+    # "ＣＡ", "UЅ", zero-width characters, the Kelvin sign...) must never pass as a real code.
+    if not country.isascii() or len(country) != 2 or not ("A" <= country[0].upper() <= "Z") \
+            or not ("A" <= country[1].upper() <= "Z"):
         return False, "binance_operating_country_unattested"
+    country = country.upper()
+    if country not in ISO_3166_ALPHA2:
+        return False, "binance_operating_country_not_iso3166"
     if country in BINANCE_RESTRICTED_COUNTRIES:
         return False, f"binance_jurisdiction_restricted:{country}"
     return True, f"attested:{country}"
+
+
+def _binance_guard(guard: Any = None) -> Any:
+    """The given request-weight guard, or the per-process one shared with every other Binance call
+    (Binance meters weight and bans per IP). Imported lazily: binance_market_data imports this module."""
+    if guard is not None:
+        return guard
+    from backend.signals import binance_market_data
+
+    return binance_market_data._DEFAULT_GUARD
 
 
 class BinanceSpotPublicCandles:
@@ -277,12 +324,13 @@ class BinanceSpotPublicCandles:
     classification = LIVE
 
     def __init__(self, http: _Http | None = None, *, operating_country: str | None = None, clock=None,
-                 base_url: str = BINANCE_PUBLIC_BASE) -> None:
+                 base_url: str = BINANCE_PUBLIC_BASE, guard: Any = None) -> None:
         if base_url.rstrip("/") != BINANCE_PUBLIC_BASE:
             raise CandleError("binance_non_public_host_refused")
         self.eligible, self.eligibility_reason = binance_eligibility(operating_country)
         self.http = http or _requests_session()
         self.clock = clock or _now_utc
+        self.guard = guard
 
     def fetch(self, instrument: str, *, granularity_s: int, end: datetime | None = None) -> CandleSeries:
         if not self.eligible:
@@ -294,8 +342,7 @@ class BinanceSpotPublicCandles:
         params: dict = {"symbol": symbol, "interval": interval, "limit": 1000}
         if end is not None:
             params["endTime"] = int(end.timestamp() * 1000)
-        resp = self.http.get(f"{BINANCE_PUBLIC_BASE}/api/v3/klines", params=params, timeout=10.0)
-        check_http(resp)
+        resp = _binance_guard(self.guard).get(self.http, f"{BINANCE_PUBLIC_BASE}/api/v3/klines", params)
         rows = resp.json()
         if not isinstance(rows, list):
             raise CandleError("response_invalid")
@@ -530,18 +577,18 @@ class BinanceQuotes:
     source = "binance_spot_public"
 
     def __init__(self, http: _Http | None = None, *, operating_country: str | None = None, clock=None,
-                 max_age_s: float = 30.0) -> None:
+                 max_age_s: float = 30.0, guard: Any = None) -> None:
         self.eligible, self.eligibility_reason = binance_eligibility(operating_country)
         self.http, self.clock, self.max_age_s = http or _requests_session(), clock or _now_utc, max_age_s
+        self.guard = guard
 
     def quote(self, instrument: str, *, depth_bps: float = 25.0) -> QuoteSnapshot:
         if not self.eligible:
             raise CandleError(self.eligibility_reason)
         sym = normalize_symbol("binance", instrument)
-        server = self.http.get(f"{BINANCE_PUBLIC_BASE}/api/v3/time", timeout=10.0)
-        check_http(server)
-        resp = self.http.get(f"{BINANCE_PUBLIC_BASE}/api/v3/depth", params={"symbol": sym, "limit": 100}, timeout=10.0)
-        check_http(resp)
+        guard = _binance_guard(self.guard)
+        server = guard.get(self.http, f"{BINANCE_PUBLIC_BASE}/api/v3/time", {})
+        resp = guard.get(self.http, f"{BINANCE_PUBLIC_BASE}/api/v3/depth", {"symbol": sym, "limit": 100})
         try:
             book = resp.json()
             bid, ask = float(book["bids"][0][0]), float(book["asks"][0][0])
@@ -588,6 +635,8 @@ def provider_matrix(env: Mapping[str, str] | None = None) -> list[dict[str, Any]
     ok_binance, why_binance = binance_eligibility(env.get("CSS_OPERATING_COUNTRY", ""))
     has_alpaca = bool(env.get("APCA_API_KEY_ID") and env.get("APCA_API_SECRET_KEY"))
     has_oanda = bool(env.get("OANDA_PRACTICE_TOKEN"))
+    # Questrade: presence of an operator-authorized OAuth refresh-token reference only (never the value).
+    has_questrade = bool(env.get("QUESTRADE_REFRESH_TOKEN") or env.get("QUESTRADE_SECRET_STORE_PROVIDER"))
     return [
         {"provider": "coinbase_exchange_public", "asset_class": "CRYPTO", "classification": LIVE,
          "credentials": "none", "status": "READY", "reason": "public endpoint"},
@@ -601,6 +650,10 @@ def provider_matrix(env: Mapping[str, str] | None = None) -> list[dict[str, Any]
         {"provider": "oanda_practice", "asset_class": "FX", "classification": LIVE,
          "credentials": "OANDA_PRACTICE_TOKEN",
          "status": "READY" if has_oanda else "BLOCKED", "reason": "token present" if has_oanda else "oanda_practice_token_missing"},
+        {"provider": "questrade_api", "asset_class": "EQUITY", "classification": "LIVE_IF_ENTITLED_ELSE_DELAYED",
+         "credentials": "Questrade OAuth (operator-authorized refresh token)",
+         "status": "READY" if has_questrade else "BLOCKED",
+         "reason": "token reference present" if has_questrade else "questrade_oauth_authorization_required"},
         {"provider": OPTIONS_FEED.source, "asset_class": "OPTIONS", "classification": "BLOCKED", "credentials": "n/a",
          "status": "BLOCKED", "reason": OPTIONS_FEED.reason},
         {"provider": FUTURES_FEED.source, "asset_class": "FUTURES", "classification": "BLOCKED", "credentials": "n/a",
