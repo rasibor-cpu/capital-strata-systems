@@ -33,12 +33,17 @@ class AgreementReview:
     def __init__(self, services: Sequence[ConsentService], *, user_id: str, auth_session_hash: str, operator_id: str,
                  operating_mode: str, risk_personality: str | None, limits: Mapping[str, Any] | None = None,
                  review_method: str = "non_scrollable_presented",
-                 clock: Callable[[], datetime] | None = None) -> None:
+                 clock: Callable[[], datetime] | None = None,
+                 run_bindings: Sequence[str | None] | None = None) -> None:
         if not services:
             raise ConsentError("no_consent_service")
         if not str(operator_id or "").strip():
             raise ConsentError("operator_required")
         self.services = list(services)
+        # Optional per-ledger run binding (e.g. a simulation run root), recorded in each acceptance.
+        self.run_bindings = list(run_bindings) if run_bindings is not None else [None] * len(self.services)
+        if len(self.run_bindings) != len(self.services):
+            raise ConsentError("run_bindings_mismatch")
         self.user_id, self.session, self.operator_id = user_id, auth_session_hash, str(operator_id).strip()
         self.method = review_method
         self.clock = clock or (lambda: datetime.now(timezone.utc))
@@ -132,13 +137,13 @@ class AgreementReview:
             raise ConsentError("pages_not_reviewed:" + ",".join(missing))
         now = self.clock()
         receipts = []
-        for s, r in zip(self.services, self.reviews):
+        for s, r, binding in zip(self.services, self.reviews, self.run_bindings):
             receipts.append(s.accept(
                 self.user_id, auth_session_hash=self.session, review_id=r.review_id,
                 acknowledgement_checked=acknowledged is True, acknowledgement_sha256=ACKNOWLEDGEMENT_SHA256,
                 manual_version=self.manual.version, manual_sha256=self.manual.sha256,
                 policy_hash_shown=policy_hash_shown, now=now, operator_id=self.operator_id,
-                agreement_session_id=self.agreement_session_id))
+                agreement_session_id=self.agreement_session_id, run_binding=binding))
         self.status, self.receipts = ACCEPTED, receipts
         return receipts
 

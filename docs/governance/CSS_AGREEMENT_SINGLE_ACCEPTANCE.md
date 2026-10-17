@@ -38,7 +38,8 @@ Unrecognised input, including `y` and `yes`, is explained and re-prompted; it ne
 - `operator_id`;
 - the operating mode, risk personality, limits and policy hash;
 - the acknowledgement hash;
-- `agreement_session_id`.
+- `agreement_session_id`;
+- `run_binding`: a SHA-256 of the track's resolved, case-normalised root location. It is the run the acceptance is valid for.
 
 The simulation journal adds an `AGREEMENT_ACCEPTED` event. A decline produces a `DECLINED` ledger record.
 
@@ -67,6 +68,7 @@ Also unchanged:
 **Not shown on restart or resume** while the acceptance in both track ledgers is still valid, that is, when `verify_active` passes and the accepted policy matches the simulation's settings.
 
 **Shown again when:**
+- the run directory was copied or moved (`acceptance_from_another_run`), or the acceptance carries no run binding (`acceptance_not_bound_to_run`). This closes Grok audit finding A-M3: a copied root used to carry a valid acceptance;
 - the agreement version changes materially (`renewal_required`);
 - the content or acknowledgement changes;
 - the ledger is tampered with;
@@ -75,6 +77,8 @@ Also unchanged:
 **Re-acceptance does not restart a trial that already started.**
 
 **Policy for new runs (owner decision, approved 2026-10-16):** each new isolated simulation `--root` requires one fresh final-screen acceptance. Consent is never reused across runs. A material change to the agreement version or content, or to the accepted trading settings, requires re-acceptance. The audit evidence (version, hash, operator, session, timestamp) and all fail-closed controls are preserved.
+
+**Known limitation (Grok audit A-M2, open).** The consent ledger is an unkeyed SHA-256 chain, and the preference file is unsigned. Someone with write access to the run root can rewrite a record, recompute the chain and repoint the active settings; that includes forging a run binding. Accidental edits are detected; deliberate forgery by a local writer is not. The planned fix is to HMAC the entries with a key held outside the run root, or to anchor the chain head externally.
 
 ## Operator action (FINANCE)
 **The FINANCE trial that is already running is out of scope for this change.** Its output shows:

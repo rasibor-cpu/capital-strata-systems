@@ -391,7 +391,7 @@ class ConsentService:
     def accept(self, user_id: str, *, auth_session_hash: str, review_id: str, acknowledgement_checked: Any,
                acknowledgement_sha256: str, manual_version: str, manual_sha256: str, policy_hash_shown: str,
                now: datetime, operator_id: str | None = None,
-               agreement_session_id: str | None = None) -> dict[str, Any]:
+               agreement_session_id: str | None = None, run_binding: str | None = None) -> dict[str, Any]:
         if acknowledgement_checked is not True:
             raise ConsentError("acknowledgement_not_checked")
         if acknowledgement_sha256 != ACKNOWLEDGEMENT_SHA256:
@@ -450,6 +450,8 @@ class ConsentService:
                 body["operator_id"] = str(operator_id)
             if agreement_session_id:
                 body["agreement_session_id"] = str(agreement_session_id)
+            if run_binding:
+                body["run_binding"] = str(run_binding)  # the run (root) this acceptance is valid for
             # (a) evidence first: an acceptance record without activation is harmless
             record = self.ledger.append("ACCEPTED", body)
             change["status"] = "ACCEPTED"
@@ -495,6 +497,7 @@ class ConsentService:
             "limits": record["limits"], "mandate_terms": record["mandate_terms"], "mandate_id": mandate_id,
             "pages_reviewed": len(record["pages_reviewed"]),
             "operator_id": record.get("operator_id"), "agreement_session_id": record.get("agreement_session_id"),
+            "run_binding": record.get("run_binding"),
             "live_trading_authorized": False,
         }
 
@@ -552,6 +555,14 @@ class ConsentService:
         except (ConsentError, MandateError, ValueError, KeyError) as exc:
             return False, f"consent_unverifiable:{exc}"
         return True, "consent_valid"
+
+    def active_record(self, user_id: str) -> dict[str, Any] | None:
+        """The ACCEPTED ledger record the user's active settings reference, if any."""
+        active = self.preferences.get(user_id).active
+        if active is None:
+            return None
+        return next((r for r in self.ledger.records()
+                     if r["entry_hash"] == active.consent_record_hash and r.get("record_type") == "ACCEPTED"), None)
 
     def receipts(self, user_id: str) -> list[dict[str, Any]]:
         return [self.receipt_from_record(r) for r in self.ledger.records()

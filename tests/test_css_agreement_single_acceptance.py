@@ -340,3 +340,45 @@ def test_tampered_acceptance_record_breaks_the_chain_and_blocks_trading(tmp_path
     with pytest.raises(SimulationError, match="consent_activation_required"):
         Cad146Simulation(root, artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path / "ops",
                          operator="robert", now=T0)
+
+
+# ------------------------------------------------------------------ one acceptance per run root (Grok audit A-M3)
+def test_copied_run_directory_needs_its_own_acceptance(tmp_path):
+    import shutil
+    run_a = tmp_path / "runA"
+    _sim(run_a, accept_agreement)
+    run_c = tmp_path / "runC"
+    shutil.copytree(run_a, run_c)  # the copy carries run A's ledgers, preferences and signing key
+    ok, why = cad146.consent_status(_engine(run_c / "track_a"))
+    assert ok is False and why == "acceptance_from_another_run"
+    with pytest.raises(SimulationError, match="consent_activation_required"):
+        Cad146Simulation(run_c, artifacts=[], costs=DEFAULT_COSTS, operational_approvals_root=tmp_path / "ops",
+                         operator="robert", now=T0)
+    calls = []
+    _sim(run_c, lambda r: calls.append(1) or accept_agreement(r), now=T0 + timedelta(minutes=1))
+    assert calls == [1]  # one fresh acceptance, recorded for run C's own root
+    assert cad146.consent_status(_engine(run_c / "track_a")) == (True, "consent_valid")
+    assert cad146.consent_status(_engine(run_a / "track_a")) == (True, "consent_valid")  # run A unaffected
+
+
+def test_moved_run_directory_needs_a_fresh_acceptance(tmp_path):
+    run_a = tmp_path / "runA"
+    _sim(run_a, accept_agreement)
+    moved = tmp_path / "moved"
+    run_a.rename(moved)
+    assert cad146.consent_status(_engine(moved / "track_b")) == (False, "acceptance_from_another_run")
+
+
+def test_acceptance_without_a_run_binding_is_not_current(tmp_path):
+    review, engines = _review(tmp_path)  # a review given outside a simulation run records no binding
+    accept_agreement(review)
+    assert engines[0].consent.active_record(SIM_USER).get("run_binding") is None
+    assert cad146.consent_status(engines[0]) == (False, "acceptance_not_bound_to_run")
+
+
+def test_run_binding_is_recorded_in_every_acceptance_record(tmp_path):
+    root = tmp_path / "run"
+    sim = _sim(root, accept_agreement)
+    for track, receipt in zip(("track_a", "track_b"), sim.agreement.receipts):
+        assert receipt["run_binding"] == cad146.run_binding(root / track)
+    assert cad146.run_binding(root / "track_a") != cad146.run_binding(root / "track_b")
