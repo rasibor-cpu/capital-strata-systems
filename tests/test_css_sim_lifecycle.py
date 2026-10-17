@@ -231,7 +231,9 @@ def test_cli_completed_run_exits_0_with_started_and_stopped_records(tmp_path, cl
     assert life[0]["code_revision"] == "test-rev" and life[1]["reason"] == "completed" and life[1]["exit_code"] == 0
 
 
-def test_cli_signal_stop_is_journalled_and_resume_is_clean(tmp_path, cli):
+@pytest.mark.skipif(os.name != "posix", reason="POSIX only: on Windows os.kill(pid, SIGTERM) is TerminateProcess "
+                    "and would kill pytest itself; Windows is covered by the child-process tests below")
+def test_cli_real_sigterm_in_process_is_journalled_and_resume_is_clean(tmp_path, cli):
     args = _args(tmp_path)
     clock = _Clock(datetime.now(timezone.utc))
 
@@ -249,6 +251,157 @@ def test_cli_signal_stop_is_journalled_and_resume_is_clean(tmp_path, cli):
     assert cli.cmd_run(resume_args, presenter=accept_agreement, clock=clock, sleep=lambda s: None) == cli.EXIT_COMPLETED
     types = [e["type"] for e in events(args.root) if e["type"] in (*cad146.LIFECYCLE_TYPES, "RUN_INTERRUPTION_DETECTED")]
     assert types == ["RUN_STARTED", "RUN_STOPPED", "RUN_RESUMED", "RUN_STOPPED"]
+
+
+def _available_stop_signals():
+    names = ["SIGINT", "SIGTERM", "SIGHUP", "SIGBREAK"]
+    return [n for n in names if hasattr(signal, n)]
+
+
+@pytest.mark.parametrize("name", _available_stop_signals())
+def test_installed_stop_handler_invoked_directly_journals_and_is_restored(tmp_path, cli, name):
+    """No real signal (safe on every OS): call the handler `run` installed, exactly as the
+    interpreter would on delivery, then check the journal, the exit code and the restoration."""
+    sig = getattr(signal, name)
+    original = signal.getsignal(sig)
+    seen = {}
+
+    def deliver(_seconds):
+        handler = signal.getsignal(sig)
+        seen["installed"] = handler
+        handler(int(sig), None)
+
+    code = cli.cmd_run(_args(tmp_path), presenter=accept_agreement, sleep=deliver, fetch=lambda i, g: None)
+    assert seen["installed"] is not original and callable(seen["installed"])
+    assert code == 128 + int(sig)
+    (stop,) = events(_args(tmp_path).root, "RUN_STOPPED")
+    assert stop["reason"] == f"signal:{name}" and stop["exit_code"] == code
+    assert signal.getsignal(sig) is original
+    for other in _available_stop_signals():  # every handler restored, not just the one delivered
+        assert getattr(signal.getsignal(getattr(signal, other)), "__qualname__", "") != "_install_stop_handlers.<locals>.handler"
+    st = json.loads((Path(_args(tmp_path).root) / "status.json").read_text())
+    assert st["state"] == "STOPPED" and st["exit_code"] == code
+
+
+def test_sleep_is_sliced_so_a_windows_ctrl_break_is_handled_within_a_second():
+    slices = []
+    clock = {"t": 0.0}
+    import time as _time
+
+    real_monotonic = _time.monotonic
+    try:
+        _time.monotonic = lambda: clock["t"]
+
+        def fake_sleep(s):
+            slices.append(s)
+            clock["t"] += s
+        tool._sleep_in_slices(300.0, _sleep=fake_sleep)
+    finally:
+        _time.monotonic = real_monotonic
+    assert max(slices) <= 1.0 and sum(slices) == pytest.approx(300.0) and len(slices) == 300
+
+
+CHILD = REPO / "tests" / "css_sim_lifecycle_child.py"
+WINDOWS = os.name == "nt"
+
+
+def _spawn(tmp_path, *, hours, poll, log):
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items()
+           if k not in ("CSS_LIVE_ORDER_KILL_SWITCH", "REA_KILL_SWITCH", "CSS_SIM_ENTRY_HALT", *cad146.LIVE_ARM_ENVS)}
+    kw = {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP} if WINDOWS else {}
+    out = open(log, "ab")
+    return subprocess.Popen([sys.executable, str(CHILD), str(tmp_path / "run"), str(tmp_path / "keys"), str(hours),
+                             str(poll)], stdout=out, stderr=subprocess.STDOUT, stdin=subprocess.DEVNULL, env=env,
+                            cwd=str(REPO), **kw), out
+
+
+def _wait_for_heartbeat(proc, root, log, timeout=90.0):
+    import time as _time
+
+    deadline = _time.monotonic() + timeout
+    journal = Path(root) / "journal.jsonl"
+    while _time.monotonic() < deadline:
+        if proc.poll() is not None:
+            pytest.fail(f"child exited early ({proc.returncode}): {Path(log).read_text(errors='replace')[-2000:]}")
+        if journal.exists() and '"HEARTBEAT"' in journal.read_text():
+            return
+        _time.sleep(0.2)
+    proc.kill()
+    pytest.fail("child never reached its first heartbeat")
+
+
+def _finish(proc, out, timeout):
+    import subprocess
+
+    try:
+        return proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()  # fallback: never leave a child behind
+        proc.wait(timeout=30)
+        pytest.fail(f"child did not stop within {timeout}s of the stop signal")
+    finally:
+        out.close()
+
+
+def _graceful_stop(proc):
+    """Windows: CTRL_BREAK_EVENT to the child's own process group (never to pytest). POSIX: SIGTERM."""
+    if WINDOWS:
+        try:
+            os.kill(proc.pid, signal.CTRL_BREAK_EVENT)
+        except OSError as exc:  # e.g. pytest started without a console (service, some CI shells)
+            proc.kill()
+            proc.wait(timeout=30)
+            pytest.skip(f"CTRL_BREAK_EVENT not deliverable without a console: {exc}")
+        return "SIGBREAK", 128 + int(signal.SIGBREAK)  # 149
+    os.kill(proc.pid, signal.SIGTERM)
+    return "SIGTERM", 128 + int(signal.SIGTERM)  # 143
+
+
+def test_child_graceful_stop_is_prompt_journalled_and_resumes_cleanly(tmp_path):
+    import time as _time
+
+    root, log = tmp_path / "run", tmp_path / "child.log"
+    proc, out = _spawn(tmp_path, hours=48, poll=30.0, log=log)  # mid-sleep when the stop arrives
+    _wait_for_heartbeat(proc, root, log)
+    _time.sleep(0.5)
+    name, expected = _graceful_stop(proc)
+    t0 = _time.monotonic()
+    code = _finish(proc, out, timeout=20)
+    assert code == expected, Path(log).read_text(errors="replace")[-2000:]
+    assert _time.monotonic() - t0 < 15  # sliced sleep: not the 30 s poll interval
+    (stop,) = events(root, "RUN_STOPPED")
+    assert stop["reason"] == f"signal:{name}" and stop["exit_code"] == expected
+    assert json.loads((root / "status.json").read_text())["state"] == "STOPPED"
+    proc, out = _spawn(tmp_path, hours=0, poll=30.0, log=log)  # resume: window passed -> completes
+    assert _finish(proc, out, timeout=120) == 0, Path(log).read_text(errors="replace")[-2000:]
+    types = [e["type"] for e in events(root) if e["type"] in (*cad146.LIFECYCLE_TYPES, "RUN_INTERRUPTION_DETECTED")]
+    assert types == ["RUN_STARTED", "RUN_STOPPED", "RUN_RESUMED", "RUN_STOPPED"]  # clean stop: no interruption
+    assert events(root, "RUN_STOPPED")[-1]["exit_code"] == 0
+
+
+def test_child_hard_kill_cannot_journal_and_next_start_detects_the_interruption(tmp_path):
+    """Popen.kill() is SIGKILL on POSIX and TerminateProcess on Windows (= taskkill /F, console close)."""
+    root, log = tmp_path / "run", tmp_path / "child.log"
+    proc, out = _spawn(tmp_path, hours=48, poll=30.0, log=log)
+    _wait_for_heartbeat(proc, root, log)
+    proc.kill()
+    _finish(proc, out, timeout=30)
+    assert not events(root, "RUN_STOPPED")
+    proc, out = _spawn(tmp_path, hours=0, poll=30.0, log=log)
+    assert _finish(proc, out, timeout=120) == 0, Path(log).read_text(errors="replace")[-2000:]
+    (gap,) = events(root, "RUN_INTERRUPTION_DETECTED")
+    assert gap["last_lifecycle"] == "RUN_STARTED" and gap["last_heartbeat_utc"]
+    assert [e["type"] for e in events(root) if e["type"] in cad146.LIFECYCLE_TYPES] == \
+        ["RUN_STARTED", "RUN_RESUMED", "RUN_STOPPED"]
+
+
+@pytest.mark.skipif(not WINDOWS, reason="Windows-specific contract")
+def test_windows_stop_signal_contract():
+    assert int(signal.SIGBREAK) == 21 and 128 + int(signal.SIGBREAK) == 149
+    assert not hasattr(signal, "SIGHUP")  # never installed on Windows; nothing else to restore
 
 
 def test_cli_keyboard_interrupt_exits_130(tmp_path, cli):
