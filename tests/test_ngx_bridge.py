@@ -4,13 +4,14 @@ from backend.app.brokers.ngx_bridge import (
     BROKERS, SOURCE_CATALOG, NGXSource, reconcile_ngx_positions,
     summarize_pension_snapshot, register_institution,
     summarize_bank_snapshot, CANADIAN_BANKS, CANADIAN_SIMULATION_CAPITAL_CAD,
+    CANADIAN_BROKERS, summarize_broker_account,
 )
 
 
 class NGXBridgeTests(unittest.TestCase):
     def test_four_brokers_and_registrar_disabled(self):
         self.assertEqual(len(BROKERS), 4)
-        self.assertEqual(len(SOURCE_CATALOG), 12)
+        self.assertEqual(len(SOURCE_CATALOG), 13)
         self.assertTrue(all(not source.execution_allowed for source in SOURCE_CATALOG))
         self.assertTrue(all(source.api_status == "not_authorized" for source in SOURCE_CATALOG))
 
@@ -107,3 +108,19 @@ class CanadianBankBridgeTests(unittest.TestCase):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 summarize_bank_snapshot({"provider": "td", "account_key": "alias",
                                          "balance": value})
+
+
+class CanadianBrokerTests(unittest.TestCase):
+    def test_questrade_registered_as_broker_not_bank(self):
+        self.assertIn("questrade", CANADIAN_BROKERS)
+        source = next(s for s in SOURCE_CATALOG if s.source_id == "questrade")
+        self.assertEqual(source.kind, "broker")
+        self.assertEqual(source.api_status, "not_authorized")
+        self.assertFalse(source.execution_allowed)
+
+    def test_read_only_questrade_account(self):
+        result = summarize_broker_account({"provider": "questrade",
+                                           "account_key": "qt-alias", "currency": "CAD"})
+        self.assertEqual(result["connection_status"], "NOT_AUTHORIZED")
+        self.assertFalse(result["execution_allowed"])
+        self.assertFalse(result["transfer_authority"])
