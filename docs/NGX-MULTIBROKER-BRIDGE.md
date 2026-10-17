@@ -1,0 +1,20 @@
+# NGX multi-broker and registrar bridge (initial read-only core)
+
+## Sources
+- Investment One, Meristem, CardinalStone, Coronation Securities: **broker candidates**
+- GT Registrars: **registrar candidate**, used for corroboration of dividend/shareholder records, not as a trading broker.
+
+All API statuses default to `not_authorized`. No authenticated API integration has been established by this change. No orders, credential storage, network calls or production configuration are included.
+
+## Input contract
+`reconcile_ngx_positions(broker_positions, registrar_records)` accepts pre-normalized authorized snapshots. Broker rows: `broker`, `account_key` (opaque non-secret alias, **not** CSCS/CHN), `symbol`, `quantity`, optional `currency` (NGN only). Registrar rows: `registrar`, `symbol`, `quantity`. Decimal quantities must be finite and nonnegative. Duplicate broker/account/symbol rows fail closed.
+
+Consolidated quantities are sourced **only from broker snapshots**. Registrar quantities are corroboration-only and are never added to portfolio holdings. A registrar mismatch is marked `UNVERIFIED`, not treated as an automatic trade or adjustment. This simple first-pass comparison assumes same beneficial owner and snapshot date; future versions must align record dates, beneficial owner, pending settlement, corporate actions and registrar scope before making stronger reconciliation claims.
+
+## Next implementation gates
+1. Confirm broker-specific API/statement import contracts and data-use permissions.
+2. Add encrypted local/managed secret handling and separate CSCS/CHN identity mapping; never commit account identifiers.
+3. Implement broker-specific authenticated read-only transports with mocked contract tests.
+4. Add GT Registrars dividend entitlements, payments, withholding and claim-status reconciliation with provenance and deduplication.
+5. Add dated valuation, FX, liquidity and fee models; do not infer PnL from share quantities.
+6. CI tests, independent review, and explicit approval before any production integration. **No live execution.**
