@@ -26,6 +26,7 @@ real-time USD/CAD source is connected). It is reported, not hidden.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import secrets
@@ -166,9 +167,18 @@ def _desired_policy_hash() -> str:
                        UserRiskLimits.from_mapping(None), None)
 
 
+def run_binding(root: Path) -> str:
+    """Identity of one simulation run: its resolved, case-normalised root location. An acceptance
+    is valid only for the root it was given in, so a copied or moved run directory needs a fresh
+    acceptance (owner policy: each new --root requires one; consent is never reused across runs)."""
+    location = os.path.normcase(str(Path(root).resolve()))
+    return "root-sha256:" + hashlib.sha256(location.encode("utf-8")).hexdigest()
+
+
 def consent_status(engine: CopyTradeEngine) -> tuple[bool, str]:
-    """Valid, current acceptance of the simulation's exact settings? Otherwise (none yet, agreement
-    version or content changed, tampered or different settings) the agreement must be accepted."""
+    """Valid, current acceptance of the simulation's exact settings, given for this run root?
+    Otherwise (none yet, agreement version or content changed, tampered or different settings,
+    or an acceptance carried over from another root) the agreement must be accepted."""
     active = engine.preferences.get(SIM_USER).active
     if active is None:
         return False, "no_acceptance"
@@ -177,6 +187,11 @@ def consent_status(engine: CopyTradeEngine) -> tuple[bool, str]:
         return False, why
     if active.policy_hash != _desired_policy_hash():
         return False, "accepted_settings_differ"
+    record = engine.consent.active_record(SIM_USER)
+    if record is None or not record.get("run_binding"):
+        return False, "acceptance_not_bound_to_run"
+    if record["run_binding"] != run_binding(engine.root):
+        return False, "acceptance_from_another_run"
     return True, "consent_valid"
 
 
@@ -193,7 +208,8 @@ def obtain_agreement(engines: Sequence[CopyTradeEngine], *, operator: str, prese
     try:
         review = AgreementReview([e.consent for e in pending], user_id=SIM_USER, auth_session_hash=SIM_SESSION,
                                  operator_id=operator, operating_mode=OperatingMode.SIMULATED_TRADING.value,
-                                 risk_personality=SIMULATED_DEFAULT_PERSONALITY.value, limits=None, clock=clock)
+                                 risk_personality=SIMULATED_DEFAULT_PERSONALITY.value, limits=None, clock=clock,
+                                 run_bindings=[run_binding(e.root) for e in pending])
     except ConsentError as exc:
         raise SimulationError(f"agreement_unavailable:{exc}") from exc
     try:
