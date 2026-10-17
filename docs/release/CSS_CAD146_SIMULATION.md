@@ -48,4 +48,5 @@ See `tools/css_sim_cad146.py` (run / attest / report).
   Task Manager, closing the console window, logoff and reboot end the process without running Python
   code. Nothing can be journalled, and the exit code is the OS's (e.g. 1 for `taskkill /F`, 0xC000013A
   for console close). The next `run` journals RUN_INTERRUPTION_DETECTED. A supervisor should treat
-  exit codes 0, 2, 4 and 5 as "do not restart" and anything else as "resume the same root".
+  exit codes 0, 2, 4 and 5 as "do not restart", 3 as "attest first, then resume", and anything else
+  as "resume the same root".
