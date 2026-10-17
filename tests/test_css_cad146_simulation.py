@@ -27,6 +27,13 @@ def _no_ambient_switches(monkeypatch):
     for name in ("CSS_LIVE_ORDER_KILL_SWITCH", "REA_KILL_SWITCH", *cad146.LIVE_ARM_ENVS):
         monkeypatch.delenv(name, raising=False)
 
+@pytest.fixture(autouse=True)
+def _decide_at_close_plus_60s(monkeypatch):
+    # These mechanics tests decide a bar 60 s after its close (test_css_rc1_signals._now_for). The
+    # production settle delay (cad146.DEFAULT_BAR_SETTLE_SECONDS) is covered in test_css_sim_lifecycle.
+    monkeypatch.setattr(cad146, "DEFAULT_BAR_SETTLE_SECONDS", 0.0)
+
+
 
 def live(series):
     return replace(series, classification="LIVE")

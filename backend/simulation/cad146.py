@@ -30,6 +30,8 @@ import hashlib
 import json
 import os
 import secrets
+import socket
+import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +53,7 @@ from backend.trading_profiles.consent import ConsentError, policy_hash
 from backend.trading_profiles.limits import UserRiskLimits
 from backend.trading_profiles.operating_modes import OperatingMode
 from backend.trading_profiles.router import PaperBook, TradingRouter
+from backend.governance.css_unified_trade_gate import SESSION_TIMEOUT_SECONDS
 
 STARTING_EQUITY_CAD = 146.00
 SIM_USER = "sim-cad146"
@@ -62,6 +65,14 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 SIM_ENTRY_HALT_ENV = "CSS_SIM_ENTRY_HALT"
 LIVE_KILL_SWITCH_ENV = "CSS_LIVE_ORDER_KILL_SWITCH"
 _TRUTHY = {"1", "true", "yes", "y", "on"}
+# Coinbase revises an hourly candle for several minutes after it closes (FINANCE run 2026-10-16/17:
+# 12 of 14 bars changed between the first observation at close+2 min and the next at close+7 min,
+# by up to 12.5 bps). A bar is decided only once it has settled for this long after its close.
+DEFAULT_BAR_SETTLE_SECONDS = 600.0
+LIFECYCLE_TYPES = ("RUN_STARTED", "RUN_RESUMED", "RUN_STOPPED")
+# A heartbeat gap larger than this multiple of the poll interval inside one process means the
+# host slept, hibernated or the process was suspended; it is journalled, never silent.
+SUSPENSION_GAP_MULTIPLE = 3.0
 
 
 def sim_entry_halted(env: Mapping[str, str] | None = None) -> bool:
@@ -134,15 +145,37 @@ class Track:
     approvals: Any
     state_path: Path
     processed: set[str] = field(default_factory=set)
+    # Write-ahead marker: the bar being decided right now. Persisted BEFORE the router is called,
+    # so a crash between a paper fill and the processed-list update can never re-decide that bar.
+    inflight: str | None = None
+    recovered_inflight: str | None = None
 
     def load(self) -> None:
         if self.state_path.exists():
-            self.processed = set(json.loads(self.state_path.read_text(encoding="utf-8")).get("processed", []))
+            doc = json.loads(self.state_path.read_text(encoding="utf-8"))
+            self.processed = set(doc.get("processed", []))
+            pending = doc.get("inflight")
+            if pending:
+                # The previous process stopped mid-decision. Fail closed: the bar counts as decided
+                # (a possible fill is kept, never duplicated); the recovery is journalled by the caller.
+                self.processed.add(pending)
+                self.recovered_inflight = pending
+                self.inflight = None
+                self.save()
 
     def save(self) -> None:
         tmp = self.state_path.with_suffix(".tmp")
-        tmp.write_text(json.dumps({"processed": sorted(self.processed)}), encoding="utf-8")
+        tmp.write_text(json.dumps({"processed": sorted(self.processed), "inflight": self.inflight}), encoding="utf-8")
         tmp.replace(self.state_path)
+
+    def begin(self, key: str) -> None:
+        self.inflight = key
+        self.save()
+
+    def commit(self, key: str) -> None:
+        self.processed.add(key)
+        self.inflight = None
+        self.save()
 
 
 def _key(root: Path) -> bytes:
@@ -302,7 +335,8 @@ class Cad146Simulation:
                  operational_approvals_root: Path | str, operator: str, now: datetime | None = None,
                  starting_equity: float = STARTING_EQUITY_CAD, quote_provider: Any = None,
                  env: Mapping[str, str] | None = None, presenter: Presenter | None = None,
-                 require_current_agreement: bool = True, key_store: Any = None) -> None:
+                 require_current_agreement: bool = True, key_store: Any = None,
+                 bar_settle_seconds: float | None = None) -> None:
         """require_current_agreement=False is for read-only use (reports): no agreement is presented
         and nothing is activated; the router still verifies consent at every decision."""
         refuse_if_live_armed(env)
@@ -315,6 +349,14 @@ class Cad146Simulation:
         if _is_operational(self.root):
             raise SimulationError("simulation_cannot_use_operational_paper_book")
         self.artifacts, self.costs, self.quote_provider = list(artifacts), dict(costs), quote_provider
+        if bar_settle_seconds is None:
+            bar_settle_seconds = DEFAULT_BAR_SETTLE_SECONDS
+        if not float(bar_settle_seconds) >= 0:
+            raise SimulationError("bar_settle_seconds_must_be_non_negative")
+        self.bar_settle_seconds = float(bar_settle_seconds)
+        self._seen_digest: dict[str, str] = {}
+        self._session_alerted = False
+        self._last_cycle_at: datetime | None = None
         self.journal = self.root / "journal.jsonl"
         self.meta_path = self.root / "run.json"
         self.session_path = self.root / "operator_session.json"
@@ -369,6 +411,14 @@ class Cad146Simulation:
         self.track_b = build_track(TRACK_B, engine_b, approvals=_ResearchApprovals(), now=start,
                                    starting_equity=meta["starting_equity_cad"], session_created=session_created,
                                    require_consent=require_current_agreement, run_id=self.run_id)
+        if not self.read_only:
+            for track in (self.track_a, self.track_b):
+                if track.recovered_inflight:
+                    ids = _signal_ids_for_bar(track.recovered_inflight, self.artifacts)
+                    held = [p.position_id for p in track.router.book.positions(SIM_USER) if p.signal_id in ids]
+                    self._write({"type": "DECISION_INFLIGHT_RECOVERED", "track": track.name,
+                                 "key": track.recovered_inflight, "positions_opened_on_bar": held,
+                                 "policy": "bar_marked_decided_never_redecided", "at_utc": _utc().isoformat()})
 
     def _cycles_recorded(self) -> bool:
         try:
@@ -402,13 +452,24 @@ class Cad146Simulation:
 
     # ------------------------------------------------------------------ one cycle
     def cycle(self, fetch: Callable[[str, int], CandleSeries], instruments: Sequence[tuple[str, int]], *,
-              now: datetime | None = None) -> dict[str, Any]:
+              now: datetime | None = None, poll_seconds: float | None = None) -> dict[str, Any]:
         if self.read_only:
             raise SimulationError("read_only_simulation_cannot_cycle")  # reports never trade
         now = _utc(now)
         refuse_if_live_armed()
+        session_age = now.timestamp() - self._session_created()
+        session_valid = session_age <= SESSION_TIMEOUT_SECONDS
         summary = {"at_utc": now.isoformat(), "observations": 0, "outages": 0, "decisions": {TRACK_A: 0, TRACK_B: 0},
-                   "operator_session_age_s": round(now.timestamp() - self._session_created(), 1)}
+                   "operator_session_age_s": round(session_age, 1), "operator_session_valid": session_valid,
+                   "unsettled": 0}
+        if self._last_cycle_at is not None and poll_seconds:
+            gap = (now - self._last_cycle_at).total_seconds()
+            if gap > SUSPENSION_GAP_MULTIPLE * float(poll_seconds):
+                # Same process, but the wall clock jumped: host sleep/hibernate or a suspended process.
+                self._write({"type": "SUSPENSION_DETECTED", "gap_s": round(gap, 1),
+                             "previous_cycle_utc": self._last_cycle_at.isoformat(), "at_utc": now.isoformat()})
+        self._last_cycle_at = now
+        self._surface_session(session_valid, session_age, now)
         marks: dict[str, float] = {}
         for instrument, gran in instruments:
             try:
@@ -425,12 +486,26 @@ class Cad146Simulation:
                 continue
             last = series.candles[-1]
             obs_key = f"{series.source}|{instrument}|{gran}|{last.ts}"
+            settled_for = now.timestamp() - (last.ts + gran)
+            settled = settled_for >= self.bar_settle_seconds
             self._write({"type": "OBSERVATION", "key": obs_key, "source": series.source,
                          "classification": series.classification, "instrument": instrument, "granularity_s": gran,
                          "bars": len(series.candles), "last_bar_open_utc": datetime.fromtimestamp(last.ts, tz=timezone.utc).isoformat(),
-                         "last_close": last.close, "data_sha256": series.digest, "at_utc": now.isoformat()})
+                         "last_close": last.close, "data_sha256": series.digest, "settled": settled,
+                         "seconds_since_bar_close": round(settled_for, 1), "at_utc": now.isoformat()})
             summary["observations"] += 1
             marks[instrument] = last.close
+            last_digest = _last_bar_digest(series)
+            prior = self._seen_digest.get(obs_key)
+            if prior is not None and prior != last_digest and any(obs_key in t.processed for t in (self.track_a, self.track_b)):
+                self._write({"type": "BAR_REVISED_AFTER_DECISION", "key": obs_key, "last_close": last.close,
+                             "at_utc": now.isoformat()})
+            self._seen_digest[obs_key] = last_digest
+            self._journal_missed_bars(series, now)
+            if not settled:
+                # Not decided yet and NOT marked processed: decided on a later cycle once settled.
+                summary["unsettled"] += 1
+                continue
             halted = sim_entry_halted()
             for track in (self.track_a, self.track_b):
                 if obs_key in track.processed:
@@ -441,9 +516,9 @@ class Cad146Simulation:
                     self._write({"type": "SIM_ENTRY_HALTED", "track": track.name, "key": obs_key,
                                  "at_utc": now.isoformat()})
                     continue
+                track.begin(obs_key)
                 summary["decisions"][track.name] += self._decide(track, series, now)
-                track.processed.add(obs_key)
-                track.save()
+                track.commit(obs_key)
         for track in (self.track_a, self.track_b):
             symbols = {p.position_id: p.symbol for p in track.router.book.positions(SIM_USER)}
             for closed in track.router.run_exit_cycle(marks, now=now):
@@ -454,8 +529,127 @@ class Cad146Simulation:
                          "open_positions": len(track.router.book.positions(SIM_USER)), "at_utc": now.isoformat()})
         summary["sim_entry_halted"] = sim_entry_halted()
         summary["live_kill_switch_engaged"] = live_kill_switch_engaged()
+        blocked = []
+        if not session_valid:
+            blocked.append("operator_session_expired:R7")
+        if summary["sim_entry_halted"]:
+            blocked.append("sim_entry_halted")
+        summary["entries_blocked"] = blocked
         self._write({"type": "HEARTBEAT", **summary})
+        self.write_status("RUNNING", now=now, last_summary=summary)
         return summary
+
+    # ------------------------------------------------------------------ surfacing and lifecycle
+    def _surface_session(self, valid: bool, age: float, now: datetime) -> None:
+        """R7 already refuses entries once the sign-on is older than SESSION_TIMEOUT_SECONDS (fail
+        closed; never relaxed here). This makes that state impossible to miss: one journal record
+        and one console alert on every valid->expired transition, and again on each start."""
+        if valid:
+            if self._session_alerted:
+                self._write({"type": "OPERATOR_SESSION_RESTORED", "at_utc": now.isoformat()})
+            self._session_alerted = False
+            return
+        if self._session_alerted:
+            return
+        self._session_alerted = True
+        self._write({"type": "OPERATOR_SESSION_EXPIRED", "operator_session_age_s": round(age, 1),
+                     "timeout_s": SESSION_TIMEOUT_SECONDS, "effect": "R7 refuses every new entry; exits still run",
+                     "action": "re-attest: tools/css_sim_cad146.py attest --root <root> --operator <id>",
+                     "at_utc": now.isoformat()})
+        print(f"ALERT {now.isoformat()}: operator sign-on expired ({age:.0f}s > {SESSION_TIMEOUT_SECONDS}s). "
+              "R7 refuses all new simulated entries until `attest` is run.", file=sys.stderr, flush=True)
+
+    def operator_session_valid(self, now: datetime | None = None) -> bool:
+        return _utc(now).timestamp() - self._session_created() <= SESSION_TIMEOUT_SECONDS
+
+    def _journal_missed_bars(self, series: CandleSeries, now: datetime) -> None:
+        """Bars that closed while no decision was possible (process down, host asleep) are never
+        decided late on stale prices; they are listed explicitly so nothing is silently lost."""
+        prefix = f"{series.source}|{series.instrument}|{series.granularity_s}|"
+        done = [int(k.rsplit("|", 1)[-1]) for t in (self.track_a, self.track_b) for k in t.processed
+                if k.startswith(prefix)]
+        if not done:
+            return
+        newest_done = max(done)
+        last_ts = series.candles[-1].ts
+        g = series.granularity_s
+        # bars strictly between the newest decided bar and the current one
+        missed = [ts for ts in range(newest_done + g, last_ts, g)]
+        if not missed:
+            return
+        key = f"{prefix}{missed[0]}..{missed[-1]}"
+        if self._seen_digest.get("missed:" + key):
+            return
+        self._seen_digest["missed:" + key] = "1"
+        self._write({"type": "BARS_MISSED", "instrument": series.instrument, "granularity_s": g, "count": len(missed),
+                     "first_bar_open_utc": datetime.fromtimestamp(missed[0], tz=timezone.utc).isoformat(),
+                     "last_bar_open_utc": datetime.fromtimestamp(missed[-1], tz=timezone.utc).isoformat(),
+                     "policy": "not_decided_late", "at_utc": now.isoformat()})
+        for t in (self.track_a, self.track_b):  # recorded once; the newest decided bar moves past the gap
+            for ts in missed:
+                t.processed.add(f"{prefix}{ts}")
+            t.save()
+
+    def lifecycle_state(self) -> dict[str, Any]:
+        """Last lifecycle record and last heartbeat, read from the journal."""
+        last_life = last_hb = None
+        if self.journal.exists():
+            for line in self.journal.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = json.loads(line)
+                except ValueError:
+                    continue
+                if rec.get("type") in LIFECYCLE_TYPES:
+                    last_life = rec
+                elif rec.get("type") == "HEARTBEAT":
+                    last_hb = rec
+        return {"last_lifecycle": last_life, "last_heartbeat": last_hb}
+
+    def begin_session(self, *, now: datetime | None = None, hours: float | None = None,
+                      poll_seconds: float | None = None, code_revision: str | None = None) -> dict[str, Any]:
+        """Journal RUN_STARTED (fresh root) or RUN_RESUMED (existing root). A resume after a stop that
+        was never recorded (crash, power loss, closed console, kill) first journals
+        RUN_INTERRUPTION_DETECTED with the last heartbeat, so an interruption is never silent."""
+        now = _utc(now)
+        st = self.lifecycle_state()
+        life, hb = st["last_lifecycle"], st["last_heartbeat"]
+        resumed = hb is not None or (life is not None and life["type"] != "RUN_STOPPED")
+        if resumed and (life is None or life["type"] != "RUN_STOPPED"):
+            last_seen = (hb or life or {}).get("at_utc")
+            gap = (now - datetime.fromisoformat(last_seen)).total_seconds() if last_seen else None
+            self._write({"type": "RUN_INTERRUPTION_DETECTED", "last_lifecycle": (life or {}).get("type"),
+                         "last_heartbeat_utc": (hb or {}).get("at_utc"), "gap_s": round(gap, 1) if gap is not None else None,
+                         "at_utc": now.isoformat()})
+        consent = {t.name: consent_status(t.router.engine, run_id=self.run_id)[1] for t in (self.track_a, self.track_b)}
+        rec = {"type": "RUN_RESUMED" if resumed else "RUN_STARTED", "pid": os.getpid(), "host": socket.gethostname(),
+               "hours": hours, "poll_seconds": poll_seconds, "bar_settle_seconds": self.bar_settle_seconds,
+               "code_revision": code_revision, "operator_session_valid": self.operator_session_valid(now),
+               "consent": consent, "processed": {t.name: len(t.processed) for t in (self.track_a, self.track_b)},
+               "at_utc": now.isoformat()}
+        self._write(rec)
+        self.write_status("RUNNING", now=now)
+        return rec
+
+    def end_session(self, reason: str, exit_code: int, *, now: datetime | None = None) -> None:
+        now = _utc(now)
+        self._write({"type": "RUN_STOPPED", "reason": reason, "exit_code": int(exit_code), "pid": os.getpid(),
+                     "at_utc": now.isoformat()})
+        self.write_status("STOPPED", now=now, reason=reason, exit_code=exit_code)
+
+    def write_status(self, state: str, *, now: datetime, last_summary: Mapping[str, Any] | None = None,
+                     **extra: Any) -> None:
+        """status.json: one small, atomically replaced file a supervisor (or the operator) can poll."""
+        doc = {"state": state, "updated_utc": now.isoformat(), "pid": os.getpid(),
+               "operator_session_valid": self.operator_session_valid(now),
+               "operator_session_age_s": round(now.timestamp() - self._session_created(), 1), **extra}
+        if last_summary is not None:
+            doc["last_heartbeat"] = dict(last_summary)
+        path = self.root / "status.json"
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(doc, indent=2, sort_keys=True, default=str), encoding="utf-8")
+        tmp.replace(path)
 
     def _decide(self, track: Track, series: CandleSeries, now: datetime) -> int:
         producer = SignalProducer(_ObservedProvider(series), track.approvals, self.artifacts, self.costs,
@@ -574,4 +768,21 @@ def _by_instrument(exits: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, An
         row["closed"] += 1
         row["wins"] += int((e.get("pnl") or 0) > 0)
         row["pnl_cad"] = round(row["pnl_cad"] + float(e.get("pnl") or 0), 2)
+    return out
+
+
+def _last_bar_digest(series: CandleSeries) -> str:
+    c = series.candles[-1]
+    return hashlib.sha256(f"{c.ts},{c.open!r},{c.high!r},{c.low!r},{c.close!r},{c.volume!r}".encode()).hexdigest()
+
+
+def _signal_ids_for_bar(key: str, artifacts: Sequence[Mapping[str, Any]]) -> set[str]:
+    """The producer's deterministic signal ids for one observation key (source|instrument|gran|bar_ts),
+    for every artifact and side (backend.signals.producer: rd-sha256(sha|instrument|bar_ts|side)[:20])."""
+    _source, instrument, _gran, bar_ts = key.split("|")
+    out = set()
+    for a in artifacts:
+        for side in ("BUY", "SELL"):
+            raw = f"{a.get('artifact_sha256')}|{instrument}|{bar_ts}|{side}".encode()
+            out.add("rd-" + hashlib.sha256(raw).hexdigest()[:20])
     return out
