@@ -20,6 +20,8 @@ on:
       - claude/css-agreement-single-acceptance
       - grok/css-129-h2-questrade-refresh-hardening
       - claude/css-integration-proposal-128-132
+      - claude/css-h2-lowfindings-followup
+      - claude/css-final-release-candidate
 
 permissions:
   contents: read
