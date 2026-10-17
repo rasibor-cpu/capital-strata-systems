@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from dataclasses import dataclass
 from typing import Iterable, List
 
@@ -29,7 +31,11 @@ class ExecutionCost:
 
     @property
     def total(self) -> float:
-        return float(self.spread + self.slippage + self.fees)
+        components = (self.spread, self.slippage, self.fees)
+        values = tuple(float(value) for value in components)
+        if any(not math.isfinite(value) or value < 0 for value in values):
+            raise ValueError('Execution costs must be finite and nonnegative')
+        return sum(values)
 
 
 @dataclass
@@ -83,7 +89,7 @@ def _direction_multiplier(side: str) -> int:
 
 def _safe_multiplier(spec: InstrumentSpec) -> float:
     multiplier = float(spec.multiplier)
-    if multiplier <= 0:
+    if not math.isfinite(multiplier) or multiplier <= 0:
         raise ValueError(
             f"Invalid multiplier for {spec.symbol}: {spec.multiplier}"
         )
@@ -99,6 +105,10 @@ def compute_gross_unrealized(position: Position) -> float:
     quantity = float(position.quantity)
     multiplier = _safe_multiplier(position.instrument_spec)
 
+    if not all(math.isfinite(value) for value in (float(position.current_price), float(position.entry_price), quantity)):
+        raise ValueError('PnL prices and quantity must be finite')
+    if quantity < 0:
+        raise ValueError('PnL quantity cannot be negative')
     return direction * price_diff * quantity * multiplier
 
 
