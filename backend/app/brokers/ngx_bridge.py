@@ -12,7 +12,8 @@ from typing import Iterable, Mapping
 
 BROKERS = frozenset({"investment_one", "meristem", "cardinalstone", "coronation_securities"})
 REGISTRARS = frozenset({"gt_registrars"})
-SOURCES = BROKERS | REGISTRARS
+PENSION_PROVIDERS = frozenset({"stanbic_ibtc_pension_managers"})
+SOURCES = BROKERS | REGISTRARS | PENSION_PROVIDERS
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,8 @@ class NGXSource:
     def __post_init__(self) -> None:
         if self.source_id not in SOURCES:
             raise ValueError("Unrecognized NGX source")
-        expected = "broker" if self.source_id in BROKERS else "registrar"
+        expected = ("broker" if self.source_id in BROKERS else
+                    "registrar" if self.source_id in REGISTRARS else "pension")
         if self.kind != expected or self.execution_allowed:
             raise ValueError("NGX source kind mismatch or execution requested")
         if self.api_status != "not_authorized":
@@ -33,7 +35,8 @@ class NGXSource:
 
 
 SOURCE_CATALOG = tuple(
-    NGXSource(name, "broker" if name in BROKERS else "registrar")
+    NGXSource(name, "broker" if name in BROKERS else
+              "registrar" if name in REGISTRARS else "pension")
     for name in sorted(SOURCES)
 )
 
@@ -107,3 +110,20 @@ def reconcile_ngx_positions(
         "registrar_corroboration": corroboration,
         "registrar_quantities_included_in_portfolio": False,
     }
+
+
+def summarize_pension_snapshot(snapshot: Mapping[str, object]) -> dict[str, object]:
+    """Read-only pension snapshot, separate from NGX holdings and trading capital."""
+    if str(snapshot.get("provider", "")).strip().lower() not in PENSION_PROVIDERS:
+        raise ValueError("Unsupported pension provider")
+    account_key = str(snapshot.get("account_key", "")).strip()
+    if not account_key:
+        raise ValueError("Opaque pension account alias required")
+    currency = str(snapshot.get("currency", "NGN")).strip().upper()
+    if currency != "NGN":
+        raise ValueError("Unsupported pension snapshot currency")
+    balance = _decimal(snapshot.get("balance"))
+    return {"provider": "stanbic_ibtc_pension_managers", "account_key": account_key,
+            "currency": currency, "balance": str(balance), "asset_class": "PENSION",
+            "included_in_trading_capital": False, "execution_allowed": False,
+            "source_status": "USER_SUPPLIED_UNVERIFIED"}
