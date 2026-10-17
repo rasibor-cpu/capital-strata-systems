@@ -12,8 +12,9 @@ from typing import Iterable, Mapping
 
 BROKERS = frozenset({"investment_one", "meristem", "cardinalstone", "coronation_securities"})
 REGISTRARS = frozenset({"gt_registrars"})
+CANADIAN_BANKS = frozenset({"rbc", "td", "scotiabank", "bmo", "cibc", "national_bank"})
 PENSION_PROVIDERS = frozenset({"stanbic_ibtc_pension_managers"})
-SOURCES = BROKERS | REGISTRARS | PENSION_PROVIDERS
+SOURCES = BROKERS | REGISTRARS | PENSION_PROVIDERS | CANADIAN_BANKS
 
 
 @dataclass(frozen=True)
@@ -24,7 +25,7 @@ class NGXSource:
     execution_allowed: bool = False
 
     def __post_init__(self) -> None:
-        if self.kind not in {"broker", "registrar", "pension"}:
+        if self.kind not in {"broker", "registrar", "pension", "bank"}:
             raise ValueError("Invalid institution type")
         if not self.source_id or not self.source_id.replace("_", "").isalnum():
             raise ValueError("Invalid institution identifier")
@@ -36,7 +37,8 @@ class NGXSource:
 
 SOURCE_CATALOG = tuple(
     NGXSource(name, "broker" if name in BROKERS else
-              "registrar" if name in REGISTRARS else "pension")
+              "registrar" if name in REGISTRARS else
+              "bank" if name in CANADIAN_BANKS else "pension")
     for name in sorted(SOURCES)
 )
 
@@ -135,3 +137,27 @@ def register_institution(source_id: str, kind: str, *, display_name: str) -> NGX
     if not isinstance(display_name, str) or not display_name.strip():
         raise ValueError("Institution display name required")
     return NGXSource(source_id.strip().lower(), kind.strip().lower())
+
+
+def summarize_bank_snapshot(snapshot: Mapping[str, object]) -> dict[str, object]:
+    """Unverified read-only bank balance; never available for trading by default.
+
+    Institution IDs are user-configurable. No connection or bank authorization
+    is implied. Account keys must be non-secret aliases, not account numbers.
+    """
+    provider = str(snapshot.get("provider", "")).strip().lower()
+    account_key = str(snapshot.get("account_key", "")).strip()
+    currency = str(snapshot.get("currency", "CAD")).strip().upper()
+    if not provider or not provider.replace("_", "").isalnum() or not account_key:
+        raise ValueError("Valid bank provider and opaque account alias required")
+    if currency not in {"CAD", "USD"}:
+        raise ValueError("Unsupported bank snapshot currency")
+    balance = _decimal(snapshot.get("balance"))
+    return {"provider": provider, "account_key": account_key,
+            "currency": currency, "balance": str(balance),
+            "asset_class": "CASH", "source_status": "USER_SUPPLIED_UNVERIFIED",
+            "included_in_trading_capital": False, "execution_allowed": False,
+            "transfer_authority": False}
+
+
+CANADIAN_SIMULATION_CAPITAL_CAD = Decimal("14600")
