@@ -13,9 +13,11 @@ from typing import Iterable, Mapping
 BROKERS = frozenset({"investment_one", "meristem", "cardinalstone", "coronation_securities"})
 REGISTRARS = frozenset({"gt_registrars"})
 CANADIAN_BROKERS = frozenset({"questrade"})
+US_BANKS = frozenset({"chase", "bank_of_america", "wells_fargo", "citi", "capital_one", "us_bank"})
+US_BROKERS = frozenset({"fidelity", "charles_schwab", "interactive_brokers", "robinhood", "etrade"})
 CANADIAN_BANKS = frozenset({"rbc", "td", "scotiabank", "bmo", "cibc", "national_bank"})
 PENSION_PROVIDERS = frozenset({"stanbic_ibtc_pension_managers"})
-SOURCES = BROKERS | CANADIAN_BROKERS | REGISTRARS | PENSION_PROVIDERS | CANADIAN_BANKS
+SOURCES = BROKERS | CANADIAN_BROKERS | US_BROKERS | REGISTRARS | PENSION_PROVIDERS | CANADIAN_BANKS | US_BANKS
 
 
 @dataclass(frozen=True)
@@ -37,9 +39,9 @@ class NGXSource:
 
 
 SOURCE_CATALOG = tuple(
-    NGXSource(name, "broker" if name in BROKERS | CANADIAN_BROKERS else
+    NGXSource(name, "broker" if name in BROKERS | CANADIAN_BROKERS | US_BROKERS else
               "registrar" if name in REGISTRARS else
-              "bank" if name in CANADIAN_BANKS else "pension")
+              "bank" if name in CANADIAN_BANKS | US_BANKS else "pension")
     for name in sorted(SOURCES)
 )
 
@@ -180,3 +182,20 @@ def summarize_broker_account(snapshot: Mapping[str, object]) -> dict[str, object
             "currency": currency, "kind": "broker",
             "connection_status": "NOT_AUTHORIZED", "execution_allowed": False,
             "transfer_authority": False}
+
+
+def summarize_us_institution_account(snapshot: Mapping[str, object]) -> dict[str, object]:
+    """US institution metadata only; no bank-linking, ACH, wire or trade authority."""
+    provider = str(snapshot.get("provider", "")).strip().lower()
+    kind = str(snapshot.get("kind", "")).strip().lower()
+    account_key = str(snapshot.get("account_key", "")).strip()
+    currency = str(snapshot.get("currency", "USD")).strip().upper()
+    if not provider or not provider.replace("_", "").isalnum() or kind not in {"bank", "broker"}:
+        raise ValueError("Invalid US institution")
+    if not account_key or currency != "USD":
+        raise ValueError("Valid account alias and USD currency required")
+    return {"provider": provider, "kind": kind, "account_key": account_key,
+            "currency": "USD", "connection_status": "NOT_AUTHORIZED",
+            "included_in_trading_capital": False, "execution_allowed": False,
+            "transfer_authority": False, "ach_authority": False,
+            "wire_authority": False}
