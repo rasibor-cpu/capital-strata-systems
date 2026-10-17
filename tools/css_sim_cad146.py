@@ -22,7 +22,10 @@ resume and stop is journalled (RUN_STARTED / RUN_RESUMED / RUN_STOPPED); a resum
 unrecorded stop journals RUN_INTERRUPTION_DETECTED, bars that closed while down are journalled as
 BARS_MISSED (never decided late), and <root>/status.json always holds the current state.
 Exit codes: 0 completed, 1 error, 2 preflight failed, 3 R7 sign-on expired (--on-session-expiry exit),
-4 root already running, 5 refused (consent/agreement), 128+N stopped by signal N (Ctrl+C = 130).
+4 root already running, 5 refused (consent/agreement), 128+N stopped by signal N (Ctrl+C = 130;
+POSIX SIGTERM 143 / SIGHUP 129; Windows Ctrl+Break 149). On Windows a forced kill, console close or
+reboot cannot be journalled and yields the OS exit code (e.g. 1 for taskkill /F, 0xC000013A for
+console close); the next `run` journals RUN_INTERRUPTION_DETECTED.
 """
 from __future__ import annotations
 
@@ -182,9 +185,13 @@ class _Stop(Exception):
 
 
 def _install_stop_handlers():
-    """SIGINT (Ctrl+C), SIGTERM, SIGHUP and Windows SIGBREAK (Ctrl+Break, console close on some hosts)
-    stop the loop between steps and journal RUN_STOPPED. A hard kill, power loss or a console closed
-    without a signal cannot be caught: the next `run` journals RUN_INTERRUPTION_DETECTED instead."""
+    """Stop the loop between steps and journal RUN_STOPPED on a catchable stop signal.
+
+    POSIX: SIGINT (Ctrl+C) 130, SIGTERM 143, SIGHUP 129.
+    Windows: only Ctrl+C (SIGINT, 130) and Ctrl+Break (SIGBREAK, 149) reach Python as signals.
+    `os.kill(pid, SIGTERM)`, `taskkill /F`, Task Manager, closing the console window, logoff and
+    reboot terminate the process without running any Python code, so nothing can be journalled;
+    the next `run` journals RUN_INTERRUPTION_DETECTED instead (as for power loss or SIGKILL)."""
     import signal
     import threading
 
@@ -214,6 +221,18 @@ def _install_stop_handlers():
     return restore
 
 
+def _sleep_in_slices(seconds: float, *, slice_seconds: float = 1.0, _sleep=time.sleep) -> None:
+    """time.sleep in <=1 s slices. On Windows CPython only SIGINT wakes a sleeping main thread; a
+    Ctrl+Break (SIGBREAK) handler would otherwise run only after the whole poll interval (300 s).
+    Slicing bounds that latency to ~1 s. Same total sleep; no behaviour change on POSIX."""
+    end = time.monotonic() + float(seconds)
+    while True:
+        left = end - time.monotonic()
+        if left <= 0:
+            return
+        _sleep(min(slice_seconds, left))
+
+
 def _code_revision() -> str | None:
     import subprocess
 
@@ -225,7 +244,7 @@ def _code_revision() -> str | None:
         return None
 
 
-def cmd_run(args, *, presenter=None, sleep=time.sleep, clock=lambda: datetime.now(timezone.utc), fetch=None) -> int:
+def cmd_run(args, *, presenter=None, sleep=_sleep_in_slices, clock=lambda: datetime.now(timezone.utc), fetch=None) -> int:
     from backend.runtime.interprocess_lock import InterprocessLockTimeout, exclusive_file_lock
     from backend.simulation.cad146 import SimulationError
 
