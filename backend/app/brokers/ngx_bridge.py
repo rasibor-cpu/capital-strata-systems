@@ -217,3 +217,37 @@ def summarize_uk_institution_account(snapshot: Mapping[str, object]) -> dict[str
             "currency": "GBP", "connection_status": "NOT_AUTHORIZED",
             "included_in_trading_capital": False, "execution_allowed": False,
             "transfer_authority": False, "open_banking_payment_authority": False}
+
+
+SUPPORTED_INSTITUTION_KINDS = frozenset({
+    "bank", "credit_union", "broker", "registrar", "pension",
+    "investment_platform", "other_financial_institution",
+})
+
+
+def add_unlisted_institution(*, institution_id: str, display_name: str,
+                             country: str, kind: str, currency: str) -> dict[str, object]:
+    """Create unconnected institution metadata; no account or payment authority.
+
+    Callers must enforce user ownership and persist only in tenant-isolated storage.
+    This pure function does not create a connection, transfer funds or store secrets.
+    """
+    if not isinstance(institution_id, str) or not institution_id.strip() or not institution_id.replace("_", "").isalnum():
+        raise ValueError("Invalid institution identifier")
+    if not isinstance(display_name, str) or not display_name.strip() or len(display_name) > 160:
+        raise ValueError("Institution name required (maximum 160 characters)")
+    if not isinstance(country, str) or len(country) != 2 or not country.isalpha():
+        raise ValueError("Two-letter country code required")
+    if kind not in SUPPORTED_INSTITUTION_KINDS:
+        raise ValueError("Unsupported institution type")
+    if not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha():
+        raise ValueError("Three-letter currency code required")
+    return {
+        "institution_id": institution_id.lower(),
+        "display_name": display_name.strip(),
+        "country": country.upper(), "kind": kind, "currency": currency.upper(),
+        "directory_source": "USER_ADDED", "connection_status": "NOT_CONNECTED",
+        "manual_entry_allowed": True, "statement_import_status": "NOT_CONFIGURED",
+        "api_authorized": False, "execution_allowed": False,
+        "transfer_authority": False,
+    }
